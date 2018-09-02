@@ -1,5 +1,5 @@
 hash: 170d2c9eebcee3b9121f852e7918a5f9477d83df2028223a4bd81ee8b9f37fac
-updated: 2018-11-27T22:27:21.882832+01:00
+updated: 2018-11-27T22:42:42.390752+01:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -148,6 +148,10 @@ imports:
   version: 02826c3e79038b59d737d3b1c0a1d937f71a4433
   subpackages:
   - lru
+- name: github.com/golang/mock
+  version: bd3c8e81be01eef76d4b503f5e687d2d1354d2d9
+  subpackages:
+  - gomock
 - name: github.com/golang/protobuf
   version: 1643683e1b54a9e88ad26d98f81400c8c9d9f4f9
   subpackages:
@@ -690,5 +694,8 @@ imports:
 - name: kubevirt.io/kubevirt
   version: b5b91243f540739eb5db61af89b2f1e5ba449dfa
   subpackages:
+  - pkg/api/v1
   - pkg/kubecli
+  - pkg/precond
+  - pkg/version
 testImports: []

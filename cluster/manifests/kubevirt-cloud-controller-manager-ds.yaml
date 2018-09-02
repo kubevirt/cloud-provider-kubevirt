@@ -35,7 +35,7 @@ spec:
       serviceAccountName: cloud-controller-manager
       containers:
         - name: kubevirt-cloud-controller-manager
-          image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.0
+          image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.1
           args:
             - --cloud-provider=kubevirt
             - --use-service-account-credentials=true
@@ -49,6 +49,9 @@ spec:
               readOnly: true
             - mountPath: /etc/kubernetes/controller-manager.conf
               name: kubeconfig
+              readOnly: true
+            - mountPath: /etc/cloud
+              name: cloud-config-volume
               readOnly: true
           resources:
             requests:
@@ -68,5 +71,5 @@ spec:
           type: FileOrCreate
         name: kubeconfig
       - name: cloud-config-volume
-        configMap:
-          name: cloud-config
+        secret:
+          secretName: cloud-config
