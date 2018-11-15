@@ -35,7 +35,7 @@ spec:
       serviceAccountName: cloud-controller-manager
       containers:
         - name: kubevirt-cloud-controller-manager
-          image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.1
+          image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.2
           args:
             - --cloud-provider=kubevirt
             - --use-service-account-credentials=true

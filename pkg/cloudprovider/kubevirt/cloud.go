@@ -92,7 +92,15 @@ func (c *cloud) Instances() (cloudprovider.Instances, bool) {
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	return nil, false
+	namespace, _, err := c.config.Namespace()
+	if err != nil {
+		glog.Errorf("Could not find namespace for zones: %v", err)
+		return nil, false
+	}
+	return &zones{
+		cloud:     c,
+		namespace: namespace,
+	}, true
 }
 
 // Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.
