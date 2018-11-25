@@ -74,7 +74,15 @@ func (c *cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {}
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return nil, false
+	namespace, _, err := c.config.Namespace()
+	if err != nil {
+		glog.Errorf("Could not find namespace for loadbalancer: %v", err)
+		return nil, false
+	}
+	return &loadbalancer{
+		cloud:     c,
+		namespace: namespace,
+	}, true
 }
 
 // Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.

@@ -212,6 +212,16 @@ func instanceIDFromNodeName(nodeName string) string {
 	return data[0]
 }
 
+func instanceIDsFromNodes(nodes []*corev1.Node) []string {
+	instanceIDs := make([]string, len(nodes))
+	for i, node := range nodes {
+		if instanceID, err := instanceIDFromProviderID(node.Spec.ProviderID); err == nil {
+			instanceIDs[i] = instanceID
+		}
+	}
+	return instanceIDs
+}
+
 // instanceIDFromProviderID extracts the instance ID from a provider ID.
 func instanceIDFromProviderID(providerID string) (instanceID string, err error) {
 	matches := providerIDRegexp.FindStringSubmatch(providerID)
