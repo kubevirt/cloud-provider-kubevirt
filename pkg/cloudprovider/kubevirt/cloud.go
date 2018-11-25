@@ -18,7 +18,7 @@ const (
 )
 
 type cloud struct {
-	config     clientcmd.ClientConfig
+	namespace  string
 	kubernetes kubernetes.Clientset
 	kubevirt   kubecli.KubevirtClient
 }
@@ -41,8 +41,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
+		namespace, _, err := clientConfig.Namespace()
+		if err != nil {
+			glog.Errorf("Could not find namespace in client config: %v", err)
+			return nil, err
+		}
 		return &cloud{
-			config:     clientConfig,
+			namespace:  namespace,
 			kubernetes: *kubernetesClient,
 			kubevirt:   *kubevirtClient,
 		}, nil
@@ -74,41 +79,17 @@ func (c *cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {}
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	namespace, _, err := c.config.Namespace()
-	if err != nil {
-		glog.Errorf("Could not find namespace for loadbalancer: %v", err)
-		return nil, false
-	}
-	return &loadbalancer{
-		cloud:     c,
-		namespace: namespace,
-	}, true
+	return c, true
 }
 
 // Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
-	namespace, _, err := c.config.Namespace()
-	if err != nil {
-		glog.Errorf("Could not find namespace for instances: %v", err)
-		return nil, false
-	}
-	return &instances{
-		cloud:     c,
-		namespace: namespace,
-	}, true
+	return c, true
 }
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	namespace, _, err := c.config.Namespace()
-	if err != nil {
-		glog.Errorf("Could not find namespace for zones: %v", err)
-		return nil, false
-	}
-	return &zones{
-		cloud:     c,
-		namespace: namespace,
-	}, true
+	return c, true
 }
 
 // Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.

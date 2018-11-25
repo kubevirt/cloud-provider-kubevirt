@@ -23,18 +23,13 @@ const (
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
 var providerIDRegexp = regexp.MustCompile(`^` + providerName + `://(\w+)$`)
 
-type instances struct {
-	cloud     *cloud
-	namespace string
-}
-
 // NodeAddresses returns the addresses of the specified instance.
 // TODO(roberthbailey): This currently is only used in such a way that it
 // returns the address of the calling instance. We should do a rename to
 // make this clearer.
-func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]corev1.NodeAddress, error) {
+func (c *cloud) NodeAddresses(ctx context.Context, name types.NodeName) ([]corev1.NodeAddress, error) {
 	instanceID := instanceIDFromNodeName(string(name))
-	return i.nodeAddressesByInstanceID(ctx, instanceID)
+	return c.nodeAddressesByInstanceID(ctx, instanceID)
 }
 
 // NodeAddressesByProviderID returns the addresses of the specified instance.
@@ -42,17 +37,17 @@ func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]c
 // ProviderID is a unique identifier of the node. This will not be called
 // from the node whose nodeaddresses are being queried. i.e. local metadata
 // services cannot be used in this method to obtain nodeaddresses
-func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID string) ([]corev1.NodeAddress, error) {
+func (c *cloud) NodeAddressesByProviderID(ctx context.Context, providerID string) ([]corev1.NodeAddress, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return nil, cloudprovider.InstanceNotFound
 	}
-	return i.nodeAddressesByInstanceID(ctx, instanceID)
+	return c.nodeAddressesByInstanceID(ctx, instanceID)
 }
 
-func (i *instances) nodeAddressesByInstanceID(ctx context.Context, instanceID string) ([]corev1.NodeAddress, error) {
-	vmi, err := i.cloud.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
+func (c *cloud) nodeAddressesByInstanceID(ctx context.Context, instanceID string) ([]corev1.NodeAddress, error) {
+	vmi, err := c.kubevirt.VirtualMachineInstance(c.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -84,18 +79,18 @@ func (i *instances) nodeAddressesByInstanceID(ctx context.Context, instanceID st
 
 // ExternalID returns the cloud provider ID of the node with the specified NodeName.
 // Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
-func (i *instances) ExternalID(ctx context.Context, nodeName types.NodeName) (string, error) {
+func (c *cloud) ExternalID(ctx context.Context, nodeName types.NodeName) (string, error) {
 	// ExternalID is deprecated in newer k8s versions in favor of InstanceID.
-	return i.InstanceID(ctx, nodeName)
+	return c.InstanceID(ctx, nodeName)
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
 // Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
-func (i *instances) InstanceID(ctx context.Context, nodeName types.NodeName) (string, error) {
+func (c *cloud) InstanceID(ctx context.Context, nodeName types.NodeName) (string, error) {
 	name := instanceIDFromNodeName(string(nodeName))
-	vmi, err := i.cloud.kubevirt.VirtualMachineInstance(i.namespace).Get(name, &metav1.GetOptions{})
+	vmi, err := c.kubevirt.VirtualMachineInstance(c.namespace).Get(name, &metav1.GetOptions{})
 	if err != nil {
-		glog.Errorf("Failed to get instance with name %s in namespace %s: %v", name, i.namespace, err)
+		glog.Errorf("Failed to get instance with name %s in namespace %s: %v", name, c.namespace, err)
 		return "", cloudprovider.InstanceNotFound
 	}
 
@@ -112,25 +107,25 @@ func (i *instances) InstanceID(ctx context.Context, nodeName types.NodeName) (st
 }
 
 // InstanceType returns the type of the specified instance.
-func (i *instances) InstanceType(ctx context.Context, name types.NodeName) (string, error) {
+func (c *cloud) InstanceType(ctx context.Context, name types.NodeName) (string, error) {
 	instanceID := instanceIDFromNodeName(string(name))
-	return i.instanceTypeByInstanceID(ctx, instanceID)
+	return c.instanceTypeByInstanceID(ctx, instanceID)
 }
 
 // InstanceTypeByProviderID returns the type of the specified instance.
-func (i *instances) InstanceTypeByProviderID(ctx context.Context, providerID string) (string, error) {
+func (c *cloud) InstanceTypeByProviderID(ctx context.Context, providerID string) (string, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return "", cloudprovider.InstanceNotFound
 	}
-	return i.instanceTypeByInstanceID(ctx, instanceID)
+	return c.instanceTypeByInstanceID(ctx, instanceID)
 }
 
-func (i *instances) instanceTypeByInstanceID(ctx context.Context, instanceID string) (string, error) {
-	vmi, err := i.cloud.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
+func (c *cloud) instanceTypeByInstanceID(ctx context.Context, instanceID string) (string, error) {
+	vmi, err := c.kubevirt.VirtualMachineInstance(c.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
-		glog.Errorf("Failed to get instance with instance ID %s in namespace %s: %v", instanceID, i.namespace, err)
+		glog.Errorf("Failed to get instance with instance ID %s in namespace %s: %v", instanceID, c.namespace, err)
 		return "", cloudprovider.InstanceNotFound
 	}
 
@@ -143,16 +138,16 @@ func (i *instances) instanceTypeByInstanceID(ctx context.Context, instanceID str
 
 // AddSSHKeyToAllInstances adds an SSH public key as a legal identity for all instances
 // expected format for the key is standard ssh-keygen format: <protocol> <blob>
-func (i *instances) AddSSHKeyToAllInstances(ctx context.Context, user string, keyData []byte) error {
+func (c *cloud) AddSSHKeyToAllInstances(ctx context.Context, user string, keyData []byte) error {
 	return cloudprovider.NotImplemented
 }
 
 // CurrentNodeName returns the name of the node we are currently running on
 // On most clouds (e.g. GCE) this is the hostname, so we provide the hostname
-func (i *instances) CurrentNodeName(ctx context.Context, hostname string) (types.NodeName, error) {
-	vmis, err := i.cloud.kubevirt.VirtualMachineInstance(i.namespace).List(&metav1.ListOptions{})
+func (c *cloud) CurrentNodeName(ctx context.Context, hostname string) (types.NodeName, error) {
+	vmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&metav1.ListOptions{})
 	if err != nil {
-		glog.Errorf("Failed to list instances in namespace %s: %v", i.namespace, err)
+		glog.Errorf("Failed to list instances in namespace %s: %v", c.namespace, err)
 		return "", cloudprovider.InstanceNotFound
 	}
 
@@ -167,31 +162,31 @@ func (i *instances) CurrentNodeName(ctx context.Context, hostname string) (types
 
 // InstanceExistsByProviderID returns true if the instance for the given provider id still is running.
 // If false is returned with no error, the instance will be immediately deleted by the cloud controller manager.
-func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
+func (c *cloud) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return false, cloudprovider.InstanceNotFound
 	}
 	// If we can not get the VMI by its providerID, assume it no longer exists
-	_, err = i.cloud.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
+	_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return false, cloudprovider.InstanceNotFound
 	}
 	return true, nil
 }
 
 // InstanceShutdownByProviderID returns true if the instance is shutdown in cloudprovider
-func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
+func (c *cloud) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return true, cloudprovider.InstanceNotFound
 	}
-	vmi, err := i.cloud.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
+	vmi, err := c.kubevirt.VirtualMachineInstance(c.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
 		return true, cloudprovider.InstanceNotFound
 	}
 

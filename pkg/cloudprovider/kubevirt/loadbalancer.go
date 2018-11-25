@@ -19,18 +19,13 @@ const (
 	serviceVmiLabelKeyPrefix = "service.kubevirt.io"
 )
 
-type loadbalancer struct {
-	cloud     *cloud
-	namespace string
-}
-
 // GetLoadBalancer returns whether the specified load balancer exists, and
 // if so, what its status is.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (lb *loadbalancer) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (status *corev1.LoadBalancerStatus, exists bool, err error) {
+func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (status *corev1.LoadBalancerStatus, exists bool, err error) {
 	lbName := cloudprovider.GetLoadBalancerName(service)
-	lbService, serviceExists, err := lb.getLoadBalancerService(lbName)
+	lbService, serviceExists, err := c.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, false, err
@@ -47,16 +42,16 @@ func (lb *loadbalancer) GetLoadBalancer(ctx context.Context, clusterName string,
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
+func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	lbName := cloudprovider.GetLoadBalancerName(service)
 
-	err := lb.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
+	err := c.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return nil, err
 	}
 
-	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
+	lbService, lbExists, err := c.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, err
@@ -65,7 +60,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return &lbService.Status.LoadBalancer, nil
 	}
 
-	lbService, err = lb.createLoadBalancerService(lbName, service)
+	lbService, err = c.createLoadBalancerService(lbName, service)
 	if err != nil {
 		glog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
@@ -74,7 +69,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if len(lbService.Status.LoadBalancer.Ingress) == 0 {
 		for i := 0; i < 6; i++ {
 			time.Sleep(10 * time.Second)
-			service, exists, err := lb.getLoadBalancerService(lbName)
+			service, exists, err := c.getLoadBalancerService(lbName)
 			if err != nil {
 				glog.Errorf("Failed to get LoadBalancer service: %v", err)
 				return &lbService.Status.LoadBalancer, err
@@ -92,14 +87,14 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
+func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	lbName := cloudprovider.GetLoadBalancerName(service)
-	err := lb.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
+	err := c.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return err
 	}
-	err = lb.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
+	err = c.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -115,23 +110,23 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 // doesn't exist even if some part of it is still laying around.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
+func (c *cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
 	lbName := cloudprovider.GetLoadBalancerName(service)
 
-	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
+	lbService, lbExists, err := c.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return err
 	}
 	if lbExists {
-		err = lb.cloud.kubernetes.CoreV1().Services(lb.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
+		err = c.kubernetes.CoreV1().Services(c.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
 		if err != nil {
 			glog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
 		}
 	}
 
-	err = lb.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
+	err = c.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -140,8 +135,8 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	return nil
 }
 
-func (lb *loadbalancer) getLoadBalancerService(lbName string) (*corev1.Service, bool, error) {
-	service, err := lb.cloud.kubernetes.CoreV1().Services(lb.namespace).Get(lbName, metav1.GetOptions{})
+func (c *cloud) getLoadBalancerService(lbName string) (*corev1.Service, bool, error) {
+	service, err := c.kubernetes.CoreV1().Services(c.namespace).Get(lbName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, false, nil
@@ -151,7 +146,7 @@ func (lb *loadbalancer) getLoadBalancerService(lbName string) (*corev1.Service, 
 	return service, true, nil
 }
 
-func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1.Service) (*corev1.Service, error) {
+func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service) (*corev1.Service, error) {
 	ports := make([]corev1.ServicePort, len(service.Spec.Ports))
 	for i, port := range service.Spec.Ports {
 		ports[i].Name = port.Name
@@ -166,7 +161,7 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lbName,
-			Namespace: lb.namespace,
+			Namespace: c.namespace,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:    ports,
@@ -184,7 +179,7 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 		lbService.Spec.HealthCheckNodePort = service.Spec.HealthCheckNodePort
 	}
 
-	lbService, err := lb.cloud.kubernetes.CoreV1().Services(lb.namespace).Create(lbService)
+	lbService, err := c.kubernetes.CoreV1().Services(c.namespace).Create(lbService)
 	if err != nil {
 		glog.Errorf("Failed to create LB %s: %v", lbName, err)
 		return nil, err
@@ -192,9 +187,9 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 	return lbService, nil
 }
 
-func (lb *loadbalancer) applyServiceLabelsToVmis(lbName, serviceName string, nodes []*corev1.Node) error {
+func (c *cloud) applyServiceLabelsToVmis(lbName, serviceName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
-	allVmis, err := lb.cloud.kubevirt.VirtualMachineInstance(lb.namespace).List(&metav1.ListOptions{})
+	allVmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
@@ -203,7 +198,7 @@ func (lb *loadbalancer) applyServiceLabelsToVmis(lbName, serviceName string, nod
 	for _, vmi := range allVmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; ok {
 			vmi.ObjectMeta.Labels[serviceVmiLabelKey(lbName)] = serviceName
-			_, err = lb.cloud.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
+			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
 			if err != nil {
 				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			}
@@ -212,12 +207,12 @@ func (lb *loadbalancer) applyServiceLabelsToVmis(lbName, serviceName string, nod
 	return nil
 }
 
-func (lb *loadbalancer) ensureVmiServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
+func (c *cloud) ensureVmiServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
 	listOptions := &metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", serviceVmiLabelKey(lbName), svcName),
 	}
-	vmis, err := lb.cloud.kubevirt.VirtualMachineInstance(lb.namespace).List(listOptions)
+	vmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(listOptions)
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
@@ -225,7 +220,7 @@ func (lb *loadbalancer) ensureVmiServiceLabelsDeleted(lbName, svcName string, no
 		// Delete labels on those VMIs which do not have a corresponding node object
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; !ok {
 			delete(vmi.ObjectMeta.Labels, serviceVmiLabelKey(lbName))
-			_, err = lb.cloud.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
+			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
 			if err != nil {
 				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			}
