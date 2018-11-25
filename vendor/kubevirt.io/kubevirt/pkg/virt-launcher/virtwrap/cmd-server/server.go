@@ -31,6 +31,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/log"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap"
+	launcherErrors "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/errors"
 )
 
 type ServerOptions struct {
@@ -53,6 +54,60 @@ func getVmfromClientArgs(args *cmdclient.Args) (*v1.VirtualMachineInstance, erro
 	return args.VMI, nil
 }
 
+func getErrorMessage(err error) string {
+	if virErr := launcherErrors.FormatLibvirtError(err); virErr != "" {
+		return virErr
+	}
+	return err.Error()
+}
+
+func (s *Launcher) Migrate(args *cmdclient.Args, reply *cmdclient.Reply) error {
+
+	reply.Success = true
+
+	vmi, err := getVmfromClientArgs(args)
+	if err != nil {
+		reply.Success = false
+		reply.Message = err.Error()
+		return nil
+	}
+
+	err = s.domainManager.MigrateVMI(vmi)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Errorf("Failed to migrate vmi")
+		reply.Success = false
+		reply.Message = getErrorMessage(err)
+		return nil
+	}
+
+	log.Log.Object(vmi).Info("Signaled vmi migration")
+	return nil
+}
+
+func (s *Launcher) SyncMigrationTarget(args *cmdclient.Args, reply *cmdclient.Reply) error {
+
+	reply.Success = true
+
+	vmi, err := getVmfromClientArgs(args)
+	if err != nil {
+		reply.Success = false
+		reply.Message = err.Error()
+		return nil
+	}
+
+	err = s.domainManager.PrepareMigrationTarget(vmi, s.useEmulation)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Errorf("Failed to prepare migration target pod")
+		reply.Success = false
+		reply.Message = getErrorMessage(err)
+		return nil
+	}
+
+	log.Log.Object(vmi).Info("Prepared migration target pod")
+	return nil
+
+}
+
 func (s *Launcher) Sync(args *cmdclient.Args, reply *cmdclient.Reply) error {
 	reply.Success = true
 
@@ -67,7 +122,7 @@ func (s *Launcher) Sync(args *cmdclient.Args, reply *cmdclient.Reply) error {
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Errorf("Failed to sync vmi")
 		reply.Success = false
-		reply.Message = err.Error()
+		reply.Message = getErrorMessage(err)
 		return nil
 	}
 
@@ -89,7 +144,7 @@ func (s *Launcher) Kill(args *cmdclient.Args, reply *cmdclient.Reply) error {
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Errorf("Failed to kill vmi")
 		reply.Success = false
-		reply.Message = err.Error()
+		reply.Message = getErrorMessage(err)
 		return nil
 	}
 
@@ -111,11 +166,33 @@ func (s *Launcher) Shutdown(args *cmdclient.Args, reply *cmdclient.Reply) error 
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Errorf("Failed to signal shutdown for vmi")
 		reply.Success = false
-		reply.Message = err.Error()
+		reply.Message = getErrorMessage(err)
 		return nil
 	}
 
 	log.Log.Object(vmi).Info("Signaled vmi shutdown")
+	return nil
+}
+
+func (s *Launcher) Delete(args *cmdclient.Args, reply *cmdclient.Reply) error {
+	reply.Success = true
+
+	vmi, err := getVmfromClientArgs(args)
+	if err != nil {
+		reply.Success = false
+		reply.Message = err.Error()
+		return nil
+	}
+
+	err = s.domainManager.DeleteVMI(vmi)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Errorf("Failed to signal deletion for vmi")
+		reply.Success = false
+		reply.Message = getErrorMessage(err)
+		return nil
+	}
+
+	log.Log.Object(vmi).Info("Signaled vmi deletion")
 	return nil
 }
 
@@ -126,7 +203,7 @@ func (s *Launcher) GetDomain(args *cmdclient.Args, reply *cmdclient.Reply) error
 	list, err := s.domainManager.ListAllDomains()
 	if err != nil {
 		reply.Success = false
-		reply.Message = err.Error()
+		reply.Message = getErrorMessage(err)
 		return nil
 	}
 
@@ -160,7 +237,7 @@ func createSocket(socketPath string) (net.Listener, error) {
 func RunServer(socketPath string,
 	domainManager virtwrap.DomainManager,
 	stopChan chan struct{},
-	options *ServerOptions) error {
+	options *ServerOptions) (chan struct{}, error) {
 
 	useEmulation := false
 	if options != nil {
@@ -174,8 +251,10 @@ func RunServer(socketPath string,
 	rpcServer.Register(server)
 	sock, err := createSocket(socketPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	done := make(chan struct{})
 
 	go func() {
 		select {
@@ -183,6 +262,7 @@ func RunServer(socketPath string,
 			sock.Close()
 			os.Remove(socketPath)
 			log.Log.Info("closing cmd server socket")
+			close(done)
 		}
 	}()
 
@@ -190,7 +270,7 @@ func RunServer(socketPath string,
 		rpcServer.Accept(sock)
 	}()
 
-	return nil
+	return done, nil
 }
 
 func (s *Launcher) Ping(args *cmdclient.Args, reply *cmdclient.Reply) error {

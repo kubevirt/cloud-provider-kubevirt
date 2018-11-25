@@ -114,6 +114,16 @@ func (_mr *_MockNetworkHandlerRecorder) LinkAdd(arg0 interface{}) *gomock.Call {
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "LinkAdd", arg0)
 }
 
+func (_m *MockNetworkHandler) LinkSetLearningOff(link netlink.Link) error {
+	ret := _m.ctrl.Call(_m, "LinkSetLearningOff", link)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (_mr *_MockNetworkHandlerRecorder) LinkSetLearningOff(arg0 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "LinkSetLearningOff", arg0)
+}
+
 func (_m *MockNetworkHandler) ParseAddr(s string) (*netlink.Addr, error) {
 	ret := _m.ctrl.Call(_m, "ParseAddr", s)
 	ret0, _ := ret[0].(*netlink.Addr)
@@ -147,10 +157,10 @@ func (_mr *_MockNetworkHandlerRecorder) GetMacDetails(arg0 interface{}) *gomock.
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "GetMacDetails", arg0)
 }
 
-func (_m *MockNetworkHandler) StartDHCP(nic *VIF, serverAddr *netlink.Addr) {
-	_m.ctrl.Call(_m, "StartDHCP", nic, serverAddr)
+func (_m *MockNetworkHandler) StartDHCP(nic *VIF, serverAddr *netlink.Addr, bridgeInterfaceName string) {
+	_m.ctrl.Call(_m, "StartDHCP", nic, serverAddr, bridgeInterfaceName)
 }
 
-func (_mr *_MockNetworkHandlerRecorder) StartDHCP(arg0, arg1 interface{}) *gomock.Call {
-	return _mr.mock.ctrl.RecordCall(_mr.mock, "StartDHCP", arg0, arg1)
+func (_mr *_MockNetworkHandlerRecorder) StartDHCP(arg0, arg1, arg2 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "StartDHCP", arg0, arg1, arg2)
 }

@@ -22,6 +22,7 @@ func (VirtualMachineInstanceSpec) SwaggerDoc() map[string]string {
 		"domain":                        "Specification of the desired behavior of the VirtualMachineInstance on the host.",
 		"nodeSelector":                  "NodeSelector is a selector which must be true for the vmi to fit on a node.\nSelector which must match a node's labels for the vmi to be scheduled on that node.\nMore info: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/\n+optional",
 		"affinity":                      "If affinity is specifies, obey all the affinity rules",
+		"tolerations":                   "If toleration is specified, obey all the toleration rules.",
 		"terminationGracePeriodSeconds": "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
 		"volumes":                       "List of volumes that can be mounted by disks belonging to the vmi.",
 		"hostname":                      "Specifies the hostname of the vmi\nIf not specified, the hostname will be set to the name of the vmi, if dhcp or cloud-init is configured properly.\n+optional",
@@ -30,22 +31,15 @@ func (VirtualMachineInstanceSpec) SwaggerDoc() map[string]string {
 	}
 }
 
-func (Affinity) SwaggerDoc() map[string]string {
-	return map[string]string{
-		"":                "Affinity groups all the affinity rules related to a VirtualMachineInstance",
-		"nodeAffinity":    "Node affinity support",
-		"podAffinity":     "Pod affinity support",
-		"podAntiAffinity": "Pod anti-affinity support",
-	}
-}
-
 func (VirtualMachineInstanceStatus) SwaggerDoc() map[string]string {
 	return map[string]string{
-		"":           "VirtualMachineInstanceStatus represents information about the status of a VirtualMachineInstance. Status may trail the actual\nstate of a system.",
-		"nodeName":   "NodeName is the name where the VirtualMachineInstance is currently running.",
-		"conditions": "Conditions are specific points in VirtualMachineInstance's pod runtime.",
-		"phase":      "Phase is the status of the VirtualMachineInstance in kubernetes world. It is not the VirtualMachineInstance status, but partially correlates to it.",
-		"interfaces": "Interfaces represent the details of available network interfaces.",
+		"":               "VirtualMachineInstanceStatus represents information about the status of a VirtualMachineInstance. Status may trail the actual\nstate of a system.",
+		"nodeName":       "NodeName is the name where the VirtualMachineInstance is currently running.",
+		"reason":         "A brief CamelCase message indicating details about why the VMI is in this state. e.g. 'NodeUnresponsive'\n+optional",
+		"conditions":     "Conditions are specific points in VirtualMachineInstance's pod runtime.",
+		"phase":          "Phase is the status of the VirtualMachineInstance in kubernetes world. It is not the VirtualMachineInstance status, but partially correlates to it.",
+		"interfaces":     "Interfaces represent the details of available network interfaces.",
+		"migrationState": "Represents the status of a live migration",
 	}
 }
 
@@ -57,6 +51,21 @@ func (VirtualMachineInstanceNetworkInterface) SwaggerDoc() map[string]string {
 	return map[string]string{
 		"ipAddress": "IP address of a Virtual Machine interface",
 		"mac":       "Hardware address of a Virtual Machine interface",
+		"name":      "Name of the interface, corresponds to name of the network assigned to the interface",
+	}
+}
+
+func (VirtualMachineInstanceMigrationState) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"startTimestamp":           "The time the migration action began",
+		"endTimestamp":             "The time the migration action ended",
+		"targetNodeDomainDetected": "The Target Node has seen the Domain Start Event",
+		"targetNodeAddress":        "The address of the target node to use for the migration",
+		"targetNode":               "The target node that the VMI is moving to",
+		"sourceNode":               "The source node that the VMI originated on",
+		"completed":                "Indicates the migration completed",
+		"failed":                   "Indicates that the migration failed",
+		"migrationUid":             "The VirtualMachineInstanceMigration object associated with this migration",
 	}
 }
 
@@ -106,6 +115,30 @@ func (VirtualMachineInstanceTemplateSpec) SwaggerDoc() map[string]string {
 	}
 }
 
+func (VirtualMachineInstanceMigration) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"": "VirtualMachineInstanceMigration represents the object tracking a VMI's migration\nto another host in the cluster",
+	}
+}
+
+func (VirtualMachineInstanceMigrationList) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"": "VirtualMachineInstanceMigrationList is a list of VirtualMachineMigrations",
+	}
+}
+
+func (VirtualMachineInstanceMigrationSpec) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"vmiName": "The name of the VMI to perform the migration on. VMI must exist in the migration objects namespace",
+	}
+}
+
+func (VirtualMachineInstanceMigrationStatus) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"": "VirtualMachineInstanceMigration reprents information pertaining to a VMI's migration.",
+	}
+}
+
 func (VirtualMachineInstancePreset) SwaggerDoc() map[string]string {
 	return map[string]string{
 		"spec": "VirtualMachineInstance Spec contains the VirtualMachineInstance specification.",
@@ -142,9 +175,10 @@ func (VirtualMachineList) SwaggerDoc() map[string]string {
 
 func (VirtualMachineSpec) SwaggerDoc() map[string]string {
 	return map[string]string{
-		"":         "VirtualMachineSpec describes how the proper VirtualMachine\nshould look like",
-		"running":  "Running controls whether the associatied VirtualMachineInstance is created or not",
-		"template": "Template is the direct specification of VirtualMachineInstance",
+		"":                    "VirtualMachineSpec describes how the proper VirtualMachine\nshould look like",
+		"running":             "Running controls whether the associatied VirtualMachineInstance is created or not",
+		"template":            "Template is the direct specification of VirtualMachineInstance",
+		"dataVolumeTemplates": "dataVolumeTemplates is a list of dataVolumes that the VirtualMachineInstance template can reference.\nDataVolumes in this list are dynamically created for the VirtualMachine and are tied to the VirtualMachine's life-cycle.",
 	}
 }
 

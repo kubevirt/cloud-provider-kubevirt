@@ -27,22 +27,25 @@ package kubecli
 
 import (
 	"io"
+	"time"
 
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"k8s.io/apimachinery/pkg/types"
-
+	cdiclient "kubevirt.io/containerized-data-importer/pkg/client/clientset/versioned"
 	"kubevirt.io/kubevirt/pkg/api/v1"
 )
 
 type KubevirtClient interface {
 	VirtualMachineInstance(namespace string) VirtualMachineInstanceInterface
+	VirtualMachineInstanceMigration(namespace string) VirtualMachineInstanceMigrationInterface
 	ReplicaSet(namespace string) ReplicaSetInterface
 	VirtualMachine(namespace string) VirtualMachineInterface
 	ServerVersion() *ServerVersion
 	RestClient() *rest.RESTClient
+	CdiClient() cdiclient.Interface
 	kubernetes.Interface
 }
 
@@ -51,7 +54,12 @@ type kubevirt struct {
 	kubeconfig string
 	restClient *rest.RESTClient
 	config     *rest.Config
+	cdiClient  *cdiclient.Clientset
 	*kubernetes.Clientset
+}
+
+func (k kubevirt) CdiClient() cdiclient.Interface {
+	return k.cdiClient
 }
 
 func (k kubevirt) RestClient() *rest.RESTClient {
@@ -74,7 +82,7 @@ type VirtualMachineInstanceInterface interface {
 	Update(*v1.VirtualMachineInstance) (*v1.VirtualMachineInstance, error)
 	Delete(name string, options *k8smetav1.DeleteOptions) error
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstance, err error)
-	SerialConsole(name string) (StreamInterface, error)
+	SerialConsole(name string, timeout time.Duration) (StreamInterface, error)
 	VNC(name string) (StreamInterface, error)
 }
 
@@ -96,7 +104,7 @@ type VMIPresetInterface interface {
 }
 
 // VirtualMachineInterface provides convenience methods to work with
-// offline virtual machines inside the cluster
+// virtual machines inside the cluster
 type VirtualMachineInterface interface {
 	Get(name string, options *k8smetav1.GetOptions) (*v1.VirtualMachine, error)
 	List(opts *k8smetav1.ListOptions) (*v1.VirtualMachineList, error)
@@ -104,4 +112,13 @@ type VirtualMachineInterface interface {
 	Update(*v1.VirtualMachine) (*v1.VirtualMachine, error)
 	Delete(name string, options *k8smetav1.DeleteOptions) error
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachine, err error)
+}
+
+type VirtualMachineInstanceMigrationInterface interface {
+	Get(name string, options *k8smetav1.GetOptions) (*v1.VirtualMachineInstanceMigration, error)
+	List(opts *k8smetav1.ListOptions) (*v1.VirtualMachineInstanceMigrationList, error)
+	Create(*v1.VirtualMachineInstanceMigration) (*v1.VirtualMachineInstanceMigration, error)
+	Update(*v1.VirtualMachineInstanceMigration) (*v1.VirtualMachineInstanceMigration, error)
+	Delete(name string, options *k8smetav1.DeleteOptions) error
+	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstanceMigration, err error)
 }

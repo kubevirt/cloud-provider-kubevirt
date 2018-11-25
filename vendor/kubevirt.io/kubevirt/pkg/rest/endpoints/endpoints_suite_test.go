@@ -20,13 +20,16 @@
 package endpoints
 
 import (
+	"testing"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"testing"
+	"kubevirt.io/kubevirt/pkg/log"
 )
 
 func TestEndpoints(t *testing.T) {
+	log.Log.SetIOWriter(GinkgoWriter)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Endpoints Suite")
 }

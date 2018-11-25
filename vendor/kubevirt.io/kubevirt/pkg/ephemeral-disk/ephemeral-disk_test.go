@@ -28,7 +28,6 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
 	k8sv1 "k8s.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
@@ -146,6 +145,14 @@ var _ = Describe("RegistryDisk", func() {
 				_, err = os.Stat(filepath.Join(mountBaseDir, "fake-volume2", "disk.qcow2"))
 				Expect(err).NotTo(HaveOccurred())
 				_, err = os.Stat(filepath.Join(mountBaseDir, "fake-volume3", "disk.qcow2"))
+				Expect(err).NotTo(HaveOccurred())
+			})
+			It("Should create ephemeral images in an idempotent way", func() {
+				vmi := v1.NewMinimalVMI("fake-vmi")
+				AppendEphemeralPVC(vmi, "fake-disk1", "fake-volume1", "fake-pvc1")
+				err := CreateEphemeralImages(vmi)
+				Expect(err).NotTo(HaveOccurred())
+				err = CreateEphemeralImages(vmi)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})

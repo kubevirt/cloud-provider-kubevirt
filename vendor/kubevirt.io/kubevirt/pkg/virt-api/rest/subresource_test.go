@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
-
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/cache"
@@ -42,6 +41,7 @@ var _ = Describe("VirtualMachineInstance Subresources", func() {
 	log.Log.SetIOWriter(GinkgoWriter)
 
 	configCache := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, nil)
+	pvcCache := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, nil)
 	app := SubresourceAPIApp{}
 	BeforeEach(func() {
 		server = ghttp.NewServer()
@@ -53,7 +53,7 @@ var _ = Describe("VirtualMachineInstance Subresources", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Status.Phase = v1.Running
 			vmi.ObjectMeta.SetUID(uuid.NewUUID())
-			templateService := services.NewTemplateService("whatever", "whatever", "whatever", configCache)
+			templateService := services.NewTemplateService("whatever", "whatever", "whatever", "whatever", configCache, pvcCache)
 
 			pod, err := templateService.RenderLaunchManifest(vmi)
 			Expect(err).ToNot(HaveOccurred())
@@ -68,16 +68,12 @@ var _ = Describe("VirtualMachineInstance Subresources", func() {
 
 			server.AppendHandlers(
 				ghttp.CombineHandlers(
-					ghttp.VerifyRequest("GET", "/apis/kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi"),
-					ghttp.RespondWithJSONEncoded(http.StatusOK, vmi),
-				),
-				ghttp.CombineHandlers(
 					ghttp.VerifyRequest("GET", "/api/v1/namespaces/default/pods"),
 					ghttp.RespondWithJSONEncoded(http.StatusOK, podList),
 				),
 			)
 
-			podName, httpStatusCode, err := app.remoteExecInfo("testvmi", "default")
+			podName, httpStatusCode, err := app.remoteExecInfo(vmi)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(podName).To(Equal("madeup-name"))
@@ -90,14 +86,7 @@ var _ = Describe("VirtualMachineInstance Subresources", func() {
 			vmi.Status.Phase = v1.Succeeded
 			vmi.ObjectMeta.SetUID(uuid.NewUUID())
 
-			server.AppendHandlers(
-				ghttp.CombineHandlers(
-					ghttp.VerifyRequest("GET", "/apis/kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi"),
-					ghttp.RespondWithJSONEncoded(http.StatusOK, vmi),
-				),
-			)
-
-			_, httpStatusCode, err := app.remoteExecInfo("testvmi", "default")
+			_, httpStatusCode, err := app.remoteExecInfo(vmi)
 
 			Expect(err).To(HaveOccurred())
 			Expect(httpStatusCode).To(Equal(http.StatusBadRequest))
@@ -114,16 +103,12 @@ var _ = Describe("VirtualMachineInstance Subresources", func() {
 
 			server.AppendHandlers(
 				ghttp.CombineHandlers(
-					ghttp.VerifyRequest("GET", "/apis/kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi"),
-					ghttp.RespondWithJSONEncoded(http.StatusOK, vmi),
-				),
-				ghttp.CombineHandlers(
 					ghttp.VerifyRequest("GET", "/api/v1/namespaces/default/pods"),
 					ghttp.RespondWithJSONEncoded(http.StatusOK, podList),
 				),
 			)
 
-			_, httpStatusCode, err := app.remoteExecInfo("testvmi", "default")
+			_, httpStatusCode, err := app.remoteExecInfo(vmi)
 
 			Expect(err).To(HaveOccurred())
 			Expect(httpStatusCode).To(Equal(http.StatusBadRequest))

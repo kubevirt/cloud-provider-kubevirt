@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Copyright 2017 Red Hat, Inc.
+ * Copyright 2017,2018 Red Hat, Inc.
  *
  */
 
@@ -24,14 +24,12 @@ package api
 
 import (
 	"encoding/xml"
+	"fmt"
 
 	kubev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"fmt"
-
 	"k8s.io/apimachinery/pkg/types"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
@@ -69,12 +67,30 @@ const (
 
 	// NoState reasons
 	ReasonNonExistent StateChangeReason = "NonExistent"
+
+	// Pause reasons
+	ReasonPausedUnknown        StateChangeReason = "Unknown"
+	ReasonPausedUser           StateChangeReason = "User"
+	ReasonPausedMigration      StateChangeReason = "Migration"
+	ReasonPausedSave           StateChangeReason = "Save"
+	ReasonPausedDump           StateChangeReason = "Dump"
+	ReasonPausedIOError        StateChangeReason = "IOError"
+	ReasonPausedWatchdog       StateChangeReason = "Watchdog"
+	ReasonPausedFromSnapshot   StateChangeReason = "FromSnapshot"
+	ReasonPausedShuttingDown   StateChangeReason = "ShuttingDown"
+	ReasonPausedSnapshot       StateChangeReason = "Snapshot"
+	ReasonPausedCrashed        StateChangeReason = "Crashed"
+	ReasonPausedStartingUp     StateChangeReason = "StartingUp"
+	ReasonPausedPostcopy       StateChangeReason = "Postcopy"
+	ReasonPausedPostcopyFailed StateChangeReason = "PostcopyFailed"
+
+	UserAliasPrefix = "ua-"
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Domain struct {
 	metav1.TypeMeta
-	ObjectMeta kubev1.ObjectMeta
+	ObjectMeta metav1.ObjectMeta
 	Spec       DomainSpec
 	Status     DomainStatus
 }
@@ -112,6 +128,23 @@ type DomainSpec struct {
 	Features      *Features      `xml:"features,omitempty"`
 	CPU           CPU            `xml:"cpu"`
 	VCPU          *VCPU          `xml:"vcpu"`
+	CPUTune       *CPUTune       `xml:"cputune"`
+	IOThreads     *IOThreads     `xml:"iothreads,omitempty"`
+}
+
+type CPUTune struct {
+	VCPUPin     []CPUTuneVCPUPin     `xml:"vcpupin"`
+	IOThreadPin []CPUTuneIOThreadPin `xml:"iothreadpin,omitempty"`
+}
+
+type CPUTuneVCPUPin struct {
+	VCPU   uint   `xml:"vcpu,attr"`
+	CPUSet string `xml:"cpuset,attr"`
+}
+
+type CPUTuneIOThreadPin struct {
+	IOThread uint   `xml:"iothread,attr"`
+	CPUSet   string `xml:"cpuset,attr"`
 }
 
 type VCPU struct {
@@ -173,8 +206,18 @@ type Metadata struct {
 }
 
 type KubeVirtMetadata struct {
-	UID         types.UID           `xml:"uid"`
-	GracePeriod GracePeriodMetadata `xml:"graceperiod,omitempty"`
+	UID         types.UID            `xml:"uid"`
+	GracePeriod *GracePeriodMetadata `xml:"graceperiod,omitempty"`
+	Migration   *MigrationMetadata   `xml:"migration,omitempty"`
+}
+
+type MigrationMetadata struct {
+	UID            types.UID    `xml:"uid,omitempty"`
+	StartTimestamp *metav1.Time `xml:"startTimestamp,omitempty"`
+	EndTimestamp   *metav1.Time `xml:"endTimestamp,omitempty"`
+	Completed      bool         `xml:"completed,omitempty"`
+	Failed         bool         `xml:"failed,omitempty"`
+	FailureReason  string       `xml:"failureReason,omitempty"`
 }
 
 type GracePeriodMetadata struct {
@@ -222,17 +265,38 @@ type HugePage struct {
 }
 
 type Devices struct {
-	Emulator   string      `xml:"emulator,omitempty"`
-	Interfaces []Interface `xml:"interface"`
-	Channels   []Channel   `xml:"channel"`
-	Video      []Video     `xml:"video"`
-	Graphics   []Graphics  `xml:"graphics"`
-	Ballooning *Ballooning `xml:"memballoon,omitempty"`
-	Disks      []Disk      `xml:"disk"`
-	Serials    []Serial    `xml:"serial"`
-	Consoles   []Console   `xml:"console"`
-	Watchdog   *Watchdog   `xml:"watchdog,omitempty"`
+	Emulator    string       `xml:"emulator,omitempty"`
+	Interfaces  []Interface  `xml:"interface"`
+	Channels    []Channel    `xml:"channel"`
+	Controllers []Controller `xml:"controller,omitempty"`
+	Video       []Video      `xml:"video"`
+	Graphics    []Graphics   `xml:"graphics"`
+	Ballooning  *Ballooning  `xml:"memballoon,omitempty"`
+	Disks       []Disk       `xml:"disk"`
+	Serials     []Serial     `xml:"serial"`
+	Consoles    []Console    `xml:"console"`
+	Watchdog    *Watchdog    `xml:"watchdog,omitempty"`
+	Rng         *Rng         `xml:"rng,omitempty"`
 }
+
+// BEGIN Controller -----------------------------
+
+// Controller represens libvirt controller element https://libvirt.org/formatdomain.html#elementsControllers
+type Controller struct {
+	Type   string            `xml:"type,attr"`
+	Index  string            `xml:"index,attr"`
+	Model  string            `xml:"model,attr,omitempty"`
+	Driver *ControllerDriver `xml:"driver,omitempty"`
+}
+
+// END Controller -----------------------------
+
+// BEGIN ControllerDriver
+type ControllerDriver struct {
+	IOThread *uint `xml:"iothread,attr,omitempty"`
+}
+
+// END ControllerDriver
 
 // BEGIN Disk -----------------------------
 
@@ -249,6 +313,7 @@ type Disk struct {
 	Alias        *Alias        `xml:"alias,omitempty"`
 	BackingStore *BackingStore `xml:"backingStore,omitempty"`
 	BootOrder    *BootOrder    `xml:"boot,omitempty"`
+	Address      *Address      `xml:"address,omitempty"`
 }
 
 type DiskAuth struct {
@@ -258,12 +323,14 @@ type DiskAuth struct {
 
 type DiskSecret struct {
 	Type  string `xml:"type,attr"`
-	Usage string `xml:"usage,attr"`
+	Usage string `xml:"usage,attr,omitempty"`
+	UUID  string `xml:"uuid,attr,omitempty"`
 }
 
 type ReadOnly struct{}
 
 type DiskSource struct {
+	Dev           string          `xml:"dev,attr,omitempty"`
 	File          string          `xml:"file,attr,omitempty"`
 	StartupPolicy string          `xml:"startupPolicy,attr,omitempty"`
 	Protocol      string          `xml:"protocol,attr,omitempty"`
@@ -283,6 +350,8 @@ type DiskDriver struct {
 	IO          string `xml:"io,attr,omitempty"`
 	Name        string `xml:"name,attr"`
 	Type        string `xml:"type,attr"`
+	IOThread    *uint  `xml:"iothread,attr,omitempty"`
+	Queues      *uint  `xml:"queues,attr,omitempty"`
 }
 
 type DiskSourceHost struct {
@@ -291,9 +360,9 @@ type DiskSourceHost struct {
 }
 
 type BackingStore struct {
-	Type   string             `xml:"type,attr"`
-	Format BackingStoreFormat `xml:"format"`
-	Source *DiskSource        `xml:"source"`
+	Type   string              `xml:"type,attr,omitempty"`
+	Format *BackingStoreFormat `xml:"format,omitempty"`
+	Source *DiskSource         `xml:"source,omitempty"`
 }
 
 type BackingStoreFormat struct {
@@ -358,6 +427,12 @@ type Interface struct {
 	LinkState           *LinkState       `xml:"link,omitempty"`
 	FilterRef           *FilterRef       `xml:"filterref,omitempty"`
 	Alias               *Alias           `xml:"alias,omitempty"`
+	Driver              *InterfaceDriver `xml:"driver,omitempty"`
+}
+
+type InterfaceDriver struct {
+	Name   string `xml:"name,attr"`
+	Queues *uint  `xml:"queues,attr,omitempty"`
 }
 
 type LinkState struct {
@@ -396,6 +471,25 @@ type InterfaceTarget struct {
 
 type Alias struct {
 	Name string `xml:"name,attr"`
+}
+
+type UserAlias Alias
+
+func (alias Alias) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	userAlias := UserAlias(alias)
+	userAlias.Name = UserAliasPrefix + userAlias.Name
+	return e.EncodeElement(userAlias, start)
+}
+
+func (alias *Alias) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var userAlias UserAlias
+	err := d.DecodeElement(&userAlias, &start)
+	if err != nil {
+		return err
+	}
+	*alias = Alias(userAlias)
+	alias.Name = alias.Name[len(UserAliasPrefix):]
+	return nil
 }
 
 // END Inteface -----------------------------
@@ -479,7 +573,7 @@ type Timer struct {
 
 type Channel struct {
 	Type   string         `xml:"type,attr"`
-	Source ChannelSource  `xml:"source,omitempty"`
+	Source *ChannelSource `xml:"source,omitempty"`
 	Target *ChannelTarget `xml:"target,omitempty"`
 }
 
@@ -488,6 +582,7 @@ type ChannelTarget struct {
 	Type    string `xml:"type,attr"`
 	Address string `xml:"address,attr,omitempty"`
 	Port    uint   `xml:"port,attr,omitempty"`
+	State   string `xml:"state,attr,omitempty"`
 }
 
 type ChannelSource struct {
@@ -545,13 +640,38 @@ type Ballooning struct {
 	Model string `xml:"model,attr"`
 }
 
-type RandomGenerator struct {
-}
-
 type Watchdog struct {
 	Model  string `xml:"model,attr"`
 	Action string `xml:"action,attr"`
 	Alias  *Alias `xml:"alias,omitempty"`
+}
+
+// Rng represents the source of entropy from host to VM
+type Rng struct {
+	// Model attribute specifies what type of RNG device is provided
+	Model string `xml:"model,attr"`
+	// Backend specifies the source of entropy to be used
+	Backend *RngBackend `xml:"backend,omitempty"`
+}
+
+// RngRate sets the limiting factor how to read from entropy source
+type RngRate struct {
+	// Period define how long is the read period
+	Period uint32 `xml:"period,attr"`
+	// Bytes define how many bytes can guest read from entropy source
+	Bytes uint32 `xml:"bytes,attr"`
+}
+
+// RngBackend is the backend device used
+type RngBackend struct {
+	// Model is source model
+	Model string `xml:"model,attr"`
+	// specifies the source of entropy to be used
+	Source string `xml:",chardata"`
+}
+
+type IOThreads struct {
+	IOThreads uint `xml:",chardata"`
 }
 
 // TODO ballooning, rng, cpu ...
@@ -582,6 +702,16 @@ func NewMinimalDomain(name string) *Domain {
 	return NewMinimalDomainWithNS(kubev1.NamespaceDefault, name)
 }
 
+func NewMinimalDomainWithUUID(name string, uuid types.UID) *Domain {
+	domain := NewMinimalDomainWithNS(kubev1.NamespaceDefault, name)
+	domain.Spec.Metadata = Metadata{
+		KubeVirt: KubeVirtMetadata{
+			UID: uuid,
+		},
+	}
+	return domain
+}
+
 func NewMinimalDomainWithNS(namespace string, name string) *Domain {
 	domain := NewDomainReferenceFromName(namespace, name)
 	domain.Spec = *NewMinimalDomainSpec(namespace + "_" + name)
@@ -591,7 +721,7 @@ func NewMinimalDomainWithNS(namespace string, name string) *Domain {
 func NewDomainReferenceFromName(namespace string, name string) *Domain {
 	return &Domain{
 		Spec: DomainSpec{},
-		ObjectMeta: kubev1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},

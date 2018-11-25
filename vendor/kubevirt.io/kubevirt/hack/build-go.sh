@@ -43,7 +43,7 @@ if [ $# -eq 0 ]; then
     if [ "${target}" = "test" ]; then
         (
             cd ${KUBEVIRT_DIR}/pkg
-            go ${target} -v ./...
+            go ${target} -v -race ./...
         )
     else
         (
@@ -92,10 +92,16 @@ for arg in $args; do
             GOOS=linux GOARCH=amd64 go build -i -o ${CMD_OUT_DIR}/${BIN_NAME}/${LINUX_NAME} -ldflags "$(kubevirt::version::ldflags)" $(pkg_dir linux amd64)
             (cd ${CMD_OUT_DIR}/${BIN_NAME} && ln -sf ${LINUX_NAME} ${BIN_NAME})
 
+            kubevirt::version::get_version_vars
+            echo "$KUBEVIRT_GIT_VERSION" >${CMD_OUT_DIR}/${BIN_NAME}/.version
+
             # build virtctl also for darwin and windows
             if [ "${BIN_NAME}" = "virtctl" ]; then
                 GOOS=darwin GOARCH=amd64 go build -i -o ${CMD_OUT_DIR}/${BIN_NAME}/${ARCH_BASENAME}-darwin-amd64 -ldflags "$(kubevirt::version::ldflags)" $(pkg_dir darwin amd64)
                 GOOS=windows GOARCH=amd64 go build -i -o ${CMD_OUT_DIR}/${BIN_NAME}/${ARCH_BASENAME}-windows-amd64.exe -ldflags "$(kubevirt::version::ldflags)" $(pkg_dir windows amd64)
+                # Create symlinks to the latest binary of each architecture
+                (cd ${CMD_OUT_DIR}/${BIN_NAME} && ln -sf ${ARCH_BASENAME}-darwin-amd64 ${BIN_NAME}-darwin)
+                (cd ${CMD_OUT_DIR}/${BIN_NAME} && ln -sf ${ARCH_BASENAME}-windows-amd64.exe ${BIN_NAME}-windows.exe)
             fi
         )
     else

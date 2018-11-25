@@ -26,10 +26,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 	k8sv1 "k8s.io/api/core/v1"
-	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/api/errors"
-
+	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -80,8 +78,8 @@ var _ = Describe("Kubevirt VirtualMachineInstanceReplicaSet Client", func() {
 		))
 		fetchedVMIReplicaSetList, err := client.ReplicaSet(k8sv1.NamespaceDefault).List(k8smetav1.ListOptions{})
 
-		Expect(server.ReceivedRequests()).To(HaveLen(1))
 		Expect(err).ToNot(HaveOccurred())
+		Expect(server.ReceivedRequests()).To(HaveLen(1))
 		Expect(fetchedVMIReplicaSetList.Items).To(HaveLen(1))
 		Expect(fetchedVMIReplicaSetList.Items[0]).To(Equal(*rs))
 	})

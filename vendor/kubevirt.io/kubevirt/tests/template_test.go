@@ -20,370 +20,245 @@
 package tests_test
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/rand"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
+	vmsgen "kubevirt.io/kubevirt/tools/vms-generator/utils"
+)
+
+const (
+	defaultNamePrefix = "testvm-"
+	defaultCPUCores   = "2"
+	defaultMemory     = "2Gi"
 )
 
 var _ = Describe("Templates", func() {
 	flag.Parse()
 
-	_, err := kubecli.GetKubevirtClient()
+	virtClient, err := kubecli.GetKubevirtClient()
 	tests.PanicOnError(err)
 
 	var (
-		template         *tests.Template
-		templateParams   TemplateParams
-		templateJsonFile string
-		vmJsonFile       string
+		templateParams map[string]string
+		templateFile   string
+		vmName         string
 	)
 
 	BeforeEach(func() {
-		tests.SkipIfNoOc()
+		tests.SkipIfNoCmd("oc")
 		tests.BeforeTestCleanup()
+		SetDefaultEventuallyTimeout(120 * time.Second)
+		SetDefaultEventuallyPollingInterval(2 * time.Second)
 	})
 
-	Describe("Launching VMI from VM Template", func() {
+	Describe("Creating VM from Template", func() {
 
-		assertGeneratedVMJson := func() func() {
+		AssertTestSetupSuccess := func() func() {
 			return func() {
-				By("Generating VM JSON from the Template via oc-process command")
-				_, err := runOcProcessCommand(templateJsonFile, templateParams, vmJsonFile)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(vmJsonFile).To(BeAnExistingFile())
-			}
-		}
-
-		assertCreatedVM := func() func() {
-			return func() {
-				By("Creating VM via oc-create command")
-				out, err := runOcCreateCommand(vmJsonFile)
-				Expect(err).ToNot(HaveOccurred())
-				message := fmt.Sprintf("virtualmachine.kubevirt.io \"%s\" created\n", templateParams.Name)
-				Expect(out).To(Equal(message))
-
-				By("Checking if the VM exists via oc-get command.")
-				Eventually(func() bool {
-					out, err := runOcGetCommand("vms")
-					Expect(err).ToNot(HaveOccurred())
-					return strings.Contains(out, templateParams.Name)
-				}, time.Duration(60)*time.Second).Should(BeTrue(), "Timed out waiting for VM to apppear")
-			}
-		}
-
-		assertDeletedVM := func() func() {
-			return func() {
-				By("Deleting the VM via oc-delete command")
-				out, err := runOcDeleteCommand(templateParams.Name)
-				Expect(err).ToNot(HaveOccurred())
-				message := fmt.Sprintf("virtualmachine.kubevirt.io \"%s\" deleted\n", templateParams.Name)
-				Expect(out).To(Equal(message))
-
-				By("Checking if the VM does not exist anymore via oc-get command.")
-				Eventually(func() bool {
-					out, err := runOcGetCommand("vms")
-					Expect(err).ToNot(HaveOccurred())
-					return out == "No resources found.\n"
-				}, time.Duration(60)*time.Second).Should(BeTrue(), "Timed out waiting for VM to disappear")
-			}
-		}
-
-		assertLaunchedVMI := func() func() {
-			return func() {
-				By("Launching VMI via oc-patch command")
-				out, err := runOcPatchCommand(templateParams.Name, "{\"spec\":{\"running\":true}}")
-				Expect(err).ToNot(HaveOccurred())
-				message := fmt.Sprintf("virtualmachine.kubevirt.io \"%s\" patched\n", templateParams.Name)
-				Expect(out).To(Equal(message))
-
-				By("Checking if the VMI does exist via oc-get command")
-				Eventually(func() bool {
-					out, err := runOcGetCommand("vmis")
-					Expect(err).ToNot(HaveOccurred())
-					return strings.Contains(out, templateParams.Name)
-				}, time.Duration(60)*time.Second).Should(BeTrue(), "Timed out waiting for VMI to appear")
-			}
-		}
-
-		assertTerminatedVMI := func() func() {
-			return func() {
-				By("Terminating the VMI via oc-patch command")
-				out, err := runOcPatchCommand(templateParams.Name, "{\"spec\":{\"running\":false}}")
-				Expect(err).ToNot(HaveOccurred())
-				message := fmt.Sprintf("virtualmachine.kubevirt.io \"%s\" patched\n", templateParams.Name)
-				Expect(out).To(Equal(message))
-
-				By("Checking if the VMI does not exist anymore via oc-get command")
-				Eventually(func() bool {
-					out, err := runOcGetCommand("vmis")
-					Expect(err).ToNot(HaveOccurred())
-					return out == "No resources found.\n"
-				}, time.Duration(60)*time.Second).Should(BeTrue(), "Timed out waiting for VMI to disappear")
-			}
-		}
-
-		assertRemovedFile := func(file string) func() {
-			return func() {
-				if _, err := os.Stat(file); !os.IsNotExist(err) {
-					err := os.Remove(file)
-					Expect(err).ToNot(HaveOccurred())
+				templateParams = map[string]string{
+					"NAME":      defaultNamePrefix + rand.String(12),
+					"CPU_CORES": defaultCPUCores,
+					"MEMORY":    defaultMemory,
 				}
-				Expect(file).NotTo(BeAnExistingFile())
+				templateFile = ""
+				ExpectWithOffset(1, templateParams).To(HaveKeyWithValue("NAME", Not(BeEmpty())), "invalid NAME parameter: VirtualMachine name cannot be empty string")
+				ExpectWithOffset(1, templateParams).To(HaveKeyWithValue("CPU_CORES", MatchRegexp(`^[0-9]+$`)), "invalid CPU_CORES parameter: %q is not unsigned integer", templateParams["CPU_CORES"])
+				ExpectWithOffset(1, templateParams).To(HaveKeyWithValue("MEMORY", MatchRegexp(`^([+-]?[0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$`)), "invalid MEMORY parameter: %q is not valid quantity", templateParams["MEMORY"])
+				vmName = templateParams["NAME"]
+				vm, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+				ExpectWithOffset(1, errors.IsNotFound(err) || vm.ObjectMeta.DeletionTimestamp != nil).To(BeTrue(), "invalid NAME parameter: VirtualMachine %q already exists", vmName)
 			}
 		}
 
-		testGivenTemplate := func() {
-			It("should succeed to generate a VM JSON file using oc-process command", assertGeneratedVMJson())
+		AssertTemplateSetupSuccess := func(template *vmsgen.Template, params map[string]string) func() {
+			return func() {
+				ExpectWithOffset(1, template).NotTo(BeNil(), "template object was not provided")
+				By("Creating the Template JSON file")
+				var err error
+				templateFile, err = tests.GenerateTemplateJson(template)
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to write template JSON file: %v", err)
+				ExpectWithOffset(1, templateFile).To(BeAnExistingFile(), "template JSON file %q was not created", templateFile)
 
-			Context("with given VM JSON from the Template", func() {
-				JustBeforeEach(assertGeneratedVMJson())
-				AfterEach(assertDeletedVM())
+				if params != nil {
+					By("Validating template parameters")
+					for param, value := range params {
+						switch param {
+						case "NAME":
+							ExpectWithOffset(1, value).NotTo(BeEmpty(), "invalid NAME parameter: VirtualMachine name cannot be empty string")
+							vmName = value
+							vm, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+							ExpectWithOffset(1, errors.IsNotFound(err) || vm.ObjectMeta.DeletionTimestamp != nil).To(BeTrue(), "invalid NAME parameter: VirtualMachine %q already exists", vmName)
+						case "CPU_CORES":
+							ExpectWithOffset(1, templateParams).To(HaveKeyWithValue("CPU_CORES", MatchRegexp(`^[0-9]+$`)), "invalid CPU_CORES parameter: %q is not unsigned integer", templateParams["CPU_CORES"])
+						case "MEMORY":
+							ExpectWithOffset(1, templateParams).To(HaveKeyWithValue("MEMORY", MatchRegexp(`^([+-]?[0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$`)), "invalid MEMORY parameter: %q is not valid quantity", templateParams["MEMORY"])
+						}
+						templateParams[param] = value
+					}
+				}
+			}
+		}
 
-				It("should succeed to create a VM using oc-create command", assertCreatedVM())
+		AssertTestCleanupSuccess := func() func() {
+			return func() {
+				if vm, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{}); err == nil && vm.ObjectMeta.DeletionTimestamp == nil {
+					By("Deleting the VirtualMachine")
+					ExpectWithOffset(1, virtClient.VirtualMachine(tests.NamespaceTestDefault).Delete(vmName, &metav1.DeleteOptions{})).To(Succeed(), "failed to delete VirtualMachine %q: %v", vmName, err)
+					EventuallyWithOffset(1, func() bool {
+						obj, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+						return errors.IsNotFound(err) || obj.ObjectMeta.DeletionTimestamp != nil
+					}).Should(BeTrue(), "VirtualMachine %q still exists and the deletion timestamp was not set", vmName)
+				}
+				if templateFile != "" {
+					if _, err := os.Stat(templateFile); !os.IsNotExist(err) {
+						By("Deleting template JSON file")
+						ExpectWithOffset(1, os.RemoveAll(filepath.Dir(templateFile))).To(Succeed(), "failed to remove template JSON file %q: %v", templateFile, err)
+						ExpectWithOffset(1, templateFile).NotTo(BeAnExistingFile(), "template JSON file %q was not removed", templateFile)
+					}
+				}
+			}
+		}
 
-				Context("with given VM from the VM JSON", func() {
-					JustBeforeEach(assertCreatedVM())
+		AssertVMCreationSuccess := func() func() {
+			return func() {
+				By("Creating VirtualMachine from Template via oc command")
+				ocProcessCommand := []string{"oc", "process", "-f", templateFile}
+				for param, value := range templateParams {
+					ocProcessCommand = append(ocProcessCommand, "-p", fmt.Sprintf("%s=%s", param, value))
+				}
+				out, stderr, err := tests.RunCommandPipe(ocProcessCommand, []string{"oc", "create", "-f", "-"})
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to create VirtualMachine %q via command \"%s | oc create -f -\": %s: %v", vmName, strings.Join(ocProcessCommand, " "), out+stderr, err)
+				ExpectWithOffset(1, out).To(MatchRegexp(`"?%s"? created\n`, vmName), "command \"%s | oc create -f -\" did not print expected message: %s", strings.Join(ocProcessCommand, " "), out+stderr)
+				By("Checking if the VirtualMachine exists")
+				EventuallyWithOffset(1, func() error {
+					_, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+					return err
+				}).Should(Succeed(), "VirtualMachine %q still does not exist", vmName)
+			}
+		}
 
-					It("should succeed to launch a VMI using oc-patch command", assertLaunchedVMI())
+		AssertVMCreationFailure := func() func() {
+			return func() {
+				By("Creating VirtualMachine from Template via oc command")
+				ocProcessCommand := []string{"oc", "process", "-f", templateFile}
+				for param, value := range templateParams {
+					ocProcessCommand = append(ocProcessCommand, "-p", fmt.Sprintf("%s=%s", param, value))
+				}
+				out, stderr, err := tests.RunCommandPipe(ocProcessCommand, []string{"oc", "create", "-f", "-"})
+				ExpectWithOffset(1, err).To(HaveOccurred(), "creation of VirtualMachine %q via command \"%s | oc create -f -\" succeeded: %s: %v", vmName, strings.Join(ocProcessCommand, " "), out+stderr, err)
+			}
+		}
 
-					Context("with given VMI from the VM", func() {
-						JustBeforeEach(assertLaunchedVMI())
+		AssertVMDeletionSuccess := func() func() {
+			return func() {
+				By("Deleting the VirtualMachine via oc command")
+				out, stderr, err := tests.RunCommand("oc", "delete", "vm", vmName)
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to delete VirtualMachine via command \"oc delete vm %s\": %s: %v", vmName, out+stderr, err)
+				ExpectWithOffset(1, out).To(MatchRegexp(`"?%s"? deleted\n`, vmName), "command \"oc delete vm %s\" did not print expected message: %s", vmName, out)
 
-						It("should succeed to terminate the VMI using oc-patch command", assertTerminatedVMI())
-					})
-				})
+				By("Checking if the VM does not exist anymore")
+				EventuallyWithOffset(1, func() bool {
+					vm, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+					return errors.IsNotFound(err) || vm.ObjectMeta.DeletionTimestamp != nil
+				}).Should(BeTrue(), "the VirtualMachine %q still exists and deletion timestamp was not set", vmName)
+			}
+		}
+
+		AssertVMDeletionFailure := func() func() {
+			return func() {
+				By("Deleting the VirtualMachine via oc command")
+				out, stderr, err := tests.RunCommand("oc", "delete", "vm", vmName)
+				ExpectWithOffset(1, err).To(HaveOccurred(), "failed to delete VirtualMachine via command \"oc delete vm %s\": %s: %v", vmName, out+stderr, err)
+			}
+		}
+
+		AssertVMStartSuccess := func(command string) func() {
+			return func() {
+				switch command {
+				case "oc":
+					By("Starting VirtualMachine via oc command")
+					patch := `{"spec":{"running":true}}`
+					out, stderr, err := tests.RunCommand("oc", "patch", "vm", vmName, "--type=merge", "-p", patch)
+					ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed schedule VirtualMachine %q start via command \"oc patch vm %s --type=merge -p '%s'\": %s: %v", vmName, vmName, patch, out+stderr, err)
+					ExpectWithOffset(1, out).To(MatchRegexp(`"?%s"? patched\n`, vmName), "command \"oc patch vm %s --type=merge -p '%s'\" did not print expected message: %s", vmName, patch, out+stderr)
+
+				case "virtctl":
+					By("Starting VirtualMachine via virtctl command")
+					out, stderr, err := tests.RunCommand("virtctl", "start", vmName)
+					ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to schedule VirtualMachine %q start via command \"virtctl start %s\": %s: %v", vmName, vmName, out+stderr, err)
+					ExpectWithOffset(1, out).To(ContainSubstring("%s was scheduled to start\n", vmName), "command \"virtctl start %s\" did not print expected message: %s", vmName, out+stderr)
+				}
+
+				By("Checking if the VirtualMachineInstance was created")
+				EventuallyWithOffset(1, func() error {
+					_, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+					return err
+				}).Should(Succeed(), "the VirtualMachineInstance %q still does not exist", vmName)
+
+				By("Checking if the VirtualMachine has status ready")
+				EventuallyWithOffset(1, func() bool {
+					vm, err := virtClient.VirtualMachine(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+					ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to fetch VirtualMachine %q: %v", vmName, err)
+					return vm.Status.Ready
+				}).Should(BeTrue(), "VirtualMachine %q still does not have status ready", vmName)
+
+				By("Checking if the VirtualMachineInstance specs match Template parameters")
+				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Get(vmName, &metav1.GetOptions{})
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "failed to fetch VirtualMachine %q: %v", vmName, err)
+				vmiCPUCores := vmi.Spec.Domain.CPU.Cores
+				templateParamCPUCores, err := strconv.ParseUint(templateParams["CPU_CORES"], 10, 32)
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "cannot parse CPU_CORES parameter: value %q: %v", templateParams["CPU_CORES"], err)
+				ExpectWithOffset(1, vmiCPUCores).To(Equal(uint32(templateParamCPUCores)), "VirtualMachineInstance CPU cores (%d) does not match CPU_CORES parameter value: %s", vmiCPUCores, templateParams["CPU_CORES"])
+				vmiMemory := vmi.Spec.Domain.Resources.Requests["memory"]
+				templateParamMemory, err := resource.ParseQuantity(templateParams["MEMORY"])
+				ExpectWithOffset(1, err).ToNot(HaveOccurred(), "cannot parse MEMORY parameter: value %q: %v", templateParams["MEMORY"], err)
+				ExpectWithOffset(1, vmiMemory).To(Equal(templateParamMemory), "VirtualMachineInstance memory (%s) does not match MEMORY parameter value: %s", vmiMemory.String(), templateParams["MEMORY"])
+			}
+		}
+
+		AssertTemplateTestSuccess := func() {
+			It("should succeed to create VirtualMachine via oc command", AssertVMCreationSuccess())
+			It("should fail to delete VirtualMachine via oc command", AssertVMDeletionFailure())
+
+			When("the VirtualMachine was created", func() {
+				BeforeEach(AssertVMCreationSuccess())
+				It("should succeed to start the VirtualMachine via oc command", AssertVMStartSuccess("oc"))
+				It("should succeed to delete VirtualMachine via oc command", AssertVMDeletionSuccess())
+				It("should fail to create the same VirtualMachine via oc command", AssertVMCreationFailure())
 			})
 		}
 
-		BeforeEach(func() {
-			templateParams = TemplateParams{
-				Name:     "testvm",
-				CpuCores: "2",
-			}
-			vmJsonFile = fmt.Sprintf("%s.json", templateParams.Name)
-			Expect(vmJsonFile).NotTo(BeAnExistingFile())
+		BeforeEach(AssertTestSetupSuccess())
+
+		AfterEach(AssertTestCleanupSuccess())
+
+		Context("with Fedora Template", func() {
+			BeforeEach(AssertTemplateSetupSuccess(vmsgen.GetTemplateFedora(), nil))
+
+			AssertTemplateTestSuccess()
 		})
 
-		JustBeforeEach(func() {
-			var err error
-			templateJsonFile, err = tests.GenerateTemplateJson(template)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(templateJsonFile).To(BeAnExistingFile())
-		})
-
-		AfterEach(func() {
-			assertRemovedFile(vmJsonFile)()
-			assertRemovedFile(templateJsonFile)()
-		})
-
-		Context("with given Fedora Template", func() {
+		Context("with RHEL Template", func() {
 			BeforeEach(func() {
-				template = newTemplate(TemplateMeta{
-					Name:        "vm-template-fedora",
-					Description: "OCP KubeVirt Fedora 27 VM template",
-					Label:       "fedora27",
-					IconClass:   "icon-fedora",
-					Image:       "registry:5000/kubevirt/fedora-cloud-registry-disk-demo:latest",
-					UserData:    "#cloud-config\npassword: fedora\nchpasswd: { expire: False }",
-				})
+				tests.SkipIfNoRhelImage(virtClient)
+				AssertTemplateSetupSuccess(vmsgen.GetTestTemplateRHEL7(), nil)()
 			})
 
-			testGivenTemplate()
+			AssertTemplateTestSuccess()
 		})
 	})
 })
-
-type TemplateMeta struct {
-	Name        string
-	Description string
-	Label       string
-	IconClass   string
-	Image       string
-	UserData    string
-}
-
-type TemplateParams struct {
-	Name     string
-	CpuCores string
-}
-
-func runOcProcessCommand(templateJsonFile string, templateParams TemplateParams, vmJsonFile string) (string, error) {
-	templateParamArgs := []string{"-p", "NAME=" + templateParams.Name, "-p", "CPU_CORES=" + templateParams.CpuCores}
-	args := append([]string{"process", "-f", templateJsonFile}, templateParamArgs...)
-	out, err := tests.RunOcCommand(args...)
-	if err != nil {
-		return out, err
-	}
-	err = ioutil.WriteFile(vmJsonFile, []byte(out), 0644)
-	if err != nil {
-		return out, fmt.Errorf("failed to write json file %s", vmJsonFile)
-	}
-	return out, err
-}
-
-func runOcCreateCommand(vmJsonFile string) (string, error) {
-	out, err := tests.RunOcCommand("create", "-f", vmJsonFile)
-	return out, err
-}
-
-func runOcPatchCommand(vmName string, patch string) (string, error) {
-	out, err := tests.RunOcCommand("patch", "virtualmachine", vmName, "--type", "merge", "-p", patch)
-	return out, err
-}
-
-func runOcDeleteCommand(vmName string) (string, error) {
-	out, err := tests.RunOcCommand("delete", "vm", vmName)
-	return out, err
-}
-
-func runOcGetCommand(resourceType string) (string, error) {
-	out, err := tests.RunOcCommand("get", resourceType)
-	return out, err
-}
-
-func newBaseTemplate(vm *v1.VirtualMachine, memory string, cores string) *tests.Template {
-	obj := toUnstructured(vm)
-	unstructured.SetNestedField(obj.Object, "${{CPU_CORES}}", "spec", "template", "spec", "domain", "cpu", "cores")
-	unstructured.SetNestedField(obj.Object, "${MEMORY}", "spec", "template", "spec", "domain", "resources", "requests", "memory")
-	obj.SetName("${NAME}")
-
-	return &tests.Template{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Template",
-			APIVersion: "v1",
-		},
-		Objects: []runtime.Object{
-			obj,
-		},
-		Parameters: templateParameters(memory, cores),
-	}
-}
-
-func toUnstructured(object runtime.Object) *unstructured.Unstructured {
-	raw, err := json.Marshal(object)
-	if err != nil {
-		panic(err)
-	}
-	var objmap map[string]interface{}
-	err = json.Unmarshal(raw, &objmap)
-
-	return &unstructured.Unstructured{Object: objmap}
-}
-
-func templateParameters(memory string, cores string) []tests.Parameter {
-	return []tests.Parameter{
-		{
-			Name:        "NAME",
-			Description: "Name for the new VM",
-		},
-		{
-			Name:        "MEMORY",
-			Description: "Amount of memory",
-			Value:       memory,
-		},
-		{
-			Name:        "CPU_CORES",
-			Description: "Amount of cores",
-			Value:       cores,
-		},
-	}
-}
-
-func newTemplate(templateMeta TemplateMeta) *tests.Template {
-	gracePeriod := int64(0)
-	vmSpec := &v1.VirtualMachine{
-		Spec: v1.VirtualMachineSpec{
-			Template: &v1.VirtualMachineInstanceTemplateSpec{
-				Spec: v1.VirtualMachineInstanceSpec{
-					TerminationGracePeriodSeconds: &gracePeriod,
-					Domain: v1.DomainSpec{
-						Devices: v1.Devices{
-							Disks: []v1.Disk{
-								{
-									Name:       "registrydisk",
-									VolumeName: "registryvolume",
-									DiskDevice: v1.DiskDevice{
-										Disk: &v1.DiskTarget{
-											Bus: "virtio",
-										},
-									},
-								},
-								{
-									Name:       "cloudinitdisk",
-									VolumeName: "cloudinitvolume",
-									DiskDevice: v1.DiskDevice{
-										Disk: &v1.DiskTarget{
-											Bus: "virtio",
-										},
-									},
-								},
-							},
-						},
-					},
-					Volumes: []v1.Volume{
-						{
-							Name: "registryvolume",
-							VolumeSource: v1.VolumeSource{
-								RegistryDisk: &v1.RegistryDiskSource{
-									Image: templateMeta.Image,
-								},
-							},
-						},
-						{
-							Name: "cloudinitvolume",
-							VolumeSource: v1.VolumeSource{
-								CloudInitNoCloud: &v1.CloudInitNoCloudSource{
-									UserData: templateMeta.UserData,
-								},
-							},
-						},
-					},
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"kubevirt-vm": "vm-${NAME}",
-					},
-				},
-			},
-		},
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "kubevirt.io/v1alpha2",
-			Kind:       "VirtualMachine",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				"kubevirt-vm": "vm-${NAME}",
-			},
-			Name: "${NAME}",
-		},
-	}
-
-	template := newBaseTemplate(vmSpec, "4096Mi", "4")
-	template.ObjectMeta = metav1.ObjectMeta{
-		Name: templateMeta.Name,
-		Annotations: map[string]string{
-			"description": templateMeta.Description,
-			"tags":        "kubevirt,ocp,template,linux,virtualmachine",
-			"iconClass":   templateMeta.IconClass,
-		},
-		Labels: map[string]string{
-			"kubevirt.io/os":                        templateMeta.Label,
-			"miq.github.io/kubevirt-is-vm-template": "true",
-		},
-	}
-	return template
-}

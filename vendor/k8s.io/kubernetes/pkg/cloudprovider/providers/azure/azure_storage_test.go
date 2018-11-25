@@ -19,7 +19,7 @@ package azure
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/arm/storage"
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2017-10-01/storage"
 )
 
 func TestCreateFileShare(t *testing.T) {
@@ -116,7 +116,7 @@ func TestCreateFileShare(t *testing.T) {
 		fake.Keys = test.keys
 		fake.Err = test.err
 
-		account, key, err := cloud.CreateFileShare(test.name, test.acct, test.acctType, test.loc, test.gb)
+		account, key, err := cloud.CreateFileShare(test.name, test.acct, test.acctType, "rg", test.loc, test.gb)
 		if test.expectErr && err == nil {
 			t.Errorf("unexpected non-error")
 			continue

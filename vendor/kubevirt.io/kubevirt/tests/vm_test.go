@@ -24,22 +24,20 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
-	v13 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"time"
 
 	"github.com/google/goexpect"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	v13 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
+	"kubevirt.io/kubevirt/pkg/util/net/dns"
 	"kubevirt.io/kubevirt/pkg/virtctl/vm"
 	"kubevirt.io/kubevirt/tests"
 )
@@ -203,7 +201,6 @@ var _ = Describe("VirtualMachine", func() {
 
 		It("should remove VirtualMachineInstance once the VMI is marked for deletion", func() {
 			newVMI := newVirtualMachine(true)
-			// Create a offlinevmi with vmi
 			// Delete it
 			Expect(virtClient.VirtualMachine(newVMI.Namespace).Delete(newVMI.Name, &v12.DeleteOptions{})).To(Succeed())
 			// Wait until VMIs are gone
@@ -227,7 +224,7 @@ var _ = Describe("VirtualMachine", func() {
 			orphanPolicy := v12.DeletePropagationOrphan
 			Expect(virtClient.VirtualMachine(newVMI.Namespace).
 				Delete(newVMI.Name, &v12.DeleteOptions{PropagationPolicy: &orphanPolicy})).To(Succeed())
-			// Wait until the offlinevmi is deleted
+			// Wait until the virtual machine is deleted
 			Eventually(func() bool {
 				_, err := virtClient.VirtualMachine(newVMI.Namespace).Get(newVMI.Name, &v12.GetOptions{})
 				if errors.IsNotFound(err) {
@@ -517,7 +514,7 @@ func NewRandomVirtualMachine(vmi *v1.VirtualMachineInstance, running bool) *v1.V
 			Running: running,
 			Template: &v1.VirtualMachineInstanceTemplateSpec{
 				ObjectMeta: v12.ObjectMeta{
-					Labels:    map[string]string{"name": name},
+					Labels:    map[string]string{"name": dns.SanitizeHostname(vmi)},
 					Name:      name,
 					Namespace: namespace,
 				},

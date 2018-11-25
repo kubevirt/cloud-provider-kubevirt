@@ -22,14 +22,19 @@ package tests_test
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
+	"github.com/pborman/uuid"
+	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
@@ -53,30 +58,16 @@ var _ = Describe("Storage", func() {
 		tests.BeforeTestCleanup()
 	})
 
-	RunVMIAndExpectLaunch := func(vmi *v1.VirtualMachineInstance, withAuth bool, timeout int) *v1.VirtualMachineInstance {
-		By("Starting a VirtualMachineInstance")
-
-		var obj *v1.VirtualMachineInstance
-		var err error
-		Eventually(func() error {
-			obj, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
-			return err
-		}, timeout, 1*time.Second).ShouldNot(HaveOccurred())
-		By("Waiting until the VirtualMachineInstance will start")
-		tests.WaitForSuccessfulVMIStartWithTimeout(obj, timeout)
-		return obj
-	}
-
 	Describe("Starting a VirtualMachineInstance", func() {
 		Context("with Alpine PVC", func() {
 			table.DescribeTable("should be successfully started", func(newVMI VMICreationFunc) {
 				// Start the VirtualMachineInstance with the PVC attached
 				vmi := newVMI(tests.DiskAlpineHostPath)
-				RunVMIAndExpectLaunch(vmi, false, 90)
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				By("Checking that the VirtualMachineInstance console has expected output")
 				expecter, err := tests.LoggedInAlpineExpecter(vmi)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				expecter.Close()
 			},
 				table.Entry("with Disk PVC", tests.NewRandomVMIWithPVC),
@@ -89,19 +80,19 @@ var _ = Describe("Storage", func() {
 				num := 3
 				By("Starting and stopping the VirtualMachineInstance number of times")
 				for i := 1; i <= num; i++ {
-					vmi := RunVMIAndExpectLaunch(vmi, false, 90)
+					vmi := tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 					// Verify console on last iteration to verify the VirtualMachineInstance is still booting properly
 					// after being restarted multiple times
 					if i == num {
 						By("Checking that the VirtualMachineInstance console has expected output")
 						expecter, err := tests.LoggedInAlpineExpecter(vmi)
-						Expect(err).To(BeNil())
+						Expect(err).ToNot(HaveOccurred())
 						expecter.Close()
 					}
 
 					err = virtClient.VirtualMachineInstance(vmi.Namespace).Delete(vmi.Name, &metav1.DeleteOptions{})
-					Expect(err).To(BeNil())
+					Expect(err).ToNot(HaveOccurred())
 					tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
 				}
 			},
@@ -133,10 +124,10 @@ var _ = Describe("Storage", func() {
 						},
 					},
 				})
-				RunVMIAndExpectLaunch(vmi, false, 90)
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				expecter, err := tests.LoggedInCirrosExpecter(vmi)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				defer expecter.Close()
 
 				By("Checking that /dev/vdc has a capacity of 2Gi")
@@ -145,7 +136,7 @@ var _ = Describe("Storage", func() {
 					&expect.BExp{R: "2147483648"}, // 2Gi in bytes
 				}, 10*time.Second)
 				log.DefaultLogger().Object(vmi).Infof("%v", res)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 
 				By("Checking if we can write to /dev/vdc")
 				res, err = expecter.ExpectBatch([]expect.Batcher{
@@ -155,7 +146,7 @@ var _ = Describe("Storage", func() {
 					&expect.BExp{R: "0"},
 				}, 20*time.Second)
 				log.DefaultLogger().Object(vmi).Infof("%v", res)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 		})
@@ -184,20 +175,19 @@ var _ = Describe("Storage", func() {
 						},
 					},
 				})
-				RunVMIAndExpectLaunch(vmi, false, 90)
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				expecter, err := tests.LoggedInCirrosExpecter(vmi)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				defer expecter.Close()
 
-				snQuery := fmt.Sprintf("sudo find /sys -type f -regex \".*/block/vdb/serial\" | xargs cat && echo %s\n", diskSerial)
 				By("Checking for the specified serial number")
 				res, err := expecter.ExpectBatch([]expect.Batcher{
-					&expect.BSnd{S: snQuery},
+					&expect.BSnd{S: "sudo find /sys -type f -regex \".*/block/.*/serial\" | xargs cat\n"},
 					&expect.BExp{R: diskSerial},
 				}, 10*time.Second)
 				log.DefaultLogger().Object(vmi).Infof("%v", res)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 		})
@@ -207,11 +197,11 @@ var _ = Describe("Storage", func() {
 			It("should be successfully started", func() {
 				// Start the VirtualMachineInstance with the PVC attached
 				vmi := tests.NewRandomVMIWithEphemeralPVC(tests.DiskAlpineHostPath)
-				RunVMIAndExpectLaunch(vmi, false, 90)
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				By("Checking that the VirtualMachineInstance console has expected output")
 				expecter, err := tests.LoggedInAlpineExpecter(vmi)
-				Expect(err).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
 				expecter.Close()
 			})
 
@@ -219,7 +209,7 @@ var _ = Describe("Storage", func() {
 				vmi := tests.NewRandomVMIWithEphemeralPVC(tests.DiskAlpineHostPath)
 
 				By("Starting the VirtualMachineInstance")
-				createdVMI := RunVMIAndExpectLaunch(vmi, false, 90)
+				createdVMI := tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				By("Writing an arbitrary file to it's EFI partition")
 				expecter, err := tests.LoggedInAlpineExpecter(vmi)
@@ -243,7 +233,7 @@ var _ = Describe("Storage", func() {
 				tests.WaitForVirtualMachineToDisappearWithTimeout(createdVMI, 120)
 
 				By("Starting the VirtualMachineInstance again")
-				RunVMIAndExpectLaunch(vmi, false, 90)
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
 
 				By("Making sure that the previously written file is not present")
 				expecter, err = tests.LoggedInAlpineExpecter(vmi)
@@ -282,7 +272,7 @@ var _ = Describe("Storage", func() {
 				num := 3
 				By("Starting and stopping the VirtualMachineInstance number of times")
 				for i := 1; i <= num; i++ {
-					obj := RunVMIAndExpectLaunch(vmi, false, 120)
+					obj := tests.RunVMIAndExpectLaunch(vmi, false, 120)
 
 					// Verify console on last iteration to verify the VirtualMachineInstance is still booting properly
 					// after being restarted multiple times
@@ -300,10 +290,195 @@ var _ = Describe("Storage", func() {
 					}
 
 					err = virtClient.VirtualMachineInstance(vmi.Namespace).Delete(vmi.Name, &metav1.DeleteOptions{})
-					Expect(err).To(BeNil())
+					Expect(err).ToNot(HaveOccurred())
 
 					tests.WaitForVirtualMachineToDisappearWithTimeout(obj, 120)
 				}
+			})
+		})
+
+		Context("With a HostDisk defined", func() {
+			const hostDiskDir = "/data"
+
+			Context("With 'DiskExistsOrCreate' type", func() {
+				diskName := "disk-" + uuid.NewRandom().String() + ".img"
+				diskPath := filepath.Join(hostDiskDir, diskName)
+				// do not choose a specific node to run the test
+				nodeName := ""
+
+				It("Should create a disk image and start", func() {
+					By("Starting VirtualMachineInstance")
+					vmi := tests.NewRandomVMIWithHostDisk(diskPath, v1.HostDiskExistsOrCreate, nodeName)
+					tests.RunVMIAndExpectLaunch(vmi, false, 30)
+
+					By("Checking if disk.img has been created")
+					vmiPod := tests.GetRunningPodByVirtualMachineInstance(vmi, tests.NamespaceTestDefault)
+					nodeName = vmiPod.Spec.NodeName
+					output, err := tests.ExecuteCommandOnPod(
+						virtClient,
+						vmiPod,
+						vmiPod.Spec.Containers[0].Name,
+						[]string{"find", hostDiskDir, "-name", diskName, "-size", "1G"},
+					)
+					Expect(strings.Contains(output, diskPath)).To(BeTrue())
+
+					err = virtClient.VirtualMachineInstance(vmi.Namespace).Delete(vmi.Name, &metav1.DeleteOptions{})
+					Expect(err).ToNot(HaveOccurred())
+
+					tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
+				})
+
+				AfterEach(func() {
+					if nodeName != "" {
+						tests.RemoveHostDiskImage(diskPath, nodeName)
+					}
+				})
+			})
+
+			Context("With 'DiskExists' type", func() {
+				diskName := "disk-" + uuid.NewRandom().String() + ".img"
+				diskPath := filepath.Join(hostDiskDir, diskName)
+				// it is mandatory to run a pod which is creating a disk image
+				// on the same node with a HostDisk VMI
+				var nodeName string
+
+				BeforeEach(func() {
+					// create a disk image before test
+					job := tests.CreateHostDiskImage(diskPath)
+					job, err = virtClient.CoreV1().Pods(tests.NamespaceTestDefault).Create(job)
+					Expect(err).ToNot(HaveOccurred())
+					getStatus := func() k8sv1.PodPhase {
+						pod, err := virtClient.CoreV1().Pods(tests.NamespaceTestDefault).Get(job.Name, metav1.GetOptions{})
+						Expect(err).ToNot(HaveOccurred())
+						if pod.Spec.NodeName != "" && nodeName == "" {
+							nodeName = pod.Spec.NodeName
+						}
+						return pod.Status.Phase
+					}
+					Eventually(getStatus, 30, 1).Should(Equal(k8sv1.PodSucceeded))
+				})
+
+				It("Should use existing disk image and start", func() {
+					By("Starting VirtualMachineInstance")
+					vmi := tests.NewRandomVMIWithHostDisk(diskPath, v1.HostDiskExists, nodeName)
+					tests.RunVMIAndExpectLaunch(vmi, false, 30)
+
+					By("Checking if disk.img exists")
+					vmiPod := tests.GetRunningPodByVirtualMachineInstance(vmi, tests.NamespaceTestDefault)
+					output, err := tests.ExecuteCommandOnPod(
+						virtClient,
+						vmiPod,
+						vmiPod.Spec.Containers[0].Name,
+						[]string{"find", hostDiskDir, "-name", diskName},
+					)
+					Expect(strings.Contains(output, diskPath)).To(BeTrue())
+
+					err = virtClient.VirtualMachineInstance(vmi.Namespace).Delete(vmi.Name, &metav1.DeleteOptions{})
+					Expect(err).ToNot(HaveOccurred())
+
+					tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
+				})
+
+				AfterEach(func() {
+					tests.RemoveHostDiskImage(diskPath, nodeName)
+				})
+			})
+		})
+
+		Context("With multiple empty PVCs", func() {
+
+			var pvcs = [...]string{"empty-pvc1", "empty-pvc2", "empty-pvc3"}
+
+			BeforeEach(func() {
+				for _, pvc := range pvcs {
+					tests.CreateHostPathPv(pvc, filepath.Join(tests.HostPathBase, pvc))
+					tests.CreatePVC(pvc, "1G")
+				}
+			}, 120)
+
+			AfterEach(func() {
+				for _, pvc := range pvcs {
+					tests.DeletePVC(pvc)
+					tests.DeletePV(pvc)
+				}
+			}, 120)
+
+			It("Should initialize an empty PVC by creating a disk.img", func() {
+				for _, pvc := range pvcs {
+					By("starting VirtualMachineInstance")
+					vmi := tests.NewRandomVMIWithPVC("disk-" + pvc)
+					tests.RunVMIAndExpectLaunch(vmi, false, 90)
+
+					By("Checking if disk.img exists")
+					vmiPod := tests.GetRunningPodByVirtualMachineInstance(vmi, tests.NamespaceTestDefault)
+					output, _ := tests.ExecuteCommandOnPod(
+						virtClient,
+						vmiPod,
+						vmiPod.Spec.Containers[0].Name,
+						[]string{"find", "/var/run/kubevirt-private/vmi-disks/disk0/", "-name", "disk.img", "-size", "1G"},
+					)
+					Expect(strings.Contains(output, "disk.img")).To(BeTrue())
+				}
+			})
+		})
+
+		Context("With Cirros BlockMode PVC", func() {
+
+			pvName := "block-pv-" + rand.String(48)
+
+			BeforeEach(func() {
+				// create a new PV and PVC (PVs can't be reused)
+				tests.CreateBlockVolumePvAndPvc(pvName, "1Gi")
+			}, 60)
+
+			AfterEach(func() {
+				// create a new PV and PVC (PVs can't be reused)
+				tests.DeletePvAndPvc(pvName)
+			}, 60)
+
+			It("should be successfully started", func() {
+				// Start the VirtualMachineInstance with the PVC attached
+				vmi := tests.NewRandomVMIWithPVC(pvName)
+				// Without userdata the hostname isn't set correctly and the login expecter fails...
+				tests.AddUserData(vmi, "cloud-init", "#!/bin/bash\necho 'hello'\n")
+
+				tests.RunVMIAndExpectLaunch(vmi, false, 90)
+
+				By("Checking that the VirtualMachineInstance console has expected output")
+				expecter, err := tests.LoggedInCirrosExpecter(vmi)
+				Expect(err).ToNot(HaveOccurred(), "Cirros login successfully")
+				expecter.Close()
+			})
+		})
+
+		Context("With not existing PVC", func() {
+			It("should get unschedulable condition", func() {
+				// Start the VirtualMachineInstance
+				pvcName := "nonExistingPVC"
+				vmi := tests.NewRandomVMIWithPVC(pvcName)
+
+				tests.RunVMI(vmi, 10)
+
+				virtClient, err := kubecli.GetKubevirtClient()
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() bool {
+					vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
+					Expect(err).ToNot(HaveOccurred())
+
+					if vmi.Status.Phase != v1.Pending {
+						return false
+					}
+					if len(vmi.Status.Conditions) == 0 {
+						return false
+					}
+					Expect(vmi.Status.Conditions[0].Type).To(Equal(v1.VirtualMachineInstanceConditionType(k8sv1.PodScheduled)))
+					Expect(vmi.Status.Conditions[0].Reason).To(Equal(k8sv1.PodReasonUnschedulable))
+					Expect(vmi.Status.Conditions[0].Status).To(Equal(k8sv1.ConditionFalse))
+					Expect(vmi.Status.Conditions[0].Message).To(Equal(fmt.Sprintf("failed to render launch manifest: didn't find PVC %v", pvcName)))
+					return true
+				}, time.Duration(10)*time.Second).Should(Equal(true), "Timed out waiting for VMI to get Unschedulable condition")
+
 			})
 		})
 	})

@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -31,8 +32,6 @@ import (
 	dhcp "github.com/krolaw/dhcp4"
 	dhcpConn "github.com/krolaw/dhcp4/conn"
 	"github.com/vishvananda/netlink"
-
-	"os"
 
 	"kubevirt.io/kubevirt/pkg/log"
 )
@@ -61,6 +60,45 @@ func SingleClientDHCPServer(
 
 	log.Log.Info("Starting SingleClientDHCPServer")
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("reading the pods hostname failed: %v", err)
+	}
+
+	options, err := prepareDHCPOptions(clientMask, routerIP, dnsIPs, routes, searchDomains, mtu, hostname)
+	if err != nil {
+		return err
+	}
+
+	handler := &DHCPHandler{
+		clientIP:      clientIP,
+		clientMAC:     clientMAC,
+		serverIP:      serverIP.To4(),
+		leaseDuration: infiniteLease,
+		options:       options,
+	}
+
+	l, err := dhcpConn.NewUDP4BoundListener(serverIface, ":67")
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+	err = dhcp.Serve(l, handler)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func prepareDHCPOptions(
+	clientMask net.IPMask,
+	routerIP net.IP,
+	dnsIPs [][]byte,
+	routes *[]netlink.Route,
+	searchDomains []string,
+	mtu uint16,
+	hostname string) (dhcp.Options, error) {
+
 	mtuArray := make([]byte, 2)
 	binary.BigEndian.PutUint16(mtuArray, mtu)
 
@@ -79,36 +117,20 @@ func SingleClientDHCPServer(
 
 	searchDomainBytes, err := convertSearchDomainsToBytes(searchDomains)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if searchDomainBytes != nil {
 		dhcpOptions[dhcp.OptionDomainSearch] = searchDomainBytes
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return fmt.Errorf("reading the pods hostname failed: %v", err)
-	}
 	dhcpOptions[dhcp.OptionHostName] = []byte(hostname)
 
-	handler := &DHCPHandler{
-		clientIP:      clientIP,
-		clientMAC:     clientMAC,
-		serverIP:      serverIP.To4(),
-		leaseDuration: infiniteLease,
-		options:       dhcpOptions,
+	// Windows will ask for the domain name and use it for DNS resolution
+	domainName := getDomainName(searchDomains)
+	if len(domainName) > 0 {
+		dhcpOptions[dhcp.OptionDomainName] = []byte(domainName)
 	}
-
-	l, err := dhcpConn.NewUDP4BoundListener(serverIface, ":67")
-	if err != nil {
-		return err
-	}
-	defer l.Close()
-	err = dhcp.Serve(l, handler)
-	if err != nil {
-		return err
-	}
-	return nil
+	return dhcpOptions, nil
 }
 
 type DHCPHandler struct {
@@ -145,6 +167,25 @@ func (h *DHCPHandler) ServeDHCP(p dhcp.Packet, msgType dhcp.MessageType, options
 	}
 }
 
+func sortRoutes(routes []netlink.Route) []netlink.Route {
+	// Default route must come last, otherwise it may not get applied
+	// because there is no route to its gateway yet
+	var sortedRoutes []netlink.Route
+	var defaultRoutes []netlink.Route
+	for _, route := range routes {
+		if route.Dst == nil {
+			defaultRoutes = append(defaultRoutes, route)
+			continue
+		}
+		sortedRoutes = append(sortedRoutes, route)
+	}
+	for _, defaultRoute := range defaultRoutes {
+		sortedRoutes = append(sortedRoutes, defaultRoute)
+	}
+
+	return sortedRoutes
+}
+
 func formClasslessRoutes(routes *[]netlink.Route) (formattedRoutes []byte) {
 	// See RFC4332 for additional information
 	// (https://tools.ietf.org/html/rfc3442)
@@ -154,8 +195,12 @@ func formClasslessRoutes(routes *[]netlink.Route) (formattedRoutes []byte) {
 	//              192.168.1/24, gateway: 192.168.2.3
 	//		would result in the following structure:
 	//      []byte{8, 10, 10, 1, 2, 3, 24, 192, 168, 1, 192, 168, 2, 3}
+	if routes == nil {
+		return []byte{}
+	}
 
-	for _, route := range *routes {
+	sortedRoutes := sortRoutes(*routes)
+	for _, route := range sortedRoutes {
 		if route.Dst == nil {
 			route.Dst = &net.IPNet{
 				IP:   net.IPv4(0, 0, 0, 0),
@@ -225,4 +270,15 @@ func isValidSearchDomain(domain string) bool {
 		return false
 	}
 	return searchDomainValidationRegex.MatchString(domain)
+}
+
+//getDomainName returns the longest search domain entry, which is the most exact equivalent to a domain
+func getDomainName(searchDomains []string) string {
+	selected := ""
+	for _, d := range searchDomains {
+		if len(d) > len(selected) {
+			selected = d
+		}
+	}
+	return selected
 }

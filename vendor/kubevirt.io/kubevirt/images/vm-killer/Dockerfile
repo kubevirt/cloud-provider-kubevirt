@@ -16,9 +16,9 @@
 # Copyright 2017 Red Hat, Inc.
 #
 
-FROM fedora:27
+FROM fedora:28
 
-MAINTAINER "The KubeVirt Project" <kubevirt-dev@googlegroups.com>
+LABEL maintainer="The KubeVirt Project <kubevirt-dev@googlegroups.com>"
 ENV container docker
 
 RUN dnf -y install procps-ng nmap-ncat \

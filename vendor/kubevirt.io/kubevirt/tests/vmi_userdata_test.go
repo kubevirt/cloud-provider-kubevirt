@@ -27,13 +27,14 @@ import (
 	"github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-
+	"github.com/pborman/uuid"
 	kubev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
+	"kubevirt.io/kubevirt/pkg/util/net/dns"
 	"kubevirt.io/kubevirt/tests"
 )
 
@@ -85,6 +86,7 @@ var _ = Describe("CloudInit UserData", func() {
 				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), userData)
 				LaunchVMI(vmi)
 				VerifyUserDataVMI(vmi, []expect.Batcher{
+					&expect.BSnd{S: "\n"},
 					&expect.BExp{R: expectedUserData},
 				}, time.Second*120)
 			})
@@ -142,6 +144,7 @@ var _ = Describe("CloudInit UserData", func() {
 
 				By("executing a user-data script")
 				VerifyUserDataVMI(vmi, []expect.Batcher{
+					&expect.BSnd{S: "\n"},
 					&expect.BExp{R: expectedUserData},
 				}, time.Second*120)
 
@@ -152,7 +155,7 @@ var _ = Describe("CloudInit UserData", func() {
 
 				res, err := expecter.ExpectBatch([]expect.Batcher{
 					&expect.BSnd{S: "hostname\n"},
-					&expect.BExp{R: vmi.Name},
+					&expect.BExp{R: dns.SanitizeHostname(vmi)},
 				}, time.Second*10)
 				log.DefaultLogger().Object(vmi).Infof("%v", res)
 				Expect(err).ToNot(HaveOccurred())
@@ -170,7 +173,7 @@ var _ = Describe("CloudInit UserData", func() {
 				}
 				idx = i
 
-				secretID := fmt.Sprintf("%s-test-secret", vmi.Name)
+				secretID := fmt.Sprintf("%s-test-secret", uuid.NewRandom().String())
 				spec := volume.CloudInitNoCloud
 				spec.UserDataSecretRef = &kubev1.LocalObjectReference{Name: secretID}
 
@@ -195,6 +198,7 @@ var _ = Describe("CloudInit UserData", func() {
 			}
 			LaunchVMI(vmi)
 			VerifyUserDataVMI(vmi, []expect.Batcher{
+				&expect.BSnd{S: "\n"},
 				&expect.BExp{R: expectedUserData},
 			}, time.Second*120)
 

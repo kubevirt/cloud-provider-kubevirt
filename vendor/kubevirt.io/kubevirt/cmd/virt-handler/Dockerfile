@@ -16,10 +16,11 @@
 # Copyright 2017 Red Hat, Inc.
 #
 
-FROM fedora:27
+FROM fedora:28
 
-MAINTAINER "The KubeVirt Project" <kubevirt-dev@googlegroups.com>
+LABEL maintainer="The KubeVirt Project <kubevirt-dev@googlegroups.com>"
 
 COPY virt-handler /usr/bin/virt-handler
+COPY .version /.version
 
 ENTRYPOINT [ "/usr/bin/virt-handler" ]

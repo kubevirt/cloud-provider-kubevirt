@@ -27,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	k8sv1 "k8s.io/api/core/v1"
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
@@ -218,7 +219,7 @@ func TestInfoMessage(t *testing.T) {
 	log.Level(INFO).Log("test", "message")
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[INFO], "Logged line was not INFO level")
+	assert(t, logEntry[1].(string) == LogLevelNames[INFO], "Logged line was not infoLevel level")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
 	assert(t, logEntry[7].(string) == "test", "Component was not logged")
@@ -232,7 +233,7 @@ func TestWarningMessage(t *testing.T) {
 	log.Level(WARNING).Log("test", "message")
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[WARNING], "Logged line was not WARNING level")
+	assert(t, logEntry[1].(string) == LogLevelNames[WARNING], "Logged line was not warningLevel level")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
 	assert(t, logEntry[7].(string) == "test", "Component was not logged")
@@ -246,7 +247,7 @@ func TestErrorMessage(t *testing.T) {
 	log.Level(ERROR).Log("test", "message")
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[ERROR], "Logged line was not ERROR level")
+	assert(t, logEntry[1].(string) == LogLevelNames[ERROR], "Logged line was not errorLevel level")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
 	assert(t, logEntry[7].(string) == "test", "Component was not logged")
@@ -256,11 +257,11 @@ func TestErrorMessage(t *testing.T) {
 func TestCriticalMessage(t *testing.T) {
 	setUp()
 	log := MakeLogger(MockLogger{})
-	log.SetLogLevel(CRITICAL)
-	log.Level(CRITICAL).Log("test", "message")
+	log.SetLogLevel(FATAL)
+	log.Level(FATAL).Log("test", "message")
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[CRITICAL], "Logged line was not CRITICAL level")
+	assert(t, logEntry[1].(string) == LogLevelNames[FATAL], "Logged line was not fatalLevel level")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
 	assert(t, logEntry[7].(string) == "test", "Component was not logged")
@@ -275,7 +276,32 @@ func TestObject(t *testing.T) {
 	log.Object(&vm).Log("test", "message")
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[INFO], "Logged line was not of level INFO")
+	assert(t, logEntry[1].(string) == LogLevelNames[INFO], "Logged line was not of level infoLevel")
+	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
+	assert(t, logEntry[4].(string) == "pos", "Logged line was not pos")
+	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
+	assert(t, logEntry[7].(string) == "test", "Component was not logged")
+	assert(t, logEntry[8].(string) == "namespace", "Logged line did not contain object namespace")
+	assert(t, logEntry[10].(string) == "name", "Logged line did not contain object name")
+	assert(t, logEntry[12].(string) == "kind", "Logged line did not contain object kind")
+	assert(t, logEntry[14].(string) == "uid", "Logged line did not contain UUID")
+	tearDown()
+}
+
+func TestObjectRef(t *testing.T) {
+	setUp()
+	log := MakeLogger(MockLogger{})
+	log.SetLogLevel(INFO)
+	vmRef := &k8sv1.ObjectReference{
+		Kind:      "test",
+		Name:      "test",
+		Namespace: "test",
+		UID:       "test",
+	}
+	log.ObjectRef(vmRef).Log("test", "message")
+	logEntry := logParams[0].([]interface{})
+	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
+	assert(t, logEntry[1].(string) == LogLevelNames[INFO], "Logged line was not of level infoLevel")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[4].(string) == "pos", "Logged line was not pos")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")
@@ -319,7 +345,7 @@ func TestMultipleLevels(t *testing.T) {
 
 	logEntry := logParams[0].([]interface{})
 	assert(t, logEntry[0].(string) == "level", "Logged line did not have level entry")
-	assert(t, logEntry[1].(string) == logLevelNames[WARNING], "Logged line was not of level WARNING")
+	assert(t, logEntry[1].(string) == LogLevelNames[WARNING], "Logged line was not of level warningLevel")
 	assert(t, logEntry[2].(string) == "timestamp", "Logged line is not expected format")
 	assert(t, logEntry[4].(string) == "pos", "Logged line was not pos")
 	assert(t, logEntry[6].(string) == "component", "Logged line is not expected format")

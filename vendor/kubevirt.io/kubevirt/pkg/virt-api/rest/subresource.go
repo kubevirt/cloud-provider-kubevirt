@@ -27,7 +27,6 @@ import (
 
 	"github.com/emicklei/go-restful"
 	"github.com/gorilla/websocket"
-
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,18 +40,45 @@ import (
 	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
+	"kubevirt.io/kubevirt/pkg/util/subresources"
 )
 
 type SubresourceAPIApp struct {
 	VirtCli kubecli.KubevirtClient
 }
 
-func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response *restful.Response, cmd []string) {
+type requestType struct {
+	socketName string
+}
+
+var CONSOLE = requestType{socketName: "serial0"}
+var VNC = requestType{socketName: "vnc"}
+
+func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response *restful.Response, requestType requestType) {
 
 	vmiName := request.PathParameter("name")
 	namespace := request.PathParameter("namespace")
 
-	podName, httpStatusCode, err := app.remoteExecInfo(vmiName, namespace)
+	vmi, code, err := app.fetchVirtualMachineInstance(vmiName, namespace)
+	if err != nil {
+		log.Log.Reason(err).Error("Failed to gather remote exec info for subresource request.")
+		response.WriteError(code, err)
+		return
+	}
+
+	if requestType == VNC {
+		// If there are no graphics devices present, we can't proceed
+		if vmi.Spec.Domain.Devices.AutoattachGraphicsDevice != nil && *vmi.Spec.Domain.Devices.AutoattachGraphicsDevice == false {
+			err := fmt.Errorf("No graphics devices are present.")
+			log.Log.Reason(err).Error("Can't establish VNC connection.")
+			response.WriteError(http.StatusBadRequest, err)
+			return
+		}
+	}
+
+	cmd := []string{"/usr/share/kubevirt/virt-launcher/sock-connector", fmt.Sprintf("/var/run/kubevirt-private/%s/virt-%s", vmi.GetUID(), requestType.socketName)}
+
+	podName, httpStatusCode, err := app.remoteExecInfo(vmi)
 	if err != nil {
 		log.Log.Reason(err).Error("Failed to gather remote exec info for subresource request.")
 		response.WriteError(httpStatusCode, err)
@@ -62,6 +88,10 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  kubecli.WebsocketMessageBufferSize,
 		WriteBufferSize: kubecli.WebsocketMessageBufferSize,
+		CheckOrigin: func(_ *http.Request) bool {
+			return true
+		},
+		Subprotocols: []string{subresources.PlainStreamProtocolName},
 	}
 
 	clientSocket, err := upgrader.Upgrade(response.ResponseWriter, request.Request, nil)
@@ -81,7 +111,7 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 	httpResponseChan := make(chan int)
 	copyErr := make(chan error)
 	go func() {
-		httpCode, err := remoteExecHelper(podName, namespace, cmd, inReader, outWriter)
+		httpCode, err := remoteExecHelper(podName, vmi.Namespace, cmd, inReader, outWriter, requestType)
 		log.Log.Errorf("%v", err)
 		httpResponseChan <- httpCode
 	}()
@@ -111,26 +141,16 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 }
 
 func (app *SubresourceAPIApp) VNCRequestHandler(request *restful.Request, response *restful.Response) {
-
-	vmiName := request.PathParameter("name")
-	namespace := request.PathParameter("namespace")
-
-	cmd := []string{"/usr/share/kubevirt/virt-launcher/sock-connector", fmt.Sprintf("/var/run/kubevirt-private/%s/%s/virt-%s", namespace, vmiName, "vnc")}
-	app.requestHandler(request, response, cmd)
+	app.requestHandler(request, response, VNC)
 }
 
 func (app *SubresourceAPIApp) ConsoleRequestHandler(request *restful.Request, response *restful.Response) {
-	vmiName := request.PathParameter("name")
-	namespace := request.PathParameter("namespace")
-
-	cmd := []string{"/usr/share/kubevirt/virt-launcher/sock-connector", fmt.Sprintf("/var/run/kubevirt-private/%s/%s/virt-%s", namespace, vmiName, "serial0")}
-
-	app.requestHandler(request, response, cmd)
+	app.requestHandler(request, response, CONSOLE)
 }
 
-func (app *SubresourceAPIApp) findPod(namespace string, name string) (string, error) {
+func (app *SubresourceAPIApp) findPod(namespace string, uid string) (string, error) {
 	fieldSelector := fields.ParseSelectorOrDie("status.phase==" + string(k8sv1.PodRunning))
-	labelSelector, err := labels.Parse(fmt.Sprintf(v1.AppLabel+"=virt-launcher,"+v1.DomainLabel+" in (%s)", name))
+	labelSelector, err := labels.Parse(fmt.Sprintf(v1.AppLabel + "=virt-launcher," + v1.CreatedByLabel + "=" + uid))
 	if err != nil {
 		return "", err
 	}
@@ -147,22 +167,26 @@ func (app *SubresourceAPIApp) findPod(namespace string, name string) (string, er
 	return podList.Items[0].ObjectMeta.Name, nil
 }
 
-func (app *SubresourceAPIApp) remoteExecInfo(name string, namespace string) (string, int, error) {
-	podName := ""
+func (app *SubresourceAPIApp) fetchVirtualMachineInstance(name string, namespace string) (*v1.VirtualMachineInstance, int, error) {
 
 	vmi, err := app.VirtCli.VirtualMachineInstance(namespace).Get(name, &k8smetav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return "", http.StatusNotFound, goerror.New(fmt.Sprintf("VirtualMachineInstance %s in namespace %s not found.", name, namespace))
+			return nil, http.StatusNotFound, goerror.New(fmt.Sprintf("VirtualMachineInstance %s in namespace %s not found.", name, namespace))
 		}
-		return podName, http.StatusInternalServerError, err
+		return nil, http.StatusInternalServerError, err
 	}
+	return vmi, 0, nil
+}
+
+func (app *SubresourceAPIApp) remoteExecInfo(vmi *v1.VirtualMachineInstance) (string, int, error) {
+	podName := ""
 
 	if vmi.IsRunning() == false {
 		return podName, http.StatusBadRequest, goerror.New(fmt.Sprintf("Unable to connect to VirtualMachineInstance because phase is %s instead of %s", vmi.Status.Phase, v1.Running))
 	}
 
-	podName, err = app.findPod(namespace, name)
+	podName, err := app.findPod(vmi.Namespace, string(vmi.UID))
 	if err != nil {
 		return podName, http.StatusBadRequest, fmt.Errorf("unable to find matching pod for remote execution: %v", err)
 	}
@@ -170,7 +194,7 @@ func (app *SubresourceAPIApp) remoteExecInfo(name string, namespace string) (str
 	return podName, http.StatusOK, nil
 }
 
-func remoteExecHelper(podName string, namespace string, cmd []string, in io.Reader, out io.Writer) (int, error) {
+func remoteExecHelper(podName string, namespace string, cmd []string, in io.Reader, out io.Writer, requestType requestType) (int, error) {
 
 	config, err := kubecli.GetConfig()
 	if err != nil {
@@ -194,13 +218,15 @@ func remoteExecHelper(podName string, namespace string, cmd []string, in io.Read
 		SubResource("exec").
 		Param("container", containerName)
 
+	tty := requestType == CONSOLE
+
 	req = req.VersionedParams(&k8sv1.PodExecOptions{
 		Container: containerName,
 		Command:   cmd,
 		Stdin:     true,
 		Stdout:    true,
 		Stderr:    true,
-		TTY:       true,
+		TTY:       tty,
 	}, scheme.ParameterCodec)
 
 	// execute request

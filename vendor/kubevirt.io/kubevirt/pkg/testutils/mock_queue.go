@@ -2,14 +2,15 @@ package testutils
 
 import (
 	"sync"
+	"sync/atomic"
 
+	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/cache/testing"
 	"k8s.io/client-go/util/workqueue"
 
-	k8sv1 "k8s.io/api/core/v1"
-
+	cdiv1 "kubevirt.io/containerized-data-importer/pkg/apis/datavolumecontroller/v1alpha1"
 	"kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
@@ -32,7 +33,8 @@ a controller is set up, and an execution will process this scenario.
 */
 type MockWorkQueue struct {
 	workqueue.RateLimitingInterface
-	addWG *sync.WaitGroup
+	addWG            *sync.WaitGroup
+	rateLimitedEnque int32
 }
 
 func (q *MockWorkQueue) Add(obj interface{}) {
@@ -40,6 +42,15 @@ func (q *MockWorkQueue) Add(obj interface{}) {
 	if q.addWG != nil {
 		q.addWG.Done()
 	}
+}
+
+func (q *MockWorkQueue) AddRateLimited(item interface{}) {
+	q.RateLimitingInterface.AddRateLimited(item)
+	atomic.AddInt32(&q.rateLimitedEnque, 1)
+}
+
+func (q *MockWorkQueue) GetRateLimitedEnqueueCount() int {
+	return int(atomic.LoadInt32(&q.rateLimitedEnque))
 }
 
 // ExpectAdds allows setting the amount of expected enqueues.
@@ -58,7 +69,7 @@ func (q *MockWorkQueue) Wait() {
 }
 
 func NewMockWorkQueue(queue workqueue.RateLimitingInterface) *MockWorkQueue {
-	return &MockWorkQueue{queue, nil}
+	return &MockWorkQueue{queue, nil, 0}
 }
 
 func NewFakeInformerFor(obj runtime.Object) (cache.SharedIndexInformer, *framework.FakeControllerSource) {
@@ -152,6 +163,36 @@ func (v *DomainFeeder) Delete(vmi *api.Domain) {
 
 func NewDomainFeeder(queue *MockWorkQueue, source *framework.FakeControllerSource) *DomainFeeder {
 	return &DomainFeeder{
+		MockQueue: queue,
+		Source:    source,
+	}
+}
+
+type DataVolumeFeeder struct {
+	MockQueue *MockWorkQueue
+	Source    *framework.FakeControllerSource
+}
+
+func (v *DataVolumeFeeder) Add(dataVolume *cdiv1.DataVolume) {
+	v.MockQueue.ExpectAdds(1)
+	v.Source.Add(dataVolume)
+	v.MockQueue.Wait()
+}
+
+func (v *DataVolumeFeeder) Modify(dataVolume *cdiv1.DataVolume) {
+	v.MockQueue.ExpectAdds(1)
+	v.Source.Modify(dataVolume)
+	v.MockQueue.Wait()
+}
+
+func (v *DataVolumeFeeder) Delete(dataVolume *cdiv1.DataVolume) {
+	v.MockQueue.ExpectAdds(1)
+	v.Source.Delete(dataVolume)
+	v.MockQueue.Wait()
+}
+
+func NewDataVolumeFeeder(queue *MockWorkQueue, source *framework.FakeControllerSource) *DataVolumeFeeder {
+	return &DataVolumeFeeder{
 		MockQueue: queue,
 		Source:    source,
 	}

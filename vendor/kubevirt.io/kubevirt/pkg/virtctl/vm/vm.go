@@ -21,12 +21,12 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/clientcmd"
-
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/virtctl/templates"
@@ -39,8 +39,8 @@ const (
 
 func NewStartCommand(clientConfig clientcmd.ClientConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "start (vmi)",
-		Short:   "Start a virtual machine which is managed by an offline virtual machine.",
+		Use:     "start (VM)",
+		Short:   "Start a virtual machine.",
 		Example: usage(COMMAND_START),
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,9 +53,9 @@ func NewStartCommand(clientConfig clientcmd.ClientConfig) *cobra.Command {
 }
 
 func NewStopCommand(clientConfig clientcmd.ClientConfig) *cobra.Command {
-	return &cobra.Command{
-		Use:     "stop (vmi)",
-		Short:   "Stop a virtual machine which is managed by an offline virtual machine.",
+	cmd := &cobra.Command{
+		Use:     "stop (VM)",
+		Short:   "Stop a virtual machine.",
 		Example: usage(COMMAND_STOP),
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -63,6 +63,8 @@ func NewStopCommand(clientConfig clientcmd.ClientConfig) *cobra.Command {
 			return c.Run(cmd, args)
 		},
 	}
+	cmd.SetUsageTemplate(templates.UsageTemplate())
+	return cmd
 }
 
 type Command struct {
@@ -75,8 +77,8 @@ func NewCommand(command string) *Command {
 }
 
 func usage(cmd string) string {
-	usage := "#Start a virtual machine called 'myvmi':\n"
-	usage += fmt.Sprintf("virtctl %s myvmi", cmd)
+	usage := fmt.Sprintf("  # %s a virtual machine called 'myvm':\n", strings.Title(cmd))
+	usage += fmt.Sprintf("  virtctl %s myvm", cmd)
 	return usage
 }
 
@@ -125,5 +127,6 @@ func (o *Command) Run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Error: VirtualMachineInstance '%s' is already %s", vmiName, stateMsg)
 	}
 
+	cmd.Printf("VM %s was scheduled to %s\n", vmiName, o.command)
 	return nil
 }

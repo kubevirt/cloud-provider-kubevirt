@@ -16,14 +16,15 @@
 # Copyright 2017 Red Hat, Inc.
 #
 
-FROM fedora:27
+FROM fedora:28
 
-MAINTAINER "The KubeVirt Project" <kubevirt-dev@googlegroups.com>
+LABEL maintainer="The KubeVirt Project <kubevirt-dev@googlegroups.com>"
 
 # Create non-root user
 RUN useradd -u 1001 --create-home -s /bin/bash virt-controller
 WORKDIR /home/virt-controller
 USER 1001
 COPY virt-controller /usr/bin/virt-controller
+COPY .version /.version
 
 ENTRYPOINT [ "/usr/bin/virt-controller" ]

@@ -51,7 +51,8 @@ var exampleJSON = `{
       },
       "cpu": {
         "cores": 3,
-        "model": "Conroe"
+        "model": "Conroe",
+        "dedicatedCpuPlacement": true
       },
       "machine": {
         "type": "q35"
@@ -125,7 +126,8 @@ var exampleJSON = `{
             "volumeName": "volume0",
             "disk": {
               "bus": "virtio"
-            }
+            },
+            "dedicatedIOThread": true
           },
           {
             "name": "cdrom0",
@@ -166,8 +168,11 @@ var exampleJSON = `{
             "name": "default",
             {{.InterfaceConfig}}
           }
-        ]
-      }
+        ],
+        "rng": {},
+        "blockMultiQueue": true
+      },
+      "ioThreadsPolicy": "shared"
     },
     "volumes": [
       {
@@ -207,6 +212,7 @@ var _ = Describe("Schema", func() {
 
 	BeforeEach(func() {
 		exampleVMI = NewMinimalVMI("testvmi")
+
 		exampleVMI.Spec.Domain.Devices.Disks = []Disk{
 			{
 				Name:       "disk0",
@@ -217,6 +223,7 @@ var _ = Describe("Schema", func() {
 						ReadOnly: false,
 					},
 				},
+				DedicatedIOThread: _true,
 			},
 			{
 				Name:       "cdrom0",
@@ -261,6 +268,9 @@ var _ = Describe("Schema", func() {
 				},
 			},
 		}
+
+		exampleVMI.Spec.Domain.Devices.Rng = &Rng{}
+		exampleVMI.Spec.Domain.Devices.BlockMultiQueue = _true
 
 		exampleVMI.Spec.Volumes = []Volume{
 			{
@@ -323,6 +333,7 @@ var _ = Describe("Schema", func() {
 		exampleVMI.Spec.Domain.CPU = &CPU{
 			Cores: 3,
 			Model: "Conroe",
+			DedicatedCPUPlacement: true,
 		}
 		exampleVMI.Spec.Networks = []Network{
 			Network{
@@ -332,6 +343,8 @@ var _ = Describe("Schema", func() {
 				},
 			},
 		}
+		policy := IOThreadsPolicyShared
+		exampleVMI.Spec.Domain.IOThreadsPolicy = &policy
 
 		SetObjectDefaults_VirtualMachineInstance(exampleVMI)
 	})

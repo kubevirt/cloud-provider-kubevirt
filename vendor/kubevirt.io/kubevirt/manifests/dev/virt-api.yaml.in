@@ -35,12 +35,13 @@ spec:
                   ]
       labels:
         kubevirt.io: virt-api
+        prometheus.kubevirt.io: ""
     spec:
       serviceAccountName: kubevirt-apiserver
       containers:
         - name: virt-api
           image: {{.DockerPrefix}}/virt-api:{{.DockerTag}}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{.ImagePullPolicy}}
           command:
               - "virt-api"
               - "--port"
@@ -49,6 +50,9 @@ spec:
           ports:
             - containerPort: 8443
               name: "virt-api"
+              protocol: "TCP"
+            - containerPort: 8443
+              name: "metrics"
               protocol: "TCP"
           readinessProbe:
             tcpSocket:

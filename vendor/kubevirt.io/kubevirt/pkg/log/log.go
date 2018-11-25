@@ -21,40 +21,47 @@ package log
 
 import (
 	"errors"
+	goflag "flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/go-kit/kit/log"
+	"github.com/golang/glog"
+	flag "github.com/spf13/pflag"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 )
 
-var lock sync.Mutex
-
-type logLevel int
-
 const (
-	INFO logLevel = iota
-	WARNING
-	ERROR
-	CRITICAL
+	libvirtTimestampFormat = "2006-01-02 15:04:05.999-0700"
 )
 
-var logLevelNames = map[logLevel]string{
-	INFO:     "info",
-	WARNING:  "warning",
-	ERROR:    "error",
-	CRITICAL: "critical",
+type LogLevel int32
+
+const (
+	INFO LogLevel = iota
+	WARNING
+	ERROR
+	FATAL
+)
+
+var LogLevelNames = map[LogLevel]string{
+	INFO:    "info",
+	WARNING: "warning",
+	ERROR:   "error",
+	FATAL:   "fatal",
 }
+
+var lock sync.Mutex
 
 type LoggableObject interface {
 	metav1.ObjectMetaAccessor
@@ -64,8 +71,8 @@ type LoggableObject interface {
 type FilteredLogger struct {
 	logContext            *log.Context
 	component             string
-	filterLevel           logLevel
-	currentLogLevel       logLevel
+	filterLevel           LogLevel
+	currentLogLevel       LogLevel
 	verbosityLevel        int
 	currentVerbosityLevel int
 	err                   error
@@ -76,20 +83,27 @@ var Log = DefaultLogger()
 func InitializeLogging(comp string) {
 	defaultComponent = comp
 	Log = DefaultLogger()
+	glog.CopyStandardLogTo(LogLevelNames[INFO])
+	goflag.CommandLine.Set("component", comp)
+	goflag.CommandLine.Set("logtostderr", "true")
+}
+
+func getDefaultVerbosity() int {
+	if verbosityFlag := flag.Lookup("v"); verbosityFlag != nil {
+		defaultVerbosity, _ := strconv.Atoi(verbosityFlag.Value.String())
+		return defaultVerbosity
+	} else {
+		// "the practical default level is V(2)"
+		// see https://github.com/kubernetes/community/blob/master/contributors/devel/logging.md
+		return 2
+	}
 }
 
 // Wrap a go-kit logger in a FilteredLogger. Not cached
 func MakeLogger(logger log.Logger) *FilteredLogger {
 	defaultLogLevel := INFO
 
-	if verbosityFlag := flag.Lookup("v"); verbosityFlag != nil {
-		defaultVerbosity, _ = strconv.Atoi(verbosityFlag.Value.String())
-	} else {
-		// "the practical default level is V(2)"
-		// see https://github.com/kubernetes/community/blob/master/contributors/devel/logging.md
-		defaultVerbosity = 2
-	}
-
+	defaultVerbosity = getDefaultVerbosity()
 	// This verbosity will be used for info logs without setting a custom verbosity level
 	defaultCurrentVerbosity := 2
 
@@ -116,7 +130,7 @@ func createLogger(component string) {
 	defer lock.Unlock()
 	_, ok := loggers[component]
 	if ok == false {
-		logger := log.NewLogfmtLogger(os.Stderr)
+		logger := log.NewJSONLogger(os.Stderr)
 		log := MakeLogger(logger)
 		log.component = component
 		loggers[component] = log
@@ -135,8 +149,11 @@ func DefaultLogger() *FilteredLogger {
 	return Logger(defaultComponent)
 }
 
+// SetIOWriter is meant to be used for testing. "log" and "glog" logs are sent to /dev/nil.
+// KubeVirt related log messages will be sent to this writer
 func (l *FilteredLogger) SetIOWriter(w io.Writer) {
-	l.logContext = log.NewContext(log.NewLogfmtLogger(w))
+	l.logContext = log.NewContext(log.NewJSONLogger(w))
+	goflag.CommandLine.Set("logtostderr", "false")
 }
 
 func (l *FilteredLogger) SetLogger(logger log.Logger) *FilteredLogger {
@@ -176,7 +193,7 @@ func (l FilteredLogger) log(skipFrames int, params ...interface{}) error {
 		logParams := make([]interface{}, 0, 8)
 
 		logParams = append(logParams,
-			"level", logLevelNames[l.currentLogLevel],
+			"level", LogLevelNames[l.currentLogLevel],
 			"timestamp", now.Format("2006-01-02T15:04:05.000000Z"),
 			"pos", fmt.Sprintf("%s:%d", filepath.Base(fileName), lineNumber),
 			"component", l.component,
@@ -226,6 +243,24 @@ func (l FilteredLogger) Object(obj LoggableObject) *FilteredLogger {
 	return &l
 }
 
+func (l FilteredLogger) ObjectRef(obj *v1.ObjectReference) *FilteredLogger {
+
+	if obj == nil {
+		return &l
+	}
+
+	logParams := make([]interface{}, 0)
+	if obj.Namespace != "" {
+		logParams = append(logParams, "namespace", obj.Namespace)
+	}
+	logParams = append(logParams, "name", obj.Name)
+	logParams = append(logParams, "kind", obj.Kind)
+	logParams = append(logParams, "uid", obj.UID)
+
+	l.With(logParams...)
+	return &l
+}
+
 func (l *FilteredLogger) With(obj ...interface{}) *FilteredLogger {
 	l.logContext = l.logContext.With(obj...)
 	return l
@@ -236,12 +271,12 @@ func (l *FilteredLogger) WithPrefix(obj ...interface{}) *FilteredLogger {
 	return l
 }
 
-func (l *FilteredLogger) SetLogLevel(filterLevel logLevel) error {
-	if (filterLevel >= INFO) && (filterLevel <= CRITICAL) {
+func (l *FilteredLogger) SetLogLevel(filterLevel LogLevel) error {
+	if (filterLevel >= INFO) && (filterLevel <= FATAL) {
 		l.filterLevel = filterLevel
 		return nil
 	}
-	return errors.New(fmt.Sprintf("Log level %d does not exist", filterLevel))
+	return fmt.Errorf("Log level %d does not exist", filterLevel)
 }
 
 func (l *FilteredLogger) SetVerbosityLevel(level int) error {
@@ -267,7 +302,7 @@ func (l FilteredLogger) Reason(err error) *FilteredLogger {
 	return &l
 }
 
-func (l FilteredLogger) Level(level logLevel) *FilteredLogger {
+func (l FilteredLogger) Level(level LogLevel) *FilteredLogger {
 	l.currentLogLevel = level
 	return &l
 }
@@ -297,9 +332,70 @@ func (l FilteredLogger) Errorf(msg string, args ...interface{}) {
 }
 
 func (l FilteredLogger) Critical(msg string) {
-	l.Level(CRITICAL).msg(msg)
+	l.Level(FATAL).msg(msg)
 }
 
 func (l FilteredLogger) Criticalf(msg string, args ...interface{}) {
-	l.Level(CRITICAL).msgf(msg, args...)
+	l.Level(FATAL).msgf(msg, args...)
+}
+
+func LogLibvirtLogLine(logger *FilteredLogger, line string) {
+
+	if len(strings.TrimSpace(line)) == 0 {
+		return
+	}
+
+	fragments := strings.SplitN(line, ": ", 5)
+	if len(fragments) < 4 {
+		now := time.Now()
+		logger.logContext.Log(
+			"level", "info",
+			"timestamp", now.Format("2006-01-02T15:04:05.000000Z"),
+			"component", logger.component,
+			"subcomponent", "libvirt",
+			"msg", line,
+		)
+		return
+	}
+	severity := strings.ToLower(strings.TrimSpace(fragments[2]))
+
+	if severity == "debug" {
+		severity = "info"
+	}
+
+	t, err := time.Parse(libvirtTimestampFormat, strings.TrimSpace(fragments[0]))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	pos := strings.TrimSpace(fragments[3])
+	msg := strings.TrimSpace(fragments[4])
+
+	// check if we really got a position
+	isPos := false
+	if split := strings.Split(pos, ":"); len(split) == 2 {
+		if _, err := strconv.Atoi(split[1]); err == nil {
+			isPos = true
+		}
+	}
+
+	if !isPos {
+		msg = strings.TrimSpace(fragments[3] + ": " + fragments[4])
+		logger.logContext.Log(
+			"level", severity,
+			"timestamp", t.Format("2006-01-02T15:04:05.000000Z"),
+			"component", logger.component,
+			"subcomponent", "libvirt",
+			"msg", msg,
+		)
+	} else {
+		logger.logContext.Log(
+			"level", severity,
+			"timestamp", t.Format("2006-01-02T15:04:05.000000Z"),
+			"pos", pos,
+			"component", logger.component,
+			"subcomponent", "libvirt",
+			"msg", msg,
+		)
+	}
 }

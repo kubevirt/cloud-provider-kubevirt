@@ -43,17 +43,37 @@ func WatchdogFileFromNamespaceName(baseDir string, namespace string, name string
 	return filepath.Join(baseDir, "watchdog-files", watchdogFile)
 }
 
+// attempts to retrieve vmi uid from watchdog file if it exists
+func WatchdogFileGetUid(baseDir string, vmi *v1.VirtualMachineInstance) string {
+	namespace := precond.MustNotBeEmpty(vmi.GetObjectMeta().GetNamespace())
+	domain := precond.MustNotBeEmpty(vmi.GetObjectMeta().GetName())
+
+	filePath := WatchdogFileFromNamespaceName(baseDir, namespace, domain)
+
+	b, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+
+	return string(b)
+}
+
 func WatchdogFileRemove(baseDir string, vmi *v1.VirtualMachineInstance) error {
 	namespace := precond.MustNotBeEmpty(vmi.GetObjectMeta().GetNamespace())
 	domain := precond.MustNotBeEmpty(vmi.GetObjectMeta().GetName())
 
 	file := WatchdogFileFromNamespaceName(baseDir, namespace, domain)
 
+	log.Log.V(3).Infof("Remove watchdog file %s", file)
 	return diskutils.RemoveFile(file)
 }
 
-func WatchdogFileUpdate(watchdogFile string) error {
+func WatchdogFileUpdate(watchdogFile string, uid string) error {
 	f, err := os.Create(watchdogFile)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(uid)
 	if err != nil {
 		return err
 	}

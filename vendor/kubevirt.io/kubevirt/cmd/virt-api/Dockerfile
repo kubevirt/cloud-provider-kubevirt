@@ -16,9 +16,9 @@
 # Copyright 2018 Red Hat, Inc.
 #
 
-FROM fedora:27
+FROM fedora:28
 
-MAINTAINER "The KubeVirt Project" <kubevirt-dev@googlegroups.com>
+LABEL maintainer="The KubeVirt Project <kubevirt-dev@googlegroups.com>"
 
 # Create non-root user
 RUN useradd -u 1001 --create-home -s /bin/bash virt-api
@@ -26,5 +26,6 @@ WORKDIR /home/virt-api
 USER 1001
 
 COPY virt-api /usr/bin/virt-api
+COPY .version /.version
 
 ENTRYPOINT [ "/usr/bin/virt-api" ]

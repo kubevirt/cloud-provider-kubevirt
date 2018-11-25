@@ -22,7 +22,9 @@ package kubecli
 
 import (
 	"flag"
+	"os"
 
+	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
@@ -31,10 +33,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"os"
-
-	"github.com/spf13/pflag"
-
+	cdiclient "kubevirt.io/containerized-data-importer/pkg/client/clientset/versioned"
 	"kubevirt.io/kubevirt/pkg/api/v1"
 )
 
@@ -69,7 +68,19 @@ func GetKubevirtSubresourceClientFromFlags(master string, kubeconfig string) (Ku
 		return nil, err
 	}
 
-	return &kubevirt{master, kubeconfig, restClient, config, coreClient}, nil
+	cdiClient, err := cdiclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &kubevirt{
+		master,
+		kubeconfig,
+		restClient,
+		config,
+		cdiClient,
+		coreClient,
+	}, nil
 }
 
 // DefaultClientConfig creates a clientcmd.ClientConfig with the following hierarchy:
@@ -144,9 +155,12 @@ var GetKubevirtClientFromClientConfig = func(cmdConfig clientcmd.ClientConfig) (
 
 func GetKubevirtClientFromRESTConfig(config *rest.Config) (KubevirtClient, error) {
 	config.GroupVersion = &v1.GroupVersion
-	config.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: scheme.Codecs}
+	config.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: v1.Codecs}
 	config.APIPath = "/apis"
 	config.ContentType = runtime.ContentTypeJSON
+	if config.UserAgent == "" {
+		config.UserAgent = restclient.DefaultKubernetesUserAgent()
+	}
 
 	restClient, err := rest.RESTClientFor(config)
 	if err != nil {
@@ -158,7 +172,19 @@ func GetKubevirtClientFromRESTConfig(config *rest.Config) (KubevirtClient, error
 		return nil, err
 	}
 
-	return &kubevirt{master, kubeconfig, restClient, config, coreClient}, nil
+	cdiClient, err := cdiclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &kubevirt{
+		master,
+		kubeconfig,
+		restClient,
+		config,
+		cdiClient,
+		coreClient,
+	}, nil
 }
 
 func GetKubevirtClientFromFlags(master string, kubeconfig string) (KubevirtClient, error) {

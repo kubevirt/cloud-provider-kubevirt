@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Copyright 2017 Red Hat, Inc.
+ * Copyright 2017, 2018 Red Hat, Inc.
  *
  */
 
@@ -25,12 +25,66 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type IOThreadsPolicy string
+
+const (
+	IOThreadsPolicyShared IOThreadsPolicy = "shared"
+	IOThreadsPolicyAuto   IOThreadsPolicy = "auto"
+)
+
 //go:generate swagger-doc
 //go:generate openapi-gen -i . --output-package=kubevirt.io/kubevirt/pkg/api/v1  --go-header-file ../../../hack/boilerplate/boilerplate.go.txt
 
 /*
  ATTENTION: Rerun code generators when comments on structs or fields are modified.
 */
+
+// Represents a disk created on the cluster level
+// ---
+// +k8s:openapi-gen=true
+type HostDisk struct {
+	// The path to HostDisk image located on the cluster
+	Path string `json:"path"`
+	// Contains information if disk.img exists or should be created
+	// allowed options are 'Disk' and 'DiskOrCreate'
+	Type HostDiskType `json:"type"`
+	// Capacity of the sparse disk
+	// +optional
+	Capacity resource.Quantity `json:"capacity,omitempty"`
+}
+
+// ConfigMapVolumeSource adapts a ConfigMap into a volume.
+// More info: https://kubernetes.io/docs/concepts/storage/volumes/#configmap
+// ---
+// +k8s:openapi-gen=true
+type ConfigMapVolumeSource struct {
+	v1.LocalObjectReference `json:",inline"`
+	// Specify whether the ConfigMap or it's keys must be defined
+	// +optional
+	Optional *bool `json:"optional,omitempty"`
+}
+
+// SecretVolumeSource adapts a Secret into a volume.
+// ---
+// +k8s:openapi-gen=true
+type SecretVolumeSource struct {
+	// Name of the secret in the pod's namespace to use.
+	// More info: https://kubernetes.io/docs/concepts/storage/volumes#secret
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+	// Specify whether the Secret or it's keys must be defined
+	// +optional
+	Optional *bool `json:"optional,omitempty"`
+}
+
+// ServiceAccountVolumeSource adapts a ServiceAccount into a volume.
+// ---
+// +k8s:openapi-gen=true
+type ServiceAccountVolumeSource struct {
+	// Name of the service account in the pod's namespace to use.
+	// More info: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+}
 
 // Represents a cloud-init nocloud user data source.
 // More info: http://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html
@@ -73,34 +127,11 @@ type DomainSpec struct {
 	Features *Features `json:"features,omitempty"`
 	// Devices allows adding disks, network interfaces, ...
 	Devices Devices `json:"devices"`
-}
-
-// ---
-// +k8s:openapi-gen=true
-type DomainPresetSpec struct {
-	// Resources describes the Compute Resources required by this vmi.
-	Resources ResourceRequirements `json:"resources,omitempty"`
-	// CPU allow specified the detailed CPU topology inside the vmi.
+	// Controls whether or not disks will share IOThreads.
+	// Omitting IOThreadsPolicy disables use of IOThreads.
+	// One of: shared, auto
 	// +optional
-	CPU *CPU `json:"cpu,omitempty"`
-	// Memory allow specifying the VMI memory features.
-	// +optional
-	Memory *Memory `json:"memory,omitempty"`
-	// Machine type.
-	// +optional
-	Machine Machine `json:"machine,omitempty"`
-	// Firmware.
-	// +optional
-	Firmware *Firmware `json:"firmware,omitempty"`
-	// Clock sets the clock and timers of the vmi.
-	// +optional
-	Clock *Clock `json:"clock,omitempty"`
-	// Features like acpi, apic, hyperv.
-	// +optional
-	Features *Features `json:"features,omitempty"`
-	// Devices allows adding disks, network interfaces, ...
-	// +optional
-	Devices Devices `json:"devices,omitempty"`
+	IOThreadsPolicy *IOThreadsPolicy `json:"ioThreadsPolicy,omitempty"`
 }
 
 // ---
@@ -114,6 +145,10 @@ type ResourceRequirements struct {
 	// Valid resource keys are "memory" and "cpu".
 	// +optional
 	Limits v1.ResourceList `json:"limits,omitempty"`
+	// Don't ask the scheduler to take the guest-management overhead into account. Instead
+	// put the overhead only into the requested memory limits. This can lead to crashes if
+	// all memory is in use on a node. Defaults to false.
+	OvercommitGuestOverhead bool `json:"overcommitGuestOverhead,omitempty"`
 }
 
 // CPU allows specifying the CPU topology.
@@ -125,8 +160,16 @@ type CPU struct {
 	Cores uint32 `json:"cores,omitempty"`
 	// Model specifies the CPU model inside the VMI.
 	// List of available models https://github.com/libvirt/libvirt/blob/master/src/cpu/cpu_map.xml.
+	// It is possible to specify special cases like "host-passthrough" to get the same CPU as the node
+	// and "host-model" to get CPU closest to the node one.
+	// For more information see https://libvirt.org/formatdomain.html#elementsCPU.
+	// Defaults to host-model.
 	// +optional
 	Model string `json:"model,omitempty"`
+	// DedicatedCPUPlacement requests the scheduler to place the VirtualMachineInstance on a node
+	// with enough dedicated pCPUs and pin the vCPUs to it.
+	// +optional
+	DedicatedCPUPlacement bool `json:"dedicatedCpuPlacement,omitempty"`
 }
 
 // Memory allows specifying the VirtualMachineInstance memory features.
@@ -136,6 +179,11 @@ type Memory struct {
 	// Hugepages allow to use hugepages for the VirtualMachineInstance instead of regular memory.
 	// +optional
 	Hugepages *Hugepages `json:"hugepages,omitempty"`
+	// Guest allows to specifying the amount of memory which is visible inside the Guest OS.
+	// The Guest must lie between Requests and Limits from the resources section.
+	// Defaults to the requested memory in the resources section if not specified.
+	// + optional
+	Guest *resource.Quantity `json:"guest,omitempty"`
 }
 
 // Hugepages allow to use hugepages for the VirtualMachineInstance instead of regular memory.
@@ -168,8 +216,22 @@ type Devices struct {
 	Disks []Disk `json:"disks,omitempty"`
 	// Watchdog describes a watchdog device which can be added to the vmi.
 	Watchdog *Watchdog `json:"watchdog,omitempty"`
-	// Interfaces describe network interfaces which are added to the vm.
+	// Interfaces describe network interfaces which are added to the vmi.
 	Interfaces []Interface `json:"interfaces,omitempty"`
+	// Whether to attach a pod network interface. Defaults to true.
+	AutoattachPodInterface *bool `json:"autoattachPodInterface,omitempty"`
+	// Whether to attach the default graphics device or not.
+	// VNC will not be available if set to false. Defaults to true.
+	AutoattachGraphicsDevice *bool `json:"autoattachGraphicsDevice,omitempty"`
+	// Whether to have random number generator from host
+	// +optional
+	Rng *Rng `json:"rng,omitempty"`
+	// Whether or not to enable virtio multi-queue for block devices
+	// +optional
+	BlockMultiQueue *bool `json:"blockMultiQueue,omitempty"`
+	// If specified, virtual network interfaces configured with a virtio bus will also enable the vhost multiqueue feature
+	// +optional
+	NetworkInterfaceMultiQueue *bool `json:"networkInterfaceMultiqueue,omitempty"`
 }
 
 // ---
@@ -185,12 +247,21 @@ type Disk struct {
 	DiskDevice `json:",inline"`
 	// BootOrder is an integer value > 0, used to determine ordering of boot devices.
 	// Lower values take precedence.
+	// Each disk or interface that has a boot order must have a unique value.
 	// Disks without a boot order are not tried if a disk with a boot order exists.
 	// +optional
 	BootOrder *uint `json:"bootOrder,omitempty"`
 	// Serial provides the ability to specify a serial number for the disk device.
 	// +optional
 	Serial string `json:"serial,omitempty"`
+	// dedicatedIOThread indicates this disk should have an exclusive IO Thread.
+	// Enabling this implies useIOThreads = true.
+	// Defaults to false.
+	// +optional
+	DedicatedIOThread *bool `json:"dedicatedIOThread,omitempty"`
+	// Cache specifies which kvm disk cache mode should be used.
+	// +optional
+	Cache DriverCache `json:"cache,omitempty"`
 }
 
 // Represents the target of a volume to mount.
@@ -217,6 +288,9 @@ type DiskTarget struct {
 	// ReadOnly.
 	// Defaults to false.
 	ReadOnly bool `json:"readonly,omitempty"`
+	// If specified, the virtual disk will be placed on the guests pci address with the specifed PCI address. For example: 0000:81:01.10
+	// +optional
+	PciAddress string `json:"pciAddress,omitempty"`
 }
 
 // ---
@@ -289,6 +363,9 @@ type Volume struct {
 // ---
 // +k8s:openapi-gen=true
 type VolumeSource struct {
+	// HostDisk represents a disk created on the cluster level
+	// +optional
+	HostDisk *HostDisk `json:"hostDisk,omitempty"`
 	// PersistentVolumeClaimVolumeSource represents a reference to a PersistentVolumeClaim in the same namespace.
 	// Directly attached to the vmi via qemu.
 	// More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#persistentvolumeclaims
@@ -310,6 +387,30 @@ type VolumeSource struct {
 	// More info: https://kubevirt.gitbooks.io/user-guide/disks-and-volumes.html
 	// +optional
 	EmptyDisk *EmptyDiskSource `json:"emptyDisk,omitempty"`
+	// DataVolume represents the dynamic creation a PVC for this volume as well as
+	// the process of populating that PVC with a disk image.
+	// +optional
+	DataVolume *DataVolumeSource `json:"dataVolume,omitempty"`
+	// ConfigMapSource represents a reference to a ConfigMap in the same namespace.
+	// More info: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+	// +optional
+	ConfigMap *ConfigMapVolumeSource `json:"configMap,omitempty"`
+	// SecretVolumeSource represents a reference to a secret data in the same namespace.
+	// More info: https://kubernetes.io/docs/concepts/configuration/secret/
+	// +optional
+	Secret *SecretVolumeSource `json:"secret,omitempty"`
+	// ServiceAccountVolumeSource represents a reference to a service account.
+	// There can only be one volume of this type!
+	// More info: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+	// +optional
+	ServiceAccount *ServiceAccountVolumeSource `json:"serviceAccount,omitempty"`
+}
+
+// ---
+// +k8s:openapi-gen=true
+type DataVolumeSource struct {
+	// Name represents the name of the DataVolume in the same namespace
+	Name string `json:"name"`
 }
 
 // ---
@@ -684,6 +785,15 @@ type Interface struct {
 	Ports []Port `json:"ports,omitempty"`
 	// Interface MAC address. For example: de:ad:00:00:be:af or DE-AD-00-00-BE-AF.
 	MacAddress string `json:"macAddress,omitempty"`
+	// BootOrder is an integer value > 0, used to determine ordering of boot devices.
+	// Lower values take precedence.
+	// Each interface or disk that has a boot order must have a unique value.
+	// Interfaces without a boot order are not tried.
+	// +optional
+	BootOrder *uint `json:"bootOrder,omitempty"`
+	// If specified, the virtual network interface will be placed on the guests pci address with the specifed PCI address. For example: 0000:81:01.10
+	// +optional
+	PciAddress string `json:"pciAddress,omitempty"`
 }
 
 // Represents the method which will be used to connect the interface to the guest.
@@ -741,7 +851,9 @@ type Network struct {
 // ---
 // +k8s:openapi-gen=true
 type NetworkSource struct {
-	Pod *PodNetwork `json:"pod,omitempty"`
+	Pod    *PodNetwork `json:"pod,omitempty"`
+	Multus *CniNetwork `json:"multus,omitempty"`
+	Genie  *CniNetwork `json:"genie,omitempty"`
 }
 
 // Represents the stock pod network interface.
@@ -751,4 +863,19 @@ type PodNetwork struct {
 	// CIDR for vm network.
 	// Default 10.0.2.0/24 if not specified.
 	VMNetworkCIDR string `json:"vmNetworkCIDR,omitempty"`
+}
+
+// Rng represents the random device passed from host
+// ---
+// +k8s:openapi-gen=true
+type Rng struct {
+}
+
+// Represents the cni network.
+// ---
+// +k8s:openapi-gen=true
+type CniNetwork struct {
+	// References to a NetworkAttachmentDefinition CRD object in the same namespace.
+	// In case of genie, it references the CNI plugin name.
+	NetworkName string `json:"networkName"`
 }

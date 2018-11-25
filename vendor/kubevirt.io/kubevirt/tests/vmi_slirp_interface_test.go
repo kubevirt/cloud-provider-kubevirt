@@ -21,11 +21,10 @@ package tests_test
 
 import (
 	"flag"
-	"fmt"
 	"strings"
 	"time"
 
-	expect "github.com/google/goexpect"
+	"github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -65,7 +64,7 @@ var _ = Describe("Slirp", func() {
 	table.DescribeTable("should be able to", func(vmiRef **v1.VirtualMachineInstance) {
 		By("have containerPort in the pod manifest")
 		vmi := *vmiRef
-		vmiPod := tests.GetRunningPodByLabel(vmi.Name, v1.DomainLabel, tests.NamespaceTestDefault)
+		vmiPod := tests.GetRunningPodByVirtualMachineInstance(vmi, tests.NamespaceTestDefault)
 		for _, containerSpec := range vmiPod.Spec.Containers {
 			if containerSpec.Name == "compute" {
 				container = containerSpec
@@ -83,11 +82,12 @@ var _ = Describe("Slirp", func() {
 			virtClient,
 			vmiPod,
 			vmiPod.Spec.Containers[1].Name,
-			[]string{"netstat", "-tnlp"},
+			[]string{"cat", "/proc/net/tcp"},
 		)
 		log.Log.Infof("%v", output)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(strings.Contains(output, "0.0.0.0:80")).To(BeTrue())
+		// :0050 is port 80, 0A is listening
+		Expect(strings.Contains(output, "0: 00000000:0050 00000000:0000 0A")).To(BeTrue())
 
 		By("return \"Hello World!\" when connecting to localhost on port 80")
 		output, err = tests.ExecuteCommandOnPod(
@@ -96,7 +96,6 @@ var _ = Describe("Slirp", func() {
 			vmiPod.Spec.Containers[1].Name,
 			[]string{"curl", "-s", "--retry", "30", "--retry-delay", "30", "127.0.0.1"},
 		)
-		fmt.Println(err)
 		log.Log.Infof("%v", output)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(strings.Contains(output, "Hello World!")).To(BeTrue())

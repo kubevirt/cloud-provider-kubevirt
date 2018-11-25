@@ -21,6 +21,10 @@ ${KUBEVIRT_DIR}/tools/crd-generator/crd-generator --crd-type=vmi >${KUBEVIRT_DIR
 ${KUBEVIRT_DIR}/tools/crd-generator/crd-generator --crd-type=vmirs >${KUBEVIRT_DIR}/manifests/generated/vmirs-resource.yaml
 ${KUBEVIRT_DIR}/tools/crd-generator/crd-generator --crd-type=vmipreset >${KUBEVIRT_DIR}/manifests/generated/vmipreset-resource.yaml
 ${KUBEVIRT_DIR}/tools/crd-generator/crd-generator --crd-type=vm >${KUBEVIRT_DIR}/manifests/generated/vm-resource.yaml
+${KUBEVIRT_DIR}/tools/crd-generator/crd-generator --crd-type=vmim >${KUBEVIRT_DIR}/manifests/generated/vmim-resource.yaml
 
 (cd ${KUBEVIRT_DIR}/tools/vms-generator/ && go build)
 ${KUBEVIRT_DIR}/tools/vms-generator/vms-generator --generated-vms-dir=${KUBEVIRT_DIR}/cluster/examples
+
+protoc --proto_path=pkg/hooks/info --go_out=plugins=grpc,import_path=info:pkg/hooks/info pkg/hooks/info/api.proto
+protoc --proto_path=pkg/hooks/v1alpha1 --go_out=plugins=grpc,import_path=v1alpha:pkg/hooks/v1alpha1 pkg/hooks/v1alpha1/api.proto

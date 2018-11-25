@@ -38,24 +38,29 @@ var interfaceCacheFile = "/var/run/kubevirt-private/interface-cache-%s.json"
 var qemuArgCacheFile = "/var/run/kubevirt-private/qemu-arg-%s.json"
 var NetworkInterfaceFactory = getNetworkClass
 
+var podInterfaceName = podInterface
+
 type NetworkInterface interface {
-	Plug(iface *v1.Interface, network *v1.Network, domain *api.Domain) error
+	Plug(iface *v1.Interface, network *v1.Network, domain *api.Domain, podInterfaceName string) error
 	Unplug()
 }
 
 func SetupNetworkInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	// prepare networks map
 	networks := map[string]*v1.Network{}
+	cniNetworks := map[string]int{}
 	for _, network := range vmi.Spec.Networks {
 		networks[network.Name] = network.DeepCopy()
-	}
-
-	if len(networks) == 0 {
-		return fmt.Errorf("no networks were specified on a vm spec")
+		if networks[network.Name].Multus != nil {
+			// multus pod interfaces start from 1
+			cniNetworks[network.Name] = len(cniNetworks) + 1
+		} else if networks[network.Name].Genie != nil {
+			// genie pod interfaces start from 0
+			cniNetworks[network.Name] = len(cniNetworks)
+		}
 	}
 
 	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
-
 		network, ok := networks[iface.Name]
 		if !ok {
 			return fmt.Errorf("failed to find a network %s", iface.Name)
@@ -65,7 +70,17 @@ func SetupNetworkInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain) 
 			return err
 		}
 
-		err = vif.Plug(&iface, network, domain)
+		if networks[iface.Name].Multus != nil {
+			// multus pod interfaces named netX
+			podInterfaceName = fmt.Sprintf("net%d", cniNetworks[iface.Name])
+		} else if networks[iface.Name].Genie != nil {
+			// genie pod interfaces named ethX
+			podInterfaceName = fmt.Sprintf("eth%d", cniNetworks[iface.Name])
+		} else {
+			podInterfaceName = podInterface
+		}
+
+		err = vif.Plug(&iface, network, domain, podInterfaceName)
 		if err != nil {
 			return err
 		}
@@ -75,7 +90,7 @@ func SetupNetworkInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain) 
 
 // a factory to get suitable network interface
 func getNetworkClass(network *v1.Network) (NetworkInterface, error) {
-	if network.Pod != nil {
+	if network.Pod != nil || network.Multus != nil || network.Genie != nil {
 		return new(PodInterface), nil
 	}
 	return nil, fmt.Errorf("Network not implemented")

@@ -128,6 +128,7 @@ func SetDefaults_VirtualMachineInstance(obj *VirtualMachineInstance) {
 	if obj.Spec.Domain.Machine.Type == "" {
 		obj.Spec.Domain.Machine.Type = "q35"
 	}
+
 	setDefaults_DiskFromMachineType(obj)
 	SetDefaults_NetworkInterface(obj)
 }
@@ -153,6 +154,11 @@ func setDefaults_DiskFromMachineType(obj *VirtualMachineInstance) {
 }
 
 func SetDefaults_NetworkInterface(obj *VirtualMachineInstance) {
+	autoAttach := obj.Spec.Domain.Devices.AutoattachPodInterface
+	if autoAttach != nil && *autoAttach == false {
+		return
+	}
+
 	// Override only when nothing is specified
 	if len(obj.Spec.Networks) == 0 {
 		obj.Spec.Domain.Devices.Interfaces = []Interface{*DefaultNetworkInterface()}

@@ -21,17 +21,16 @@ package api
 
 import (
 	"encoding/xml"
-	"net"
+	"fmt"
+	"os"
+	"reflect"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
-
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"fmt"
-	"os"
 
 	"kubevirt.io/kubevirt/pkg/api/v1"
 )
@@ -55,11 +54,10 @@ var _ = Describe("Converter", func() {
   <source></source>
   <target bus="virtio" dev="vda"></target>
   <driver name="qemu" type=""></driver>
-  <alias name="mydisk"></alias>
+  <alias name="ua-mydisk"></alias>
   <boot order="1"></boot>
 </Disk>`
 			xml := diskToDiskXML(kubevirtDisk)
-			fmt.Println(xml)
 			Expect(xml).To(Equal(convertedDisk))
 		})
 
@@ -77,10 +75,9 @@ var _ = Describe("Converter", func() {
   <source></source>
   <target bus="virtio" dev="vda"></target>
   <driver name="qemu" type=""></driver>
-  <alias name="mydisk"></alias>
+  <alias name="ua-mydisk"></alias>
 </Disk>`
 			xml := diskToDiskXML(kubevirtDisk)
-			fmt.Println(xml)
 			Expect(xml).To(Equal(convertedDisk))
 		})
 
@@ -162,6 +159,7 @@ var _ = Describe("Converter", func() {
 							Bus: "virtio",
 						},
 					},
+					DedicatedIOThread: &_true,
 				},
 				{
 					Name:       "mydisk1",
@@ -171,6 +169,7 @@ var _ = Describe("Converter", func() {
 							Bus: "virtio",
 						},
 					},
+					DedicatedIOThread: &_true,
 				},
 				{
 					Name:       "cdrom_tray_unspecified",
@@ -180,6 +179,7 @@ var _ = Describe("Converter", func() {
 							ReadOnly: &_false,
 						},
 					},
+					DedicatedIOThread: &_false,
 				},
 				{
 					Name:       "cdrom_tray_open",
@@ -214,14 +214,36 @@ var _ = Describe("Converter", func() {
 				{
 					Name:       "ephemeral_pvc",
 					VolumeName: "volume5",
+					Cache:      "none",
+				},
+				{
+					Name:       "secret_test",
+					VolumeName: "volume6",
+					Serial:     "D23YZ9W6WA5DJ487",
+				},
+				{
+					Name:       "configmap_test",
+					VolumeName: "volume7",
+					Serial:     "CVLY623300HK240D",
+				},
+				{
+					Name:       "pvc_block_test",
+					VolumeName: "volume8",
+					Cache:      "writethrough",
+				},
+				{
+					Name:       "serviceaccount_test",
+					VolumeName: "volume9",
 				},
 			}
 			vmi.Spec.Volumes = []v1.Volume{
 				{
 					Name: "myvolume",
 					VolumeSource: v1.VolumeSource{
-						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "testclaim",
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/myvolume/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
 						},
 					},
 				},
@@ -244,32 +266,40 @@ var _ = Describe("Converter", func() {
 				{
 					Name: "volume1",
 					VolumeSource: v1.VolumeSource{
-						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "testclaim",
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/volume1/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
 						},
 					},
 				},
 				{
 					Name: "volume2",
 					VolumeSource: v1.VolumeSource{
-						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "testclaim",
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/volume2/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
 						},
 					},
 				},
 				{
 					Name: "volume3",
 					VolumeSource: v1.VolumeSource{
-						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "testclaim",
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/volume3/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
 						},
 					},
 				},
 				{
 					Name: "volume4",
 					VolumeSource: v1.VolumeSource{
-						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
-							ClaimName: "testclaim",
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/volume4/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
 						},
 					},
 				},
@@ -280,6 +310,40 @@ var _ = Describe("Converter", func() {
 							PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
 								ClaimName: "testclaim",
 							},
+						},
+					},
+				},
+				{
+					Name: "volume6",
+					VolumeSource: v1.VolumeSource{
+						Secret: &v1.SecretVolumeSource{
+							SecretName: "testsecret",
+						},
+					},
+				},
+				{
+					Name: "volume7",
+					VolumeSource: v1.VolumeSource{
+						ConfigMap: &v1.ConfigMapVolumeSource{
+							LocalObjectReference: k8sv1.LocalObjectReference{
+								Name: "testconfig",
+							},
+						},
+					},
+				},
+				{
+					Name: "volume8",
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "testblock",
+						},
+					},
+				},
+				{
+					Name: "volume9",
+					VolumeSource: v1.VolumeSource{
+						ServiceAccount: &v1.ServiceAccountVolumeSource{
+							ServiceAccountName: "testaccount",
 						},
 					},
 				},
@@ -313,80 +377,114 @@ var _ = Describe("Converter", func() {
   </sysinfo>
   <devices>
     <interface type="bridge">
-      <source bridge="br1"></source>
+      <source bridge="k6t-eth0"></source>
       <model type="virtio"></model>
-      <alias name="default"></alias>
+      <alias name="ua-default"></alias>
     </interface>
+    <channel type="unix">
+      <target name="org.qemu.guest_agent.0" type="virtio"></target>
+    </channel>
+    <controller type="usb" index="0" model="none"></controller>
     <video>
       <model type="vga" heads="1" vram="16384"></model>
     </video>
     <graphics type="vnc">
-      <listen type="socket" socket="/var/run/kubevirt-private/mynamespace/testvmi/virt-vnc"></listen>
+      <listen type="socket" socket="/var/run/kubevirt-private/f4686d2c-6e8d-4335-b8fd-81bee22f4814/virt-vnc"></listen>
     </graphics>
+    <memballoon model="none"></memballoon>
     <disk device="disk" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/myvolume/disk.img"></source>
       <target bus="virtio" dev="vda"></target>
-      <driver name="qemu" type="raw"></driver>
-      <alias name="mydisk"></alias>
+      <driver name="qemu" type="raw" iothread="2"></driver>
+      <alias name="ua-mydisk"></alias>
     </disk>
     <disk device="disk" type="file">
       <source file="/var/run/libvirt/cloud-init-dir/mynamespace/testvmi/noCloud.iso"></source>
       <target bus="virtio" dev="vdb"></target>
-      <driver name="qemu" type="raw"></driver>
-      <alias name="mydisk1"></alias>
+      <driver name="qemu" type="raw" iothread="3"></driver>
+      <alias name="ua-mydisk1"></alias>
     </disk>
     <disk device="cdrom" type="file">
       <source file="/var/run/libvirt/cloud-init-dir/mynamespace/testvmi/noCloud.iso"></source>
       <target bus="sata" dev="sda" tray="closed"></target>
-      <driver name="qemu" type="raw"></driver>
-      <alias name="cdrom_tray_unspecified"></alias>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-cdrom_tray_unspecified"></alias>
     </disk>
     <disk device="cdrom" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/volume1/disk.img"></source>
       <target bus="sata" dev="sdb" tray="open"></target>
-      <driver name="qemu" type="raw"></driver>
+      <driver name="qemu" type="raw" iothread="1"></driver>
       <readonly></readonly>
-      <alias name="cdrom_tray_open"></alias>
+      <alias name="ua-cdrom_tray_open"></alias>
     </disk>
     <disk device="floppy" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/volume2/disk.img"></source>
       <target bus="fdc" dev="fda" tray="closed"></target>
-      <driver name="qemu" type="raw"></driver>
-      <alias name="floppy_tray_unspecified"></alias>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-floppy_tray_unspecified"></alias>
     </disk>
     <disk device="floppy" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/volume3/disk.img"></source>
       <target bus="fdc" dev="fdb" tray="open"></target>
-      <driver name="qemu" type="raw"></driver>
+      <driver name="qemu" type="raw" iothread="1"></driver>
       <readonly></readonly>
-      <alias name="floppy_tray_open"></alias>
+      <alias name="ua-floppy_tray_open"></alias>
     </disk>
     <disk device="disk" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/volume4/disk.img"></source>
       <target bus="sata" dev="sdc"></target>
-      <driver name="qemu" type="raw"></driver>
-      <alias name="should_default_to_disk"></alias>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-should_default_to_disk"></alias>
     </disk>
     <disk device="disk" type="file">
       <source file="/var/run/libvirt/kubevirt-ephemeral-disk/volume5/disk.qcow2"></source>
       <target bus="sata" dev="sdd"></target>
-      <driver name="qemu" type="qcow2"></driver>
-      <alias name="ephemeral_pvc"></alias>
+      <driver cache="none" name="qemu" type="qcow2" iothread="1"></driver>
+      <alias name="ua-ephemeral_pvc"></alias>
       <backingStore type="file">
         <format type="raw"></format>
         <source file="/var/run/kubevirt-private/vmi-disks/volume5/disk.img"></source>
       </backingStore>
     </disk>
+    <disk device="disk" type="file">
+      <source file="/var/run/kubevirt-private/secret-disks/volume6.iso"></source>
+      <target bus="sata" dev="sde"></target>
+      <serial>D23YZ9W6WA5DJ487</serial>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-secret_test"></alias>
+    </disk>
+    <disk device="disk" type="file">
+      <source file="/var/run/kubevirt-private/config-map-disks/volume7.iso"></source>
+      <target bus="sata" dev="sdf"></target>
+      <serial>CVLY623300HK240D</serial>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-configmap_test"></alias>
+    </disk>
+    <disk device="disk" type="block">
+      <source dev="/dev/volume8"></source>
+      <target bus="sata" dev="sdg"></target>
+      <driver cache="writethrough" name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-pvc_block_test"></alias>
+    </disk>
+    <disk device="disk" type="file">
+      <source file="/var/run/kubevirt-private/service-account-disk/service-account.iso"></source>
+      <target bus="sata" dev="sdh"></target>
+      <driver name="qemu" type="raw" iothread="1"></driver>
+      <alias name="ua-serviceaccount_test"></alias>
+    </disk>
     <serial type="unix">
       <target port="0"></target>
-      <source mode="bind" path="/var/run/kubevirt-private/mynamespace/testvmi/virt-serial0"></source>
+      <source mode="bind" path="/var/run/kubevirt-private/f4686d2c-6e8d-4335-b8fd-81bee22f4814/virt-serial0"></source>
     </serial>
     <console type="pty">
       <target type="serial" port="0"></target>
     </console>
     <watchdog model="i6300esb" action="poweroff">
-      <alias name="mywatchdog"></alias>
+      <alias name="ua-mywatchdog"></alias>
     </watchdog>
+    <rng model="virtio">
+      <backend model="random">/dev/urandom</backend>
+    </rng>
   </devices>
   <clock offset="utc" adjustment="reset">
     <timer name="rtc" tickpolicy="catchup" present="yes" track="guest"></timer>
@@ -419,10 +517,13 @@ var _ = Describe("Converter", func() {
     </hyperv>
   </features>
   <cpu mode="host-model"></cpu>
+  <iothreads>3</iothreads>
 </domain>`, domainType)
 
 		var c *ConverterContext
 
+		isBlockPVCMap := make(map[string]bool)
+		isBlockPVCMap["volume8"] = true
 		BeforeEach(func() {
 			c = &ConverterContext{
 				VirtualMachine: vmi,
@@ -434,11 +535,13 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				UseEmulation: true,
+				IsBlockPVC:   isBlockPVCMap,
 			}
 		})
 
 		It("should be converted to a libvirt Domain with vmi defaults set", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Rng = &v1.Rng{}
 			Expect(vmiToDomainXML(vmi, c)).To(Equal(convertedDomain))
 		})
 
@@ -464,6 +567,20 @@ var _ = Describe("Converter", func() {
 			Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)))
 		})
 
+		table.DescribeTable("should convert CPU model", func(model string) {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.CPU = &v1.CPU{
+				Cores: 3,
+				Model: model,
+			}
+			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+			Expect(domainSpec.CPU.Mode).To(Equal(model))
+		},
+			table.Entry(CPUModeHostPassthrough, CPUModeHostPassthrough),
+			table.Entry(CPUModeHostModel, CPUModeHostModel),
+		)
+
 		Context("when CPU spec defined and model not", func() {
 			It("should set host-model CPU mode", func() {
 				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
@@ -485,11 +602,46 @@ var _ = Describe("Converter", func() {
 			})
 		})
 
+		It("should set disk pci address when specified", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Disks[0].Disk.PciAddress = "0000:81:01.0"
+			test_address := Address{
+				Type:     "pci",
+				Domain:   "0x0000",
+				Bus:      "0x81",
+				Slot:     "0x01",
+				Function: "0x0",
+			}
+			domain := vmiToDomain(vmi, c)
+			Expect(*domain.Spec.Devices.Disks[0].Address).To(Equal(test_address))
+		})
+
+		It("should fail disk config pci address is set with a non virtio bus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Disks[0].Disk.PciAddress = "0000:81:01.0"
+			vmi.Spec.Domain.Devices.Disks[0].Disk.Bus = "scsi"
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &Domain{}, c)).ToNot(Succeed())
+		})
+
 		It("should select explicitly chosen network model", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Interfaces[0].Model = "e1000"
 			domain := vmiToDomain(vmi, c)
 			Expect(domain.Spec.Devices.Interfaces[0].Model.Type).To(Equal("e1000"))
+		})
+
+		It("should set nic pci address when specified", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Interfaces[0].PciAddress = "0000:81:01.0"
+			test_address := Address{
+				Type:     "pci",
+				Domain:   "0x0000",
+				Bus:      "0x81",
+				Slot:     "0x01",
+				Function: "0x0",
+			}
+			domain := vmiToDomain(vmi, c)
+			Expect(*domain.Spec.Devices.Interfaces[0].Address).To(Equal(test_address))
 		})
 
 		It("should calculate memory in bytes", func() {
@@ -547,6 +699,31 @@ var _ = Describe("Converter", func() {
 			Expect(domainSpec.Memory.Value).To(Equal(uint64(8388608)))
 			Expect(domainSpec.Memory.Unit).To(Equal("B"))
 		})
+
+		It("should use guest memory instead of requested memory if present", func() {
+			guestMemory := resource.MustParse("123Mi")
+			vmi.Spec.Domain.Memory = &v1.Memory{
+				Guest: &guestMemory,
+			}
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+
+			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+			Expect(domainSpec.Memory.Value).To(Equal(uint64(128974848)))
+			Expect(domainSpec.Memory.Unit).To(Equal("B"))
+		})
+
+		It("should not add RNG when not present", func() {
+			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+			Expect(domainSpec.Devices.Rng).To(BeNil())
+		})
+
+		It("should add RNG when present", func() {
+			vmi.Spec.Domain.Devices.Rng = &v1.Rng{}
+			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+			Expect(domainSpec.Devices.Rng).ToNot(BeNil())
+		})
+
 	})
 	Context("Network convert", func() {
 		var vmi *v1.VirtualMachineInstance
@@ -573,7 +750,7 @@ var _ = Describe("Converter", func() {
 			}
 		})
 
-		It("should fail to convert if non-pod interfaces are present", func() {
+		It("should fail to convert if non network source are present", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			name := "otherName"
 			iface := v1.DefaultNetworkInterface()
@@ -667,66 +844,491 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.Interfaces[1].Type).To(Equal("user"))
 			Expect(domain.Spec.Devices.Interfaces[1].Model.Type).To(Equal("e1000"))
 		})
+		It("Should set domain interface source correctly for multus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
+				*v1.DefaultNetworkInterface(),
+				*v1.DefaultNetworkInterface(),
+				*v1.DefaultNetworkInterface(),
+			}
+			vmi.Spec.Domain.Devices.Interfaces[0].Name = "red1"
+			vmi.Spec.Domain.Devices.Interfaces[1].Name = "red2"
+			// 3rd network is the default pod network, name is "default"
+			vmi.Spec.Networks = []v1.Network{
+				v1.Network{
+					Name: "red1",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.CniNetwork{NetworkName: "red"},
+					},
+				},
+				v1.Network{
+					Name: "red2",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.CniNetwork{NetworkName: "red"},
+					},
+				},
+				v1.Network{
+					Name: "default",
+					NetworkSource: v1.NetworkSource{
+						Pod: &v1.PodNetwork{},
+					},
+				},
+			}
+
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(3))
+			Expect(domain.Spec.Devices.Interfaces[0].Source.Bridge).To(Equal("k6t-net1"))
+			Expect(domain.Spec.Devices.Interfaces[1].Source.Bridge).To(Equal("k6t-net2"))
+			Expect(domain.Spec.Devices.Interfaces[2].Source.Bridge).To(Equal("k6t-eth0"))
+		})
+		It("Should set domain interface source correctly for genie", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
+				*v1.DefaultNetworkInterface(),
+				*v1.DefaultNetworkInterface(),
+			}
+			vmi.Spec.Domain.Devices.Interfaces[0].Name = "red1"
+			vmi.Spec.Domain.Devices.Interfaces[1].Name = "red2"
+			vmi.Spec.Networks = []v1.Network{
+				v1.Network{
+					Name: "red1",
+					NetworkSource: v1.NetworkSource{
+						Genie: &v1.CniNetwork{NetworkName: "red"},
+					},
+				},
+				v1.Network{
+					Name: "red2",
+					NetworkSource: v1.NetworkSource{
+						Genie: &v1.CniNetwork{NetworkName: "red"},
+					},
+				},
+			}
+
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(2))
+			Expect(domain.Spec.Devices.Interfaces[0].Source.Bridge).To(Equal("k6t-eth0"))
+			Expect(domain.Spec.Devices.Interfaces[1].Source.Bridge).To(Equal("k6t-eth1"))
+		})
+		It("should allow setting boot order", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			name1 := "Name1"
+			name2 := "Name2"
+			iface1 := v1.DefaultNetworkInterface()
+			iface2 := v1.DefaultNetworkInterface()
+			net1 := v1.DefaultPodNetwork()
+			net2 := v1.DefaultPodNetwork()
+			iface1.Name = name1
+			iface2.Name = name2
+			bootOrder := uint(1)
+			iface1.BootOrder = &bootOrder
+			net1.Name = name1
+			net2.Name = name2
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*iface1, *iface2}
+			vmi.Spec.Networks = []v1.Network{*net1, *net2}
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(2))
+			Expect(domain.Spec.Devices.Interfaces[0].BootOrder).NotTo(BeNil())
+			Expect(domain.Spec.Devices.Interfaces[0].BootOrder.Order).To(Equal(uint(bootOrder)))
+			Expect(domain.Spec.Devices.Interfaces[1].BootOrder).To(BeNil())
+		})
 	})
-	Context("Function ParseNameservers()", func() {
-		It("should return a byte array of nameservers", func() {
-			ns1, ns2 := []uint8{8, 8, 8, 8}, []uint8{8, 8, 4, 4}
-			resolvConf := "nameserver 8.8.8.8\nnameserver 8.8.4.4\n"
-			nameservers, err := ParseNameservers(resolvConf)
-			Expect(nameservers).To(Equal([][]uint8{ns1, ns2}))
-			Expect(err).To(BeNil())
-		})
 
-		It("should ignore non-nameserver lines and malformed nameserver lines", func() {
-			ns1, ns2 := []uint8{8, 8, 8, 8}, []uint8{8, 8, 4, 4}
-			resolvConf := "search example.com\nnameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver mynameserver\n"
-			nameservers, err := ParseNameservers(resolvConf)
-			Expect(nameservers).To(Equal([][]uint8{ns1, ns2}))
-			Expect(err).To(BeNil())
-		})
+	Context("graphics and video device", func() {
 
-		It("should return a default nameserver if none is parsed", func() {
-			nameservers, err := ParseNameservers("")
-			expectedDNS := net.ParseIP(defaultDNS).To4()
-			Expect(nameservers).To(Equal([][]uint8{expectedDNS}))
-			Expect(err).To(BeNil())
-		})
+		table.DescribeTable("should check autoAttachGraphicsDevices", func(autoAttach *bool, devices int) {
+
+			vmi := v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "default",
+					UID:       "1234",
+				},
+				Spec: v1.VirtualMachineInstanceSpec{
+					Domain: v1.DomainSpec{
+						CPU: &v1.CPU{Cores: 3},
+						Resources: v1.ResourceRequirements{
+							Requests: k8sv1.ResourceList{
+								k8sv1.ResourceCPU:    resource.MustParse("1m"),
+								k8sv1.ResourceMemory: resource.MustParse("64M"),
+							},
+						},
+					},
+				},
+			}
+			vmi.Spec.Domain.Devices = v1.Devices{
+				AutoattachGraphicsDevice: autoAttach,
+			}
+			domain := vmiToDomain(&vmi, &ConverterContext{UseEmulation: true})
+			Expect(domain.Spec.Devices.Video).To(HaveLen(devices))
+			Expect(domain.Spec.Devices.Graphics).To(HaveLen(devices))
+
+		},
+			table.Entry("and add the graphics and video device if it is not set", nil, 1),
+			table.Entry("and add the graphics and video device if it is set to true", True(), 1),
+			table.Entry("and not add the graphics and video device if it is set to false", False(), 0),
+		)
 	})
 
-	Context("Function ParseSearchDomains()", func() {
-		It("should return a string of search domains", func() {
-			resolvConf := "search cluster.local svc.cluster.local example.com\nnameserver 8.8.8.8\n"
-			searchDomains, err := ParseSearchDomains(resolvConf)
-			Expect(searchDomains).To(Equal([]string{"cluster.local", "svc.cluster.local", "example.com"}))
-			Expect(err).To(BeNil())
+	Context("IOThreads", func() {
+		_false := false
+		_true := true
+
+		table.DescribeTable("Should use correct IOThreads policies", func(policy v1.IOThreadsPolicy, cpuCores int, threadCount int, threadIDs []int) {
+			vmi := v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "default",
+					UID:       "1234",
+				},
+				Spec: v1.VirtualMachineInstanceSpec{
+					Domain: v1.DomainSpec{
+						IOThreadsPolicy: &policy,
+						Resources: v1.ResourceRequirements{
+							Requests: k8sv1.ResourceList{
+								k8sv1.ResourceCPU: resource.MustParse(fmt.Sprintf("%d", cpuCores)),
+							},
+						},
+						Devices: v1.Devices{
+							Disks: []v1.Disk{
+								{
+									Name:       "dedicated",
+									VolumeName: "volume0",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+									DedicatedIOThread: &_true,
+								},
+								{
+									Name:       "shared",
+									VolumeName: "volume1",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+									DedicatedIOThread: &_false,
+								},
+								{
+									Name:       "omitted1",
+									VolumeName: "volume2",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+								},
+								{
+									Name:       "omitted2",
+									VolumeName: "volume3",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+								},
+								{
+									Name:       "omitted3",
+									VolumeName: "volume4",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+								},
+								{
+									Name:       "omitted4",
+									VolumeName: "volume5",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+								},
+								{
+									Name:       "omitted5",
+									VolumeName: "volume5",
+									DiskDevice: v1.DiskDevice{
+										Disk: &v1.DiskTarget{
+											Bus: "virtio",
+										},
+									},
+								},
+							},
+						},
+					},
+					Volumes: []v1.Volume{
+						{
+							Name: "volume0",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume1",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume2",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume3",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume4",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume5",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+						{
+							Name: "volume6",
+							VolumeSource: v1.VolumeSource{
+								Ephemeral: &v1.EphemeralVolumeSource{
+									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testclaim",
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			domain := vmiToDomain(&vmi, &ConverterContext{UseEmulation: true})
+			Expect(domain.Spec.IOThreads).ToNot(BeNil())
+			Expect(int(domain.Spec.IOThreads.IOThreads)).To(Equal(threadCount))
+			for idx, disk := range domain.Spec.Devices.Disks {
+				Expect(disk.Driver.IOThread).ToNot(BeNil())
+				Expect(int(*disk.Driver.IOThread)).To(Equal(threadIDs[idx]))
+			}
+		},
+			table.Entry("using a shared policy with 1 CPU", v1.IOThreadsPolicyShared, 1, 2, []int{2, 1, 1, 1, 1, 1, 1}),
+			table.Entry("using a shared policy with 2 CPUs", v1.IOThreadsPolicyShared, 2, 2, []int{2, 1, 1, 1, 1, 1, 1}),
+			table.Entry("using a shared policy with 3 CPUs", v1.IOThreadsPolicyShared, 2, 2, []int{2, 1, 1, 1, 1, 1, 1}),
+			table.Entry("using an auto policy with 1 CPU", v1.IOThreadsPolicyAuto, 1, 2, []int{2, 1, 1, 1, 1, 1, 1}),
+			table.Entry("using an auto policy with 2 CPUs", v1.IOThreadsPolicyAuto, 2, 4, []int{4, 1, 2, 3, 1, 2, 3}),
+			table.Entry("using an auto policy with 3 CPUs", v1.IOThreadsPolicyAuto, 3, 6, []int{6, 1, 2, 3, 4, 5, 1}),
+			table.Entry("using an auto policy with 4 CPUs", v1.IOThreadsPolicyAuto, 4, 7, []int{7, 1, 2, 3, 4, 5, 6}),
+			table.Entry("using an auto policy with 5 CPUs", v1.IOThreadsPolicyAuto, 5, 7, []int{7, 1, 2, 3, 4, 5, 6}),
+		)
+
+	})
+
+	Context("virtio block multi-queue", func() {
+		var vmi *v1.VirtualMachineInstance
+
+		BeforeEach(func() {
+			vmi = &v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "mynamespace",
+				},
+			}
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
+				{
+					Name:       "mydisk",
+					VolumeName: "myvolume",
+					DiskDevice: v1.DiskDevice{
+						Disk: &v1.DiskTarget{
+							Bus: "virtio",
+						},
+					},
+				},
+			}
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "myvolume",
+					VolumeSource: v1.VolumeSource{
+						HostDisk: &v1.HostDisk{
+							Path:     "/var/run/kubevirt-private/vmi-disks/myvolume/disk.img",
+							Type:     v1.HostDiskExistsOrCreate,
+							Capacity: resource.MustParse("1Gi"),
+						},
+					},
+				},
+			}
+
+			vmi.Spec.Domain.Devices.BlockMultiQueue = True()
+			vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("2")
 		})
 
-		It("should handle multi-line search domains", func() {
-			resolvConf := "search cluster.local\nsearch svc.cluster.local example.com\nnameserver 8.8.8.8\n"
-			searchDomains, err := ParseSearchDomains(resolvConf)
-			Expect(searchDomains).To(Equal([]string{"cluster.local", "svc.cluster.local", "example.com"}))
-			Expect(err).To(BeNil())
+		It("should assign queues to a device if requested", func() {
+			expectedQueues := uint(2)
+
+			v1Disk := v1.Disk{
+				DiskDevice: v1.DiskDevice{
+					Disk: &v1.DiskTarget{},
+				},
+			}
+			apiDisk := Disk{}
+			devicePerBus := map[string]int{}
+			numQueues := uint(2)
+			Convert_v1_Disk_To_api_Disk(&v1Disk, &apiDisk, devicePerBus, &numQueues)
+			Expect(apiDisk.Device).To(Equal("disk"), "expected disk device to be defined")
+			Expect(*(apiDisk.Driver.Queues)).To(Equal(expectedQueues), "expected queues to be 2")
 		})
 
-		It("should clean up extra whitespace between search domains", func() {
-			resolvConf := "search cluster.local\tsvc.cluster.local    example.com\nnameserver 8.8.8.8\n"
-			searchDomains, err := ParseSearchDomains(resolvConf)
-			Expect(searchDomains).To(Equal([]string{"cluster.local", "svc.cluster.local", "example.com"}))
-			Expect(err).To(BeNil())
+		It("should not assign queues to a device if omitted", func() {
+			v1Disk := v1.Disk{
+				DiskDevice: v1.DiskDevice{
+					Disk: &v1.DiskTarget{},
+				},
+			}
+			apiDisk := Disk{}
+			devicePerBus := map[string]int{}
+			Convert_v1_Disk_To_api_Disk(&v1Disk, &apiDisk, devicePerBus, nil)
+			Expect(apiDisk.Device).To(Equal("disk"), "expected disk device to be defined")
+			Expect(apiDisk.Driver.Queues).To(BeNil(), "expected no queues to be requested")
 		})
 
-		It("should handle non-presence of search domains by returning default search domain", func() {
-			resolvConf := fmt.Sprintf("nameserver %s\n", defaultDNS)
-			searchDomains, err := ParseSearchDomains(resolvConf)
-			Expect(searchDomains).To(Equal([]string{defaultSearchDomain}))
-			Expect(err).To(BeNil())
+		It("should honor multiQueue setting", func() {
+			var expectedQueues uint = 2
+
+			domain := vmiToDomain(vmi, &ConverterContext{UseEmulation: true})
+			Expect(*(domain.Spec.Devices.Disks[0].Driver.Queues)).To(Equal(expectedQueues),
+				"expected number of queues to equal number of requested CPUs")
+		})
+	})
+	Context("Correctly handle iothreads with dedicated cpus", func() {
+		var vmi *v1.VirtualMachineInstance
+
+		BeforeEach(func() {
+			vmi = &v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "default",
+					UID:       "1234",
+				},
+				Spec: v1.VirtualMachineInstanceSpec{
+					Domain: v1.DomainSpec{
+						CPU: &v1.CPU{DedicatedCPUPlacement: true},
+						Resources: v1.ResourceRequirements{
+							Requests: k8sv1.ResourceList{
+								k8sv1.ResourceMemory: resource.MustParse("64M"),
+							},
+						},
+					},
+				},
+			}
+		})
+		It("assigns a set of cpus per iothread, if there are more vcpus that iothreads", func() {
+			vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("16")
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			c := &ConverterContext{CPUSet: []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+				UseEmulation: true,
+			}
+			domain := vmiToDomain(vmi, c)
+			domain.Spec.IOThreads = &IOThreads{}
+			domain.Spec.IOThreads.IOThreads = uint(6)
+
+			err := formatDomainIOThreadPin(vmi, domain, c)
+			Expect(err).ToNot(HaveOccurred())
+			expectedLayout := []CPUTuneIOThreadPin{
+				CPUTuneIOThreadPin{IOThread: 1, CPUSet: "5,6,7"},
+				CPUTuneIOThreadPin{IOThread: 2, CPUSet: "8,9,10"},
+				CPUTuneIOThreadPin{IOThread: 3, CPUSet: "11,12,13"},
+				CPUTuneIOThreadPin{IOThread: 4, CPUSet: "14,15,16"},
+				CPUTuneIOThreadPin{IOThread: 5, CPUSet: "17,18"},
+				CPUTuneIOThreadPin{IOThread: 6, CPUSet: "19,20"},
+			}
+			isExpectedThreadsLayout := reflect.DeepEqual(expectedLayout, domain.Spec.CPUTune.IOThreadPin)
+			Expect(isExpectedThreadsLayout).To(BeTrue())
+
+		})
+		It("should pack iothreads equally on available vcpus, if there are more iothreads than vcpus", func() {
+			vmi.Spec.Domain.CPU.Cores = 2
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			c := &ConverterContext{CPUSet: []int{5, 6}, UseEmulation: true}
+			domain := vmiToDomain(vmi, c)
+			domain.Spec.IOThreads = &IOThreads{}
+			domain.Spec.IOThreads.IOThreads = uint(6)
+
+			err := formatDomainIOThreadPin(vmi, domain, c)
+			Expect(err).ToNot(HaveOccurred())
+			expectedLayout := []CPUTuneIOThreadPin{
+				CPUTuneIOThreadPin{IOThread: 1, CPUSet: "6"},
+				CPUTuneIOThreadPin{IOThread: 2, CPUSet: "5"},
+				CPUTuneIOThreadPin{IOThread: 3, CPUSet: "6"},
+				CPUTuneIOThreadPin{IOThread: 4, CPUSet: "5"},
+				CPUTuneIOThreadPin{IOThread: 5, CPUSet: "6"},
+				CPUTuneIOThreadPin{IOThread: 6, CPUSet: "5"},
+			}
+			isExpectedThreadsLayout := reflect.DeepEqual(expectedLayout, domain.Spec.CPUTune.IOThreadPin)
+			Expect(isExpectedThreadsLayout).To(BeTrue())
+		})
+	})
+	Context("virtio-net multi-queue", func() {
+		var vmi *v1.VirtualMachineInstance
+
+		BeforeEach(func() {
+			vmi = &v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "mynamespace",
+				},
+			}
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+
+			vmi.Spec.Domain.Devices.NetworkInterfaceMultiQueue = True()
+			vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("2")
 		})
 
-		It("should allow partial search domains", func() {
-			resolvConf := "search local\nnameserver 8.8.8.8\n"
-			searchDomains, err := ParseSearchDomains(resolvConf)
-			Expect(searchDomains).To(Equal([]string{"local"}))
-			Expect(err).To(BeNil())
+		It("should assign queues to a device if requested", func() {
+			var expectedQueues uint = 2
+
+			domain := vmiToDomain(vmi, &ConverterContext{UseEmulation: true})
+			Expect(*(domain.Spec.Devices.Interfaces[0].Driver.Queues)).To(Equal(expectedQueues),
+				"expected number of queues to equal number of requested CPUs")
+		})
+
+		It("should not assign queues to a non-virtio devices", func() {
+			vmi.Spec.Domain.Devices.Interfaces[0].Model = "e1000"
+			domain := vmiToDomain(vmi, &ConverterContext{UseEmulation: true})
+			Expect(domain.Spec.Devices.Interfaces[0].Driver).To(BeNil(),
+				"queues should not be set for models other than virtio")
 		})
 	})
 })
@@ -734,7 +1336,7 @@ var _ = Describe("Converter", func() {
 func diskToDiskXML(disk *v1.Disk) string {
 	devicePerBus := make(map[string]int)
 	libvirtDisk := &Disk{}
-	Expect(Convert_v1_Disk_To_api_Disk(disk, libvirtDisk, devicePerBus)).To(Succeed())
+	Expect(Convert_v1_Disk_To_api_Disk(disk, libvirtDisk, devicePerBus, nil)).To(Succeed())
 	data, err := xml.MarshalIndent(libvirtDisk, "", "  ")
 	Expect(err).ToNot(HaveOccurred())
 	return string(data)
@@ -765,4 +1367,14 @@ func xmlToDomainSpec(data string) *DomainSpec {
 
 func vmiToDomainXMLToDomainSpec(vmi *v1.VirtualMachineInstance, c *ConverterContext) *DomainSpec {
 	return xmlToDomainSpec(vmiToDomainXML(vmi, c))
+}
+
+func True() *bool {
+	b := true
+	return &b
+}
+
+func False() *bool {
+	b := false
+	return &b
 }
