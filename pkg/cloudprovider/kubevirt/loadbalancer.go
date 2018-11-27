@@ -11,12 +11,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 )
 
 const (
 	// Prefix of the service label to put on VMIs
 	serviceVmiLabelKeyPrefix = "service.kubevirt.io"
+	// Interval in seconds between polling the service after creation
+	loadBalancerCreatePollIntervalSeconds = 5
 )
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -66,20 +69,26 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 		return nil, err
 	}
 
-	if len(lbService.Status.LoadBalancer.Ingress) == 0 {
-		for i := 0; i < 6; i++ {
-			time.Sleep(10 * time.Second)
-			service, exists, err := c.getLoadBalancerService(lbName)
-			if err != nil {
-				glog.Errorf("Failed to get LoadBalancer service: %v", err)
-				return &lbService.Status.LoadBalancer, err
-			}
-			if exists && len(service.Status.LoadBalancer.Ingress) > 0 {
-				lbService = service
-				break
-			}
+	err = wait.PollUntil(loadBalancerCreatePollIntervalSeconds*time.Second, func() (bool, error) {
+		if len(lbService.Status.LoadBalancer.Ingress) != 0 {
+			return true, nil
 		}
+		service, exists, err := c.getLoadBalancerService(lbName)
+		if err != nil {
+			glog.Errorf("Failed to get LoadBalancer service: %v", err)
+			return false, err
+		}
+		if exists && len(service.Status.LoadBalancer.Ingress) > 0 {
+			lbService = service
+			return true, nil
+		}
+		return false, nil
+	}, ctx.Done())
+	if err != nil {
+		glog.Errorf("Failed to poll LoadBalancer service: %v", err)
+		return nil, err
 	}
+
 	return &lbService.Status.LoadBalancer, nil
 }
 
