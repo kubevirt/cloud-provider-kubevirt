@@ -165,8 +165,9 @@ func (c *cloud) CurrentNodeName(ctx context.Context, hostname string) (types.Nod
 func (c *cloud) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, c.namespace, err)
-		return false, cloudprovider.InstanceNotFound
+		// Retry getting instanceID with the node name, seems like node_controller
+		// does this if it does not know the providerID
+		instanceID = instanceIDFromNodeName(providerID)
 	}
 	// If we can not get the VMI by its providerID, assume it no longer exists
 	_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Get(instanceID, &metav1.GetOptions{})
