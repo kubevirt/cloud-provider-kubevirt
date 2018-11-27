@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	// Prefix of the service label to put on VMIs
-	serviceVmiLabelKeyPrefix = "service.kubevirt.io"
+	// Prefix of the service label to put on VMIs and pods
+	serviceLabelKeyPrefix = "service.kubevirt.io"
 	// Interval in seconds between polling the service after creation
 	loadBalancerCreatePollIntervalSeconds = 5
 )
@@ -48,7 +48,7 @@ func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service
 func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	lbName := cloudprovider.GetLoadBalancerName(service)
 
-	err := c.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
+	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return nil, err
@@ -98,12 +98,12 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	lbName := cloudprovider.GetLoadBalancerName(service)
-	err := c.applyServiceLabelsToVmis(lbName, service.ObjectMeta.Name, nodes)
+	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return err
 	}
-	err = c.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
+	err = c.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -135,7 +135,7 @@ func (c *cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName strin
 		}
 	}
 
-	err = c.ensureVmiServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
+	err = c.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -174,7 +174,7 @@ func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:    ports,
-			Selector: map[string]string{serviceVmiLabelKey(lbName): service.ObjectMeta.Name},
+			Selector: map[string]string{serviceLabelKey(lbName): service.ObjectMeta.Name},
 			Type:     corev1.ServiceTypeLoadBalancer,
 		},
 	}
@@ -196,42 +196,79 @@ func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service
 	return lbService, nil
 }
 
-func (c *cloud) applyServiceLabelsToVmis(lbName, serviceName string, nodes []*corev1.Node) error {
+func (c *cloud) applyServiceLabels(lbName, serviceName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
 	allVmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
+	vmiUIDs := make([]string, len(instanceIDs))
 
 	// Apply labels to all VMIs for the service to match
 	for _, vmi := range allVmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; ok {
-			vmi.ObjectMeta.Labels[serviceVmiLabelKey(lbName)] = serviceName
+			vmi.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
 			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
 			if err != nil {
-				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+				glog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+			} else {
+				// Remember updated VMI UIDs to find the correspomding pods
+				vmiUIDs = append(vmiUIDs, string(vmi.ObjectMeta.UID))
 			}
+		}
+	}
+
+	// Find all pods created by a VMI
+	listOptions := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("kubevirt.io/created-by in (%s)", strings.Join(vmiUIDs, ", ")),
+	}
+	vmiPods, err := c.kubernetes.CoreV1().Pods(c.namespace).List(listOptions)
+
+	// Apply labels to all found pods
+	for _, pod := range vmiPods.Items {
+		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
+		_, err = c.kubernetes.CoreV1().Pods(c.namespace).Update(&pod)
+		if err != nil {
+			glog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
 		}
 	}
 	return nil
 }
 
-func (c *cloud) ensureVmiServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
+func (c *cloud) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
-	listOptions := &metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", serviceVmiLabelKey(lbName), svcName),
+	listOptions := metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", serviceLabelKey(lbName), svcName),
 	}
-	vmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(listOptions)
+	vmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&listOptions)
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
+	pods, err := c.kubernetes.CoreV1().Pods(c.namespace).List(listOptions)
+	if err != nil {
+		return fmt.Errorf("Failed to list pods: %v", err)
+	}
+	vmiUIDs := make(map[string]struct{}, len(instanceIDs))
+
+	// Delete labels on those VMIs & pods which do not have a corresponding node object
 	for _, vmi := range vmis.Items {
-		// Delete labels on those VMIs which do not have a corresponding node object
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; !ok {
-			delete(vmi.ObjectMeta.Labels, serviceVmiLabelKey(lbName))
+			delete(vmi.ObjectMeta.Labels, serviceLabelKey(lbName))
 			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
 			if err != nil {
 				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+			}
+			vmiUIDs[string(vmi.ObjectMeta.UID)] = struct{}{}
+		}
+	}
+	for _, pod := range pods.Items {
+		if podCreatedBy, ok := pod.ObjectMeta.Labels["kubevirt.io/created-by"]; ok {
+			if _, ok := vmiUIDs[podCreatedBy]; ok {
+				delete(pod.ObjectMeta.Labels, serviceLabelKey(lbName))
+				_, err = c.kubernetes.CoreV1().Pods(c.namespace).Update(&pod)
+				if err != nil {
+					return fmt.Errorf("Failed to update pod: %s: %v", pod.ObjectMeta.Name, err)
+				}
 			}
 		}
 	}
@@ -246,6 +283,6 @@ func buildInstanceIDMap(nodes []*corev1.Node) map[string]struct{} {
 	return instanceIDs
 }
 
-func serviceVmiLabelKey(lbName string) string {
-	return strings.Join([]string{serviceVmiLabelKeyPrefix, lbName}, "/")
+func serviceLabelKey(lbName string) string {
+	return strings.Join([]string{serviceLabelKeyPrefix, lbName}, "/")
 }
