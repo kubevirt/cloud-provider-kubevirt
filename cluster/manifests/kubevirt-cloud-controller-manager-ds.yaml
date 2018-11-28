@@ -38,6 +38,7 @@ spec:
           image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.4
           args:
             - --cloud-provider=kubevirt
+            - --cloud-config=/etc/cloud/cloud-config
             - --use-service-account-credentials=true
             - --kubeconfig=/etc/kubernetes/controller-manager.conf
           volumeMounts:
