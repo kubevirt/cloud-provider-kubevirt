@@ -4,7 +4,7 @@ metadata:
   name: cloud-controller-manager
   namespace: kube-system
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: kubevirt-cloud-controller-manager
@@ -22,42 +22,30 @@ spec:
       labels:
         k8s-app: kubevirt-cloud-controller-manager
     spec:
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-      securityContext:
-        runAsUser: 1001
-      tolerations:
-      - key: node.cloudprovider.kubernetes.io/uninitialized
-        value: "true"
-        effect: NoSchedule
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      serviceAccountName: cloud-controller-manager
       containers:
-        - name: kubevirt-cloud-controller-manager
-          image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.4
-          args:
-            - --cloud-provider=kubevirt
-            - --cloud-config=/etc/cloud/cloud-config
-            - --use-service-account-credentials=true
-            - --kubeconfig=/etc/kubernetes/controller-manager.conf
-          volumeMounts:
-            - mountPath: /etc/kubernetes/pki
-              name: k8s-certs
-              readOnly: true
-            - mountPath: /etc/ssl/certs
-              name: ca-certs
-              readOnly: true
-            - mountPath: /etc/kubernetes/controller-manager.conf
-              name: kubeconfig
-              readOnly: true
-            - mountPath: /etc/cloud
-              name: cloud-config-volume
-              readOnly: true
-          resources:
-            requests:
-              cpu: 200m
-      hostNetwork: true
+      - name: kubevirt-cloud-controller-manager
+        args:
+        - --cloud-provider=kubevirt
+        - --cloud-config=/etc/cloud/cloud-config
+        - --use-service-account-credentials=true
+        - --kubeconfig=/etc/kubernetes/controller-manager.conf
+        image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.4
+        resources:
+          requests:
+            cpu: 100m
+        volumeMounts:
+        - mountPath: /etc/kubernetes/pki
+          name: k8s-certs
+          readOnly: true
+        - mountPath: /etc/ssl/certs
+          name: ca-certs
+          readOnly: true
+        - mountPath: /etc/kubernetes/controller-manager.conf
+          name: kubeconfig
+          readOnly: true
+        - mountPath: /etc/cloud
+          name: cloud-config
+          readOnly: true
       volumes:
       - hostPath:
           path: /etc/kubernetes/pki
@@ -71,6 +59,18 @@ spec:
           path: /etc/kubernetes/controller-manager.conf
           type: FileOrCreate
         name: kubeconfig
-      - name: cloud-config-volume
-        secret:
+      - secret:
           secretName: cloud-config
+        name: cloud-config
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      securityContext:
+        runAsUser: 1001
+      tolerations:
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      serviceAccountName: cloud-controller-manager
+      hostNetwork: true
