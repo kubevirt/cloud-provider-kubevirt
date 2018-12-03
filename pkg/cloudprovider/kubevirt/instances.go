@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	instanceTypeAnnotationKey = "kubevirt.io/flavor"
+	instanceTypeAnnotationKey = "cloud.kubevirt.io/flavor"
 )
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID

@@ -17,7 +17,7 @@ import (
 
 const (
 	// Prefix of the service label to put on VMIs and pods
-	serviceLabelKeyPrefix = "service.kubevirt.io"
+	serviceLabelKeyPrefix = "cloud.kubevirt.io"
 	// Interval in seconds between polling the service after creation
 	loadBalancerCreatePollIntervalSeconds = 5
 )
