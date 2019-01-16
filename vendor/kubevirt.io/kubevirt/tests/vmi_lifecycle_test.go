@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/goexpect"
+	expect "github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -38,8 +38,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/rand"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	"kubevirt.io/kubevirt/pkg/controller"
+
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
+	"kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
@@ -47,7 +50,7 @@ import (
 )
 
 func newCirrosVMI() *v1.VirtualMachineInstance {
-	return tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+	return tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 }
 
 func addNodeAffinityToVMI(vmi *v1.VirtualMachineInstance, nodeName string) {
@@ -79,7 +82,7 @@ var _ = Describe("VMIlifecycle", func() {
 
 	BeforeEach(func() {
 		tests.BeforeTestCleanup()
-		vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+		vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 	})
 
 	AfterEach(func() {
@@ -134,12 +137,10 @@ var _ = Describe("VMIlifecycle", func() {
 			// Add a disk that doesn't map to a volume.
 			// This should get rejected which tells us the webhook validator is working.
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk2",
-				VolumeName: "testvolume2",
+				Name: "testdisk2",
 			})
 
 			result := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do()
@@ -155,8 +156,8 @@ var _ = Describe("VMIlifecycle", func() {
 			Expect(err).To(BeNil(), "Result should be unmarshallable")
 
 			Expect(len(reviewResponse.Details.Causes)).To(Equal(2), "There should be 2 thing wrong in response")
-			Expect(reviewResponse.Details.Causes[0].Field).To(Equal("spec.domain.devices.disks[1].volumeName"))
-			Expect(reviewResponse.Details.Causes[1].Field).To(Equal("spec.domain.devices.disks[2].volumeName"))
+			Expect(reviewResponse.Details.Causes[0].Field).To(Equal("spec.domain.devices.disks[1].name"))
+			Expect(reviewResponse.Details.Causes[1].Field).To(Equal("spec.domain.devices.disks[2].name"))
 		})
 
 		It("should reject PATCH if schema is invalid", func() {
@@ -164,7 +165,7 @@ var _ = Describe("VMIlifecycle", func() {
 			Expect(err).To(BeNil(), "Send POST successfully")
 
 			// Add a disk without a volume reference (this is in valid)
-			patchStr := "{\"apiVersion\":\"kubevirt.io/v1alpha2\",\"kind\":\"VirtualMachineInstance\",\"spec\":{\"domain\":{\"devices\":{\"disks\":[{\"disk\":{\"bus\":\"virtio\"},\"name\":\"fakedisk\"}]}}}}"
+			patchStr := "{\"apiVersion\":\"kubevirt.io/v1alpha3\",\"kind\":\"VirtualMachineInstance\",\"spec\":{\"domain\":{\"devices\":{\"disks\":[{\"disk\":{\"bus\":\"virtio\"},\"name\":\"fakedisk\"}]}}}}"
 
 			result := virtClient.RestClient().Patch(types.MergePatchType).Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Name(vmi.Name).Body([]byte(patchStr)).Do()
 
@@ -176,7 +177,7 @@ var _ = Describe("VMIlifecycle", func() {
 
 		Context("when name is longer than 63 characters", func() {
 			BeforeEach(func() {
-				vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+				vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 				vmi.Name = "testvmi" + rand.String(63)
 			})
 			It("should start it", func() {
@@ -189,7 +190,7 @@ var _ = Describe("VMIlifecycle", func() {
 				tests.WaitForSuccessfulVMIStart(vmi)
 				vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
 				Expect(err).ToNot(HaveOccurred(), "cannot fetch VirtualMachineInstance %q: %v", vmi.Name, err)
-				Expect(vmi.IsReady()).To(BeTrue(), "VirtualMachineInstance %q is not ready: %v", vmi.Name, vmi.Status.Phase)
+				Eventually(controller.NewVirtualMachineInstanceConditionManager().HasConditionWithStatus(vmi, v1.VirtualMachineInstanceConditionType(k8sv1.PodReady), k8sv1.ConditionTrue), 2*time.Second, 100*time.Millisecond).Should(BeTrue(), "VirtualMachineInstance %q is not ready: %v", vmi.Name, vmi.Status.Phase)
 
 				By("Obtaining serial console")
 				expecter, err := tests.LoggedInAlpineExpecter(vmi)
@@ -217,9 +218,9 @@ var _ = Describe("VMIlifecycle", func() {
 		Context("with boot order", func() {
 			table.DescribeTable("should be able to boot from selected disk", func(alpineBootOrder uint, cirrosBootOrder uint, consoleText string, wait int) {
 				By("defining a VirtualMachineInstance with an Alpine disk")
-				vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdataHighMemory(tests.RegistryDiskFor(tests.RegistryDiskAlpine), "#!/bin/sh\n\necho 'hi'\n")
+				vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdataHighMemory(tests.ContainerDiskFor(tests.ContainerDiskAlpine), "#!/bin/sh\n\necho 'hi'\n")
 				By("adding a Cirros Disk")
-				tests.AddEphemeralDisk(vmi, "disk2", "virtio", tests.RegistryDiskFor(tests.RegistryDiskCirros))
+				tests.AddEphemeralDisk(vmi, "disk2", "virtio", tests.ContainerDiskFor(tests.ContainerDiskCirros))
 
 				By("setting boot order")
 				vmi = tests.AddBootOrderToDisk(vmi, "disk0", &alpineBootOrder)
@@ -249,7 +250,7 @@ var _ = Describe("VMIlifecycle", func() {
 			Context("without k8s secret", func() {
 				It("should retry starting the VirtualMachineInstance", func() {
 					userData := fmt.Sprintf("#!/bin/sh\n\necho 'hi'\n")
-					vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), userData)
+					vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), userData)
 
 					for _, volume := range vmi.Spec.Volumes {
 						if volume.CloudInitNoCloud != nil {
@@ -265,7 +266,9 @@ var _ = Describe("VMIlifecycle", func() {
 
 					By("Checking that VirtualMachineInstance was restarted twice")
 					retryCount := 0
-					tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(60 * time.Second).Watch(func(event *k8sv1.Event) bool {
+					stopChan := make(chan struct{})
+					defer close(stopChan)
+					tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(60*time.Second).Watch(stopChan, func(event *k8sv1.Event) bool {
 						if event.Type == "Warning" && event.Reason == v1.SyncFailed.String() {
 							retryCount++
 							if retryCount >= 2 {
@@ -280,7 +283,7 @@ var _ = Describe("VMIlifecycle", func() {
 				It("should log warning and proceed once the secret is there", func() {
 					userData := fmt.Sprintf("#!/bin/sh\n\necho 'hi'\n")
 					userData64 := ""
-					vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), userData)
+					vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), userData)
 
 					for _, volume := range vmi.Spec.Volumes {
 						if volume.CloudInitNoCloud != nil {
@@ -297,7 +300,9 @@ var _ = Describe("VMIlifecycle", func() {
 
 					// Wait until we see that starting the VirtualMachineInstance is failing
 					By("Checking that VirtualMachineInstance start failed")
-					event := tests.NewObjectEventWatcher(createdVMI).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(tests.WarningEvent, v1.SyncFailed)
+					stopChan := make(chan struct{})
+					defer close(stopChan)
+					event := tests.NewObjectEventWatcher(createdVMI).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(stopChan, tests.WarningEvent, v1.SyncFailed)
 					Expect(event.Message).To(ContainSubstring("nonexistent"), "VMI should not be started")
 
 					// Creat nonexistent secret, so that the VirtualMachineInstance can recover
@@ -320,7 +325,7 @@ var _ = Describe("VMIlifecycle", func() {
 
 					// Wait for the VirtualMachineInstance to be started, allow warning events to occur
 					By("Checking that VirtualMachineInstance start succeeded")
-					tests.NewObjectEventWatcher(createdVMI).SinceWatchedObjectResourceVersion().Timeout(30*time.Second).WaitFor(tests.NormalEvent, v1.Started)
+					tests.NewObjectEventWatcher(createdVMI).SinceWatchedObjectResourceVersion().Timeout(30*time.Second).WaitFor(stopChan, tests.NormalEvent, v1.Started)
 				})
 			})
 		})
@@ -337,18 +342,24 @@ var _ = Describe("VMIlifecycle", func() {
 				Expect(err).To(BeNil(), "Should kill virt-launcher successfully")
 
 				By("Waiting for the vm to be stopped")
-				tests.NewObjectEventWatcher(vmi).SinceWatchedObjectResourceVersion().Timeout(60*time.Second).WaitFor(tests.WarningEvent, v1.Stopped)
+				stopChan := make(chan struct{})
+				defer close(stopChan)
+				tests.NewObjectEventWatcher(vmi).SinceWatchedObjectResourceVersion().Timeout(60*time.Second).WaitFor(stopChan, tests.WarningEvent, v1.Stopped)
 
 				By("Checking that VirtualMachineInstance has 'Failed' phase")
-				Expect(func() v1.VirtualMachineInstancePhase {
+				Eventually(func() v1.VirtualMachineInstancePhase {
 					vmi, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
 					Expect(err).ToNot(HaveOccurred(), "Should get VMI successfully")
 					return vmi.Status.Phase
-				}()).To(Equal(v1.Failed), "VMI should be failed")
+				}, 10, 1).Should(Equal(v1.Failed), "VMI should be failed")
 			})
 		})
 
 		Context("when virt-handler crashes", func() {
+			// FIXME: This test has the issues that it tests a lot of different timing scenarios in an intransparent way:
+			// e.g. virt-handler can die before or after virt-launcher. If we wait until virt-handler is dead before we
+			// kill virt-launcher then we don't know if virt-handler already restarted.
+			// Also the virt-handler crash-loop plays a role here. We could also change the daemon-set but then we would not check the crash behaviour.
 			It("should recover and continue management", func() {
 
 				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
@@ -367,14 +378,17 @@ var _ = Describe("VMIlifecycle", func() {
 				err = pkillAllVMIs(virtClient, nodeName)
 				Expect(err).To(BeNil(), "Should kill VMI successfully")
 
-				tests.NewObjectEventWatcher(vmi).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(tests.WarningEvent, v1.Stopped)
+				// Give virt-handler some time. It can greatly vary when virt-handler will be ready again
+				stopChan := make(chan struct{})
+				defer close(stopChan)
+				tests.NewObjectEventWatcher(vmi).Timeout(120*time.Second).SinceWatchedObjectResourceVersion().WaitFor(stopChan, tests.WarningEvent, v1.Stopped)
 
 				By("Checking that VirtualMachineInstance has 'Failed' phase")
-				Expect(func() v1.VirtualMachineInstancePhase {
+				Eventually(func() v1.VirtualMachineInstancePhase {
 					vmi, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
 					Expect(err).ToNot(HaveOccurred(), "Should get VMI successfully")
 					return vmi.Status.Phase
-				}()).To(Equal(v1.Failed), "VMI should be failed")
+				}(), 10, 1).Should(Equal(v1.Failed), "VMI should be failed")
 			})
 		})
 
@@ -419,7 +433,7 @@ var _ = Describe("VMIlifecycle", func() {
 			BeforeEach(func() {
 
 				// Schedule a vmi and make sure that virt-handler gets evicted from the node where the vmi was started
-				vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "echo hi!")
+				vmi = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "echo hi!")
 				vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
 				Expect(err).ToNot(HaveOccurred(), "Should create VMI successfully")
 				nodeName = tests.WaitForSuccessfulVMIStart(vmi)
@@ -527,7 +541,7 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("the vmi with tolerations should be scheduled", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 				vmi.Spec.Tolerations = []k8sv1.Toleration{{Key: "test", Value: "123"}}
 				addNodeAffinityToVMI(vmi, nodes.Items[0].Name)
 				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
@@ -536,7 +550,7 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("the vmi without tolerations should not be scheduled", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 				addNodeAffinityToVMI(vmi, nodes.Items[0].Name)
 				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
 				Expect(err).ToNot(HaveOccurred(), "Should create VMI")
@@ -563,7 +577,7 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("the vmi with node affinity and no conflicts should be scheduled", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 				addNodeAffinityToVMI(vmi, nodes.Items[0].Name)
 				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
 				Expect(err).ToNot(HaveOccurred(), "Should create VMI")
@@ -575,7 +589,7 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("the vmi with node affinity and anti-pod affinity should not be scheduled", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 				addNodeAffinityToVMI(vmi, nodes.Items[0].Name)
 				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
 				Expect(err).ToNot(HaveOccurred(), "Should create VMI")
@@ -584,7 +598,7 @@ var _ = Describe("VMIlifecycle", func() {
 				Expect(err).ToNot(HaveOccurred(), "Should get VMI")
 				Expect(curVMI.Status.NodeName).To(Equal(nodes.Items[0].Name), "VMI should run on the same node")
 
-				vmiB := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmiB := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 				addNodeAffinityToVMI(vmiB, nodes.Items[0].Name)
 
 				vmiB.Spec.Affinity.PodAntiAffinity = &k8sv1.PodAntiAffinity{
@@ -613,6 +627,105 @@ var _ = Describe("VMIlifecycle", func() {
 					return ""
 				}, 60*time.Second, 1*time.Second).Should(Equal("Unschedulable"), "VMI should be unchedulable")
 
+			})
+
+		})
+
+		Context("with node feature discovery", func() {
+
+			var options metav1.GetOptions
+			var cfgMap *k8sv1.ConfigMap
+			var originalData string
+
+			BeforeEach(func() {
+				options = metav1.GetOptions{}
+				cfgMap, err = virtClient.CoreV1().ConfigMaps(namespaceKubevirt).Get("kubevirt-config", options)
+				Expect(err).ToNot(HaveOccurred())
+				originalData = cfgMap.Data[virtconfig.FeatureGatesKey]
+				cfgMap.Data[virtconfig.FeatureGatesKey] = virtconfig.CPUNodeDiscoveryGate
+				_, err = virtClient.CoreV1().ConfigMaps(namespaceKubevirt).Update(cfgMap)
+				Expect(err).ToNot(HaveOccurred())
+				//FIXME improve the detection if virt-controller already received the config-map change
+				time.Sleep(time.Millisecond * 500)
+
+			})
+
+			AfterEach(func() {
+				cfgMap, err = virtClient.CoreV1().ConfigMaps(namespaceKubevirt).Get("kubevirt-config", options)
+				Expect(err).ToNot(HaveOccurred())
+				cfgMap.Data[virtconfig.FeatureGatesKey] = originalData
+				_, err = virtClient.CoreV1().ConfigMaps(namespaceKubevirt).Update(cfgMap)
+				Expect(err).ToNot(HaveOccurred())
+				//FIXME improve the detection if virt-controller already received the config-map change
+				time.Sleep(time.Millisecond * 500)
+			})
+
+			It("the vmi with cpu.model matching a nfd label on a node should be scheduled", func() {
+
+				By("adding a node-feature-discovery CPU model label to a node")
+				nodes, err := virtClient.CoreV1().Nodes().List(metav1.ListOptions{})
+				Expect(err).ToNot(HaveOccurred(), "Should list nodes")
+				Expect(nodes.Items).ToNot(BeEmpty(), "There should be some nodes")
+
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Cores: 1,
+					Model: "Conroe",
+				}
+
+				cpuModelLabel, err := services.CPUModelLabelFromCPUModel(vmi)
+				Expect(err).ToNot(HaveOccurred(), "CPU model label should have been retrieved successfully")
+
+				node := &nodes.Items[0]
+				node, err = virtClient.CoreV1().Nodes().Patch(node.Name, types.StrategicMergePatchType,
+					[]byte(fmt.Sprintf(`{"metadata": { "labels": {"%s": "true"}}}`, cpuModelLabel)))
+				Expect(err).ToNot(HaveOccurred(), "Should patch node successfully")
+
+				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
+				Expect(err).ToNot(HaveOccurred(), "Should create VMI")
+				tests.WaitForSuccessfulVMIStart(vmi)
+
+				curVMI, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred(), "Should get VMI")
+				Expect(curVMI.Status.NodeName).To(Equal(nodes.Items[0].Name), "Updated VMI name run on the node with matching NFD CPU label")
+
+			})
+
+			It("the vmi with cpu.model that cannot match an nfd label on node should not be scheduled", func() {
+
+				nodes, err := virtClient.CoreV1().Nodes().List(metav1.ListOptions{})
+				Expect(err).ToNot(HaveOccurred(), "Should list nodes")
+				Expect(nodes.Items).ToNot(BeEmpty(), "There should be some nodes")
+
+				vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Cores: 1,
+					Model: "Conroe",
+				}
+
+				cpuModelLabel, err := services.CPUModelLabelFromCPUModel(vmi)
+				Expect(err).ToNot(HaveOccurred(), "CPU model label should have been retrieved successfully")
+
+				node := &nodes.Items[0]
+				node, err = virtClient.CoreV1().Nodes().Patch(node.Name, types.StrategicMergePatchType,
+					[]byte(fmt.Sprintf(`{"metadata": { "labels": {"%s": "false"}}}`, cpuModelLabel)))
+				Expect(err).ToNot(HaveOccurred(), "Should patch node successfully")
+
+				//Make sure the vmi should try to be scheduled only on master node
+				vmi.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": node.Name}
+
+				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).Create(vmi)
+				Expect(err).ToNot(HaveOccurred(), "Should create VMI")
+
+				By("Waiting for the VirtualMachineInstance to be unschedulable")
+				Eventually(func() string {
+					curVMI, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
+					Expect(err).ToNot(HaveOccurred(), "Should get vmi")
+					if curVMI.Status.Conditions != nil {
+						return curVMI.Status.Conditions[0].Reason
+					}
+					return ""
+				}, 60*time.Second, 1*time.Second).Should(Equal("Unschedulable"), "VMI should be unchedulable")
 			})
 
 		})
@@ -656,7 +769,9 @@ var _ = Describe("VMIlifecycle", func() {
 				By("Deleting the VirtualMachineInstance")
 				_, err = virtClient.RestClient().Delete().Resource("virtualmachineinstances").Namespace(vmi.GetObjectMeta().GetNamespace()).Name(vmi.GetObjectMeta().GetName()).Do().Get()
 				Expect(err).To(BeNil())
-				tests.NewObjectEventWatcher(vmi).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(tests.NormalEvent, v1.Deleted)
+				stopChan := make(chan struct{})
+				defer close(stopChan)
+				tests.NewObjectEventWatcher(vmi).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(stopChan, tests.NormalEvent, v1.Deleted)
 				tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
 
 				// Check if the stop event was logged
@@ -686,23 +801,13 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("should enable emulation in virt-launcher", func() {
-				err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()
-				Expect(err).To(BeNil(), "Should post VMI successfully")
+				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+				Expect(err).ToNot(HaveOccurred())
 
-				listOptions := metav1.ListOptions{}
-				var pod k8sv1.Pod
+				tests.WaitForSuccessfulVMIStart(vmi)
 
-				Eventually(func() error {
-					podList, err := virtClient.CoreV1().Pods(tests.NamespaceTestDefault).List(listOptions)
-					Expect(err).ToNot(HaveOccurred(), "Should list pods")
-					for _, item := range podList.Items {
-						if strings.HasPrefix(item.Name, vmi.ObjectMeta.GenerateName) {
-							pod = item
-							return nil
-						}
-					}
-					return fmt.Errorf("Associated pod for VirtualMachineInstance '%s' not found", vmi.Name)
-				}, 75, 2).Should(Succeed(), "Should find the right VMI pod")
+				pod := tests.GetRunningPodByVirtualMachineInstance(vmi, vmi.Namespace)
+				Expect(pod).NotTo(BeNil())
 
 				emulationFlagFound := false
 				computeContainerFound := false
@@ -767,23 +872,13 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("should request a TUN device but not KVM", func() {
-				err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()
-				Expect(err).To(BeNil(), "Should post VMI")
+				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+				Expect(err).ToNot(HaveOccurred())
 
-				listOptions := metav1.ListOptions{}
-				var pod k8sv1.Pod
+				tests.WaitForSuccessfulVMIStart(vmi)
 
-				Eventually(func() error {
-					podList, err := virtClient.CoreV1().Pods(tests.NamespaceTestDefault).List(listOptions)
-					Expect(err).ToNot(HaveOccurred(), "Should list pods")
-					for _, item := range podList.Items {
-						if strings.HasPrefix(item.Name, vmi.ObjectMeta.GenerateName) {
-							pod = item
-							return nil
-						}
-					}
-					return fmt.Errorf("Associated pod for VM '%s' not found", vmi.Name)
-				}, 75, 0.5).Should(Succeed(), "Should find VMI pod")
+				pod := tests.GetRunningPodByVirtualMachineInstance(vmi, vmi.Namespace)
+				Expect(pod).NotTo(BeNil())
 
 				computeContainerFound := false
 				for _, container := range pod.Spec.Containers {
@@ -815,23 +910,13 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("should request a KVM and TUN device", func() {
-				err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()
-				Expect(err).To(BeNil(), "Should post VMI")
+				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+				Expect(err).ToNot(HaveOccurred())
 
-				listOptions := metav1.ListOptions{}
-				var pod k8sv1.Pod
+				tests.WaitForSuccessfulVMIStart(vmi)
 
-				Eventually(func() error {
-					podList, err := virtClient.CoreV1().Pods(tests.NamespaceTestDefault).List(listOptions)
-					Expect(err).ToNot(HaveOccurred(), "Should list pods")
-					for _, item := range podList.Items {
-						if strings.HasPrefix(item.Name, vmi.ObjectMeta.GenerateName) {
-							pod = item
-							return nil
-						}
-					}
-					return fmt.Errorf("Associated pod for VM '%s' not found", vmi.Name)
-				}, 75, 0.5).Should(Succeed(), "Should find the VMI pod")
+				pod := tests.GetRunningPodByVirtualMachineInstance(vmi, vmi.Namespace)
+				Expect(pod).NotTo(BeNil())
 
 				computeContainerFound := false
 				for _, container := range pod.Spec.Containers {
@@ -850,23 +935,13 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 
 			It("should not enable emulation in virt-launcher", func() {
-				err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()
-				Expect(err).To(BeNil(), "Should post VMI")
+				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+				Expect(err).ToNot(HaveOccurred())
 
-				listOptions := metav1.ListOptions{}
-				var pod k8sv1.Pod
+				tests.WaitForSuccessfulVMIStart(vmi)
 
-				Eventually(func() error {
-					podList, err := virtClient.CoreV1().Pods(tests.NamespaceTestDefault).List(listOptions)
-					Expect(err).ToNot(HaveOccurred())
-					for _, item := range podList.Items {
-						if strings.HasPrefix(item.Name, vmi.ObjectMeta.GenerateName) {
-							pod = item
-							return nil
-						}
-					}
-					return fmt.Errorf("Associated pod for VM '%s' not found", vmi.Name)
-				}, 75, 0.5).Should(Succeed(), "Should find VMI pod")
+				pod := tests.GetRunningPodByVirtualMachineInstance(vmi, vmi.Namespace)
+				Expect(pod).NotTo(BeNil())
 
 				emulationFlagFound := false
 				computeContainerFound := false
@@ -1001,11 +1076,15 @@ var _ = Describe("VMIlifecycle", func() {
 			})
 		})
 		Context("with ACPI and some grace period seconds", func() {
-			It("should result in vmi status succeeded", func() {
-
+			table.DescribeTable("should result in vmi status succeeded", func(gracePeriod int64) {
 				vmi = newCirrosVMI()
-				gracePeriod := int64(10)
-				vmi.Spec.TerminationGracePeriodSeconds = &gracePeriod
+
+				if gracePeriod >= 0 {
+					vmi.Spec.TerminationGracePeriodSeconds = &gracePeriod
+				} else {
+					gracePeriod = v1.DefaultGracePeriodSeconds
+					vmi.Spec.TerminationGracePeriodSeconds = nil
+				}
 
 				By("Creating the VirtualMachineInstance")
 				obj, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
@@ -1023,7 +1102,10 @@ var _ = Describe("VMIlifecycle", func() {
 					Expect(err).ToNot(HaveOccurred(), "Should get VMI")
 					return currVMI.Status.Phase
 				}, gracePeriod+5, 0.5).Should(Equal(v1.Succeeded), "VMI should be succeeded")
-			})
+			},
+				table.Entry("with set grace period seconds", int64(10)),
+				table.Entry("with default grace period seconds", int64(-1)),
+			)
 		})
 		Context("with grace period greater than 0", func() {
 			It("should run graceful shutdown", func() {
@@ -1055,7 +1137,9 @@ var _ = Describe("VMIlifecycle", func() {
 				// Delete the VirtualMachineInstance and wait for the confirmation of the delete
 				By("Deleting the VirtualMachineInstance")
 				Expect(virtClient.VirtualMachineInstance(vmi.Namespace).Delete(obj.Name, &metav1.DeleteOptions{})).To(Succeed(), "Should delete VMI gracefully")
-				event := tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(75*time.Second).WaitFor(tests.NormalEvent, v1.Deleted)
+				stopChan := make(chan struct{})
+				defer close(stopChan)
+				event := tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(75*time.Second).WaitFor(stopChan, tests.NormalEvent, v1.Deleted)
 				Expect(event).ToNot(BeNil(), "There should be a delete event")
 
 				// Check if the graceful shutdown was logged
@@ -1090,14 +1174,16 @@ var _ = Describe("VMIlifecycle", func() {
 			err = pkillAllVMIs(virtClient, nodeName)
 			Expect(err).To(BeNil(), "Should deploy helper pod to kill VMI")
 
-			tests.NewObjectEventWatcher(obj).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(tests.WarningEvent, v1.Stopped)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+			tests.NewObjectEventWatcher(obj).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(stopChan, tests.WarningEvent, v1.Stopped)
 
 			By("Checking that the VirtualMachineInstance has 'Failed' phase")
-			Expect(func() v1.VirtualMachineInstancePhase {
+			Eventually(func() v1.VirtualMachineInstancePhase {
 				failedVMI, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Get(vmi.Name, &metav1.GetOptions{})
 				Expect(err).ToNot(HaveOccurred(), "Should get VMI")
 				return failedVMI.Status.Phase
-			}()).To(Equal(v1.Failed), "VMI should be failed")
+			}, 10, 1).Should(Equal(v1.Failed), "VMI should be failed")
 
 		})
 
@@ -1113,12 +1199,13 @@ var _ = Describe("VMIlifecycle", func() {
 			Expect(err).To(BeNil(), "Should create kill pod to kill all VMs")
 
 			// Wait for stop event of the VirtualMachineInstance
-			tests.NewObjectEventWatcher(obj).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(tests.WarningEvent, v1.Stopped)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+			tests.NewObjectEventWatcher(obj).Timeout(60*time.Second).SinceWatchedObjectResourceVersion().WaitFor(stopChan, tests.WarningEvent, v1.Stopped)
 
 			// Wait for some time and see if a sync event happens on the stopped VirtualMachineInstance
 			By("Checking that virt-handler does not try to sync stopped VirtualMachineInstance")
-			event := tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(5*time.Second).
-				SinceWatchedObjectResourceVersion().WaitFor(tests.WarningEvent, v1.SyncFailed)
+			event := tests.NewObjectEventWatcher(obj).SinceWatchedObjectResourceVersion().Timeout(10*time.Second).WaitNotFor(stopChan, tests.WarningEvent, v1.SyncFailed)
 			Expect(event).To(BeNil(), "virt-handler tried to sync on a VirtualMachineInstance in final state")
 		})
 	})

@@ -30,7 +30,9 @@ import (
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
+	k8sv1 "k8s.io/api/core/v1"
 	v12 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	v13 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -70,28 +72,11 @@ var _ = Describe("Networking", func() {
 			j, err := virtClient.Core().Pods(inboundVMI.ObjectMeta.Namespace).Get(pod.ObjectMeta.Name, v13.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
 			return j.Status.Phase
-		}, 30*time.Second, 1*time.Second).Should(Or(Equal(v12.PodSucceeded), Equal(v12.PodFailed)))
+		}, 90*time.Second, 1*time.Second).Should(Or(Equal(v12.PodSucceeded), Equal(v12.PodFailed)))
 		j, err := virtClient.Core().Pods(inboundVMI.ObjectMeta.Namespace).Get(pod.ObjectMeta.Name, v13.GetOptions{})
 		Expect(err).ToNot(HaveOccurred())
 		logPodLogs(pod)
 		return j.Status.Phase
-	}
-
-	startTCPServer := func(vmi *v1.VirtualMachineInstance, port int) {
-		expecter, err := tests.LoggedInCirrosExpecter(vmi)
-		Expect(err).ToNot(HaveOccurred())
-		defer expecter.Close()
-
-		resp, err := expecter.ExpectBatch([]expect.Batcher{
-			&expect.BSnd{S: "\n"},
-			&expect.BExp{R: "\\$ "},
-			&expect.BSnd{S: fmt.Sprintf("screen -d -m nc -klp %d -e echo -e \"Hello World!\"\n", port)},
-			&expect.BExp{R: "\\$ "},
-			&expect.BSnd{S: "echo $?\n"},
-			&expect.BExp{R: "0"},
-		}, 60*time.Second)
-		log.DefaultLogger().Infof("%v", resp)
-		Expect(err).ToNot(HaveOccurred())
 	}
 
 	checkMacAddress := func(vmi *v1.VirtualMachineInstance, expectedMacAddress string, prompt string) {
@@ -126,22 +111,22 @@ var _ = Describe("Networking", func() {
 			// Prepare inbound and outbound VMI definitions
 
 			// inboundVMI expects implicitly to be added to the pod network
-			inboundVMI = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			inboundVMI = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 			inboundVMI.Labels = map[string]string{"expose": "me"}
 			inboundVMI.Spec.Subdomain = "myvmi"
 			inboundVMI.Spec.Hostname = "my-subdomain"
 			Expect(inboundVMI.Spec.Domain.Devices.Interfaces).To(BeEmpty())
 
 			// outboundVMI is used to connect to other vms
-			outboundVMI = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			outboundVMI = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 
 			// inboudnVMIWithPodNetworkSet adds itself in an explicit fashion to the pod network
-			inboundVMIWithPodNetworkSet = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			inboundVMIWithPodNetworkSet = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 			v1.SetDefaults_NetworkInterface(inboundVMIWithPodNetworkSet)
 			Expect(inboundVMIWithPodNetworkSet.Spec.Domain.Devices.Interfaces).NotTo(BeEmpty())
 
 			// inboundVMIWithCustomMacAddress specifies a custom MAC address
-			inboundVMIWithCustomMacAddress = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			inboundVMIWithCustomMacAddress = tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 			v1.SetDefaults_NetworkInterface(inboundVMIWithCustomMacAddress)
 			Expect(inboundVMIWithCustomMacAddress.Spec.Domain.Devices.Interfaces).NotTo(BeEmpty())
 			inboundVMIWithCustomMacAddress.Spec.Domain.Devices.Interfaces[0].MacAddress = "de:ad:00:00:be:af"
@@ -158,14 +143,14 @@ var _ = Describe("Networking", func() {
 			inboundVMIWithPodNetworkSet = tests.WaitUntilVMIReady(inboundVMIWithPodNetworkSet, tests.LoggedInCirrosExpecter)
 			inboundVMIWithCustomMacAddress = tests.WaitUntilVMIReady(inboundVMIWithCustomMacAddress, tests.LoggedInCirrosExpecter)
 
-			startTCPServer(inboundVMI, testPort)
+			tests.StartTCPServer(inboundVMI, testPort)
 		})
 
 		table.DescribeTable("should be able to reach", func(destination string) {
 			var cmdCheck, addrShow, addr string
 
 			if destination == "InboundVMIWithCustomMacAddress" {
-				tests.SkipIfOpenShift("Custom MAC addresses on pod networks are not suppored")
+				tests.SkipIfOpenShift("Custom MAC addresses on pod networks are not supported")
 			}
 
 			// assuming pod network is of standard MTU = 1500 (minus 50 bytes for vxlan overhead)
@@ -189,7 +174,7 @@ var _ = Describe("Networking", func() {
 			output, err := tests.ExecuteCommandOnPod(
 				virtClient,
 				vmiPod,
-				vmiPod.Spec.Containers[0].Name,
+				"compute",
 				[]string{"ip", "address", "show", "k6t-eth0"},
 			)
 			log.Log.Infof("%v", output)
@@ -377,12 +362,24 @@ var _ = Describe("Networking", func() {
 		})
 
 		Context("VirtualMachineInstance with default interface model", func() {
+			// Unless an explicit interface model is specified, the default interface model is virtio.
 			It("should expose the right device type to the guest", func() {
 				By("checking the device vendor in /sys/class")
+
+				// Taken from https://wiki.osdev.org/Virtio#Technical_Details
+				virtio_vid := "0x1af4"
+
 				for _, networkVMI := range []*v1.VirtualMachineInstance{inboundVMI, outboundVMI} {
 					// as defined in https://vendev.org/pci/ven_1af4/
-					checkNetworkVendor(networkVMI, "0x1af4", "\\$ ")
+					checkNetworkVendor(networkVMI, virtio_vid, "\\$ ")
 				}
+			})
+
+			It("should reject the creation of virtual machine with unsupported interface model", func() {
+				// Create a virtual machine with an unsupported interface model
+				customIfVMI := NewRandomVMIWithInvalidNetworkInterface()
+				_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(customIfVMI)
+				Expect(err).To(HaveOccurred())
 			})
 		})
 	})
@@ -445,7 +442,7 @@ var _ = Describe("Networking", func() {
 
 		It("should configure custom MAC address", func() {
 			By("checking eth0 MAC address")
-			deadbeafVMI := tests.NewRandomVMIWithSlirpInterfaceEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskAlpine), "#!/bin/bash\necho 'hello'\n", []v1.Port{})
+			deadbeafVMI := tests.NewRandomVMIWithSlirpInterfaceEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskAlpine), "#!/bin/bash\necho 'hello'\n", []v1.Port{})
 			deadbeafVMI.Spec.Domain.Devices.Interfaces[0].MacAddress = "de:ad:00:00:be:af"
 			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(deadbeafVMI)
 			Expect(err).ToNot(HaveOccurred())
@@ -463,7 +460,7 @@ var _ = Describe("Networking", func() {
 		It("should not configure any external interfaces", func() {
 			By("checking loopback is the only guest interface")
 			autoAttach := false
-			detachedVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			detachedVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 			detachedVMI.Spec.Domain.Devices.AutoattachPodInterface = &autoAttach
 
 			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(detachedVMI)
@@ -482,7 +479,7 @@ var _ = Describe("Networking", func() {
 		It("should not request a tun device", func() {
 			By("Creating random VirtualMachineInstance")
 			autoAttach := false
-			vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+			vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 
 			vmi.Spec.Domain.Devices.AutoattachPodInterface = &autoAttach
 
@@ -542,7 +539,7 @@ var _ = Describe("Networking", func() {
 
 		It("should configure custom Pci address", func() {
 			By("checking eth0 Pci address")
-			testVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+			testVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 			tests.AddExplicitPodNetworkInterface(testVMI)
 			testVMI.Spec.Domain.Devices.Interfaces[0].PciAddress = "0000:81:00.1"
 			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(testVMI)
@@ -560,12 +557,161 @@ var _ = Describe("Networking", func() {
 
 		It("should disable learning on pod iface", func() {
 			By("checking learning flag")
-			learningDisabledVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskAlpine), "#!/bin/bash\necho 'hello'\n")
+			learningDisabledVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskAlpine), "#!/bin/bash\necho 'hello'\n")
 			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(learningDisabledVMI)
 			Expect(err).ToNot(HaveOccurred())
 
 			tests.WaitUntilVMIReady(learningDisabledVMI, tests.LoggedInAlpineExpecter)
 			checkLearningState(learningDisabledVMI, "0")
+		})
+	})
+
+	Context("VirtualMachineInstance with dhcp options", func() {
+		BeforeEach(func() {
+			tests.BeforeTestCleanup()
+		})
+
+		It("should offer extra dhcp options to pod iface", func() {
+			userData := "#cloud-config\npassword: fedora\nchpasswd: { expire: False }\n"
+			dhcpVMI := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskFedora), userData)
+			tests.AddExplicitPodNetworkInterface(dhcpVMI)
+
+			dhcpVMI.Spec.Domain.Resources.Requests[k8sv1.ResourceName("memory")] = resource.MustParse("1024M")
+			dhcpVMI.Spec.Domain.Devices.Interfaces[0].DHCPOptions = &v1.DHCPOptions{
+				BootFileName:   "config",
+				TFTPServerName: "tftp.kubevirt.io",
+				NTPServers:     []string{"127.0.0.1", "127.0.0.2"},
+			}
+
+			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(dhcpVMI)
+			Expect(err).ToNot(HaveOccurred())
+
+			tests.WaitUntilVMIReady(dhcpVMI, tests.LoggedInFedoraExpecter)
+
+			err = tests.CheckForTextExpecter(dhcpVMI, []expect.Batcher{
+				&expect.BSnd{S: "\n"},
+				&expect.BExp{R: "#"},
+				&expect.BSnd{S: "sudo dhclient -1 -r -d eth0\n"},
+				&expect.BExp{R: "#"},
+				&expect.BSnd{S: "sudo dhclient -1 -sf /usr/bin/env --request-options subnet-mask,broadcast-address,time-offset,routers,domain-search,domain-name,domain-name-servers,host-name,nis-domain,nis-servers,ntp-servers,interface-mtu,tftp-server-name,bootfile-name eth0 | tee /dhcp-env\n"},
+				&expect.BExp{R: "#"},
+				&expect.BSnd{S: "cat /dhcp-env\n"},
+				&expect.BExp{R: "new_tftp_server_name=tftp.kubevirt.io"},
+				&expect.BExp{R: "#"},
+				&expect.BSnd{S: "cat /dhcp-env\n"},
+				&expect.BExp{R: "new_bootfile_name=config"},
+				&expect.BExp{R: "#"},
+				&expect.BSnd{S: "cat /dhcp-env\n"},
+				&expect.BExp{R: "new_ntp_servers=127.0.0.1 127.0.0.2"},
+				&expect.BExp{R: "#"},
+			}, 15)
+
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("VirtualMachineInstance with masquerade binding mechanism", func() {
+		var serverVMI *v1.VirtualMachineInstance
+		var clientVMI *v1.VirtualMachineInstance
+
+		masqueradeVMI := func(containerImage string, userData string, Ports []v1.Port) *v1.VirtualMachineInstance {
+			vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(containerImage, userData)
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{Name: "default", Ports: Ports, InterfaceBindingMethod: v1.InterfaceBindingMethod{Masquerade: &v1.InterfaceMasquerade{}}}}
+			vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+
+			return vmi
+		}
+
+		It("should allow regular network connection", func() {
+			By("creating two virtual machines")
+			ports := []v1.Port{{Name: "http", Port: 8080}}
+			serverVMI = masqueradeVMI(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n", ports)
+			serverVMI.Labels = map[string]string{"expose": "server"}
+			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(serverVMI)
+			Expect(err).ToNot(HaveOccurred())
+
+			clientVMI = masqueradeVMI(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n", []v1.Port{})
+			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(clientVMI)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("waiting for the virtual machines to become ready")
+
+			tests.WaitUntilVMIReady(serverVMI, tests.LoggedInCirrosExpecter)
+			tests.WaitUntilVMIReady(clientVMI, tests.LoggedInCirrosExpecter)
+
+			serverVMI, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Get(serverVMI.Name, &v13.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(len(serverVMI.Status.Interfaces)).To(Equal(1))
+
+			By("checking ping to google")
+			pingVirtualMachine(serverVMI, "8.8.8.8", "\\$ ")
+			pingVirtualMachine(clientVMI, "google.com", "\\$ ")
+
+			By("starting a tcp server")
+			err = tests.CheckForTextExpecter(serverVMI, []expect.Batcher{
+				&expect.BSnd{S: "\n"},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: "screen -d -m sudo nc -klp 8080 -e echo -e 'Hello World!'\n"},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: "echo $?\n"},
+				&expect.BExp{R: "0"},
+			}, 30)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Connecting from the client vm")
+			err = tests.CheckForTextExpecter(clientVMI, []expect.Batcher{
+				&expect.BSnd{S: "\n"},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: fmt.Sprintf("echo test | nc %s 8080 -i 1 -w 1 1> /dev/null\n", serverVMI.Status.Interfaces[0].IP)},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: "echo $?\n"},
+				&expect.BExp{R: "0"},
+			}, 30)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Rejecting the connection from the client to unregistered port")
+			err = tests.CheckForTextExpecter(clientVMI, []expect.Batcher{
+				&expect.BSnd{S: "\n"},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: fmt.Sprintf("echo test | nc %s 8081 -i 1 -w 1 1> /dev/null\n", serverVMI.Status.Interfaces[0].IP)},
+				&expect.BExp{R: "\\$ "},
+				&expect.BSnd{S: "echo $?\n"},
+				&expect.BExp{R: "1"},
+			}, 30)
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("VirtualMachineInstance with TX offload disabled", func() {
+		BeforeEach(func() {
+			tests.BeforeTestCleanup()
+		})
+
+		It("should get turned off for interfaces that serve dhcp", func() {
+			vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskAlpine), "#!/bin/bash\necho")
+			vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceName("memory")] = resource.MustParse("1024M")
+
+			_, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			tests.WaitUntilVMIReady(vmi, tests.LoggedInAlpineExpecter)
+
+			output := tests.RunCommandOnVmiPod(vmi, []string{"python3", "-c", `import array
+import fcntl
+import socket
+import struct
+SIOCETHTOOL     = 0x8946
+ETHTOOL_GTXCSUM = 0x00000016
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sockfd = sock.fileno()
+ecmd = array.array('B', struct.pack('I39s', ETHTOOL_GTXCSUM, b'\x00'*39))
+ifreq = struct.pack('16sP', str.encode('k6t-eth0'), ecmd.buffer_info()[0])
+fcntl.ioctl(sockfd, SIOCETHTOOL, ifreq)
+res = ecmd.tostring()
+print(res[4])
+sock = None
+sockfd = None`})
+
+			ExpectWithOffset(1, strings.TrimSpace(output)).To(Equal("0"))
 		})
 	})
 })
@@ -584,5 +730,13 @@ func waitUntilVMIReady(vmi *v1.VirtualMachineInstance, expecterFactory tests.VMI
 	expecter, err := expecterFactory(vmi)
 	Expect(err).ToNot(HaveOccurred())
 	expecter.Close()
+	return vmi
+}
+
+func NewRandomVMIWithInvalidNetworkInterface() *v1.VirtualMachineInstance {
+	// Use alpine because cirros dhcp client starts prematurily before link is ready
+	vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
+	tests.AddExplicitPodNetworkInterface(vmi)
+	vmi.Spec.Domain.Devices.Interfaces[0].Model = "gibberish"
 	return vmi
 }

@@ -29,10 +29,15 @@ import (
 	"io"
 	"time"
 
+	secv1 "github.com/openshift/client-go/security/clientset/versioned/typed/security/v1"
+	autov1 "k8s.io/api/autoscaling/v1"
+	extclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	networkclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 
 	cdiclient "kubevirt.io/containerized-data-importer/pkg/client/clientset/versioned"
 	"kubevirt.io/kubevirt/pkg/api/v1"
@@ -43,23 +48,47 @@ type KubevirtClient interface {
 	VirtualMachineInstanceMigration(namespace string) VirtualMachineInstanceMigrationInterface
 	ReplicaSet(namespace string) ReplicaSetInterface
 	VirtualMachine(namespace string) VirtualMachineInterface
+	KubeVirt(namespace string) KubeVirtInterface
 	ServerVersion() *ServerVersion
 	RestClient() *rest.RESTClient
 	CdiClient() cdiclient.Interface
+	NetworkClient() networkclient.Interface
+	ExtensionsClient() extclient.Interface
+	SecClient() secv1.SecurityV1Interface
 	kubernetes.Interface
+	Config() *rest.Config
 }
 
 type kubevirt struct {
-	master     string
-	kubeconfig string
-	restClient *rest.RESTClient
-	config     *rest.Config
-	cdiClient  *cdiclient.Clientset
+	master           string
+	kubeconfig       string
+	restClient       *rest.RESTClient
+	config           *rest.Config
+	cdiClient        *cdiclient.Clientset
+	networkClient    *networkclient.Clientset
+	extensionsClient *extclient.Clientset
+	secClient        *secv1.SecurityV1Client
 	*kubernetes.Clientset
+}
+
+func (k kubevirt) Config() *rest.Config {
+	return k.config
 }
 
 func (k kubevirt) CdiClient() cdiclient.Interface {
 	return k.cdiClient
+}
+
+func (k kubevirt) NetworkClient() networkclient.Interface {
+	return k.networkClient
+}
+
+func (k kubevirt) ExtensionsClient() extclient.Interface {
+	return k.extensionsClient
+}
+
+func (k kubevirt) SecClient() secv1.SecurityV1Interface {
+	return k.secClient
 }
 
 func (k kubevirt) RestClient() *rest.RESTClient {
@@ -92,6 +121,9 @@ type ReplicaSetInterface interface {
 	Create(*v1.VirtualMachineInstanceReplicaSet) (*v1.VirtualMachineInstanceReplicaSet, error)
 	Update(*v1.VirtualMachineInstanceReplicaSet) (*v1.VirtualMachineInstanceReplicaSet, error)
 	Delete(name string, options *k8smetav1.DeleteOptions) error
+	GetScale(replicaSetName string, options k8smetav1.GetOptions) (*autov1.Scale, error)
+	UpdateScale(replicaSetName string, scale *autov1.Scale) (*autov1.Scale, error)
+	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstanceReplicaSet, err error)
 }
 
 type VMIPresetInterface interface {
@@ -112,6 +144,7 @@ type VirtualMachineInterface interface {
 	Update(*v1.VirtualMachine) (*v1.VirtualMachine, error)
 	Delete(name string, options *k8smetav1.DeleteOptions) error
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachine, err error)
+	Restart(name string) error
 }
 
 type VirtualMachineInstanceMigrationInterface interface {
@@ -121,4 +154,13 @@ type VirtualMachineInstanceMigrationInterface interface {
 	Update(*v1.VirtualMachineInstanceMigration) (*v1.VirtualMachineInstanceMigration, error)
 	Delete(name string, options *k8smetav1.DeleteOptions) error
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstanceMigration, err error)
+}
+
+type KubeVirtInterface interface {
+	Get(name string, options *k8smetav1.GetOptions) (*v1.KubeVirt, error)
+	List(opts *k8smetav1.ListOptions) (*v1.KubeVirtList, error)
+	Create(instance *v1.KubeVirt) (*v1.KubeVirt, error)
+	Update(*v1.KubeVirt) (*v1.KubeVirt, error)
+	Delete(name string, options *k8smetav1.DeleteOptions) error
+	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.KubeVirt, err error)
 }

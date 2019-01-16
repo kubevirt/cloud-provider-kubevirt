@@ -22,27 +22,27 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
-	"github.com/ghodss/yaml"
+	"kubevirt.io/kubevirt/tools/util"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
-	"kubevirt.io/kubevirt/pkg/virt-api/webhooks/validating-webhook"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
+	validating_webhook "kubevirt.io/kubevirt/pkg/virt-api/webhooks/validating-webhook"
 	"kubevirt.io/kubevirt/tools/vms-generator/utils"
 )
 
 func main() {
-	flag.StringVar(&utils.DockerPrefix, "docker-prefix", utils.DockerPrefix, "")
-	flag.StringVar(&utils.DockerTag, "docker-tag", utils.DockerTag, "")
+	flag.StringVar(&utils.DockerPrefix, "container-prefix", utils.DockerPrefix, "")
+	flag.StringVar(&utils.DockerTag, "container-tag", utils.DockerTag, "")
 	genDir := flag.String("generated-vms-dir", "", "")
 	flag.Parse()
 
 	// Required to validate DataVolume usage
-	os.Setenv("FEATURE_GATES", "DataVolumes,LiveMigration")
+	os.Setenv("FEATURE_GATES", "DataVolumes,LiveMigration,SRIOV")
 
 	var vms = map[string]*v1.VirtualMachine{
 		utils.VmCirros:           utils.GetVMCirros(),
@@ -61,11 +61,13 @@ func main() {
 		utils.VmiBlockPVC:          utils.GetVMIBlockPvc(),
 		utils.VmiWindows:           utils.GetVMIWindows(),
 		utils.VmiSlirp:             utils.GetVMISlirp(),
+		utils.VmiSRIOV:             utils.GetVMISRIOV(),
 		utils.VmiWithHookSidecar:   utils.GetVMIWithHookSidecar(),
 		utils.VmiMultusPtp:         utils.GetVMIMultusPtp(),
 		utils.VmiMultusMultipleNet: utils.GetVMIMultusMultipleNet(),
 		utils.VmiGeniePtp:          utils.GetVMIGeniePtp(),
 		utils.VmiGenieMultipleNet:  utils.GetVMIGenieMultipleNet(),
+		utils.VmiMasquerade:        utils.GetVMIMasquerade(),
 		utils.VmiHostDisk:          utils.GetVMIHostDisk(),
 	}
 
@@ -107,15 +109,15 @@ func main() {
 	}
 
 	dumpObject := func(name string, obj interface{}) error {
-		data, err := yaml.Marshal(obj)
-		if err != nil {
-			return fmt.Errorf("Failed to generate yaml for %s: %s", name, err)
-		}
 
-		err = ioutil.WriteFile(filepath.Join(*genDir, fmt.Sprintf("%s.yaml", name)), data, 0644)
+		filename := filepath.Join(*genDir, fmt.Sprintf("%s.yaml", name))
+		file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
-			return fmt.Errorf("Failed to write yaml file: %s", err)
+			return fmt.Errorf("Failed to open file %v, %v", filename, err)
 		}
+		defer file.Close()
+
+		util.MarshallObject(obj, file)
 
 		return nil
 	}

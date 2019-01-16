@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
 )
@@ -52,6 +52,9 @@ var _ = Describe("DataVolume Integration", func() {
 	})
 
 	runVMIAndExpectLaunch := func(vmi *v1.VirtualMachineInstance, timeout int) *v1.VirtualMachineInstance {
+		By("Checking that the DataVolume has succeeded")
+		tests.WaitForSuccessfulDataVolumeImport(vmi, timeout)
+
 		By("Starting a VirtualMachineInstance with DataVolume")
 		var obj *v1.VirtualMachineInstance
 		var err error
@@ -59,6 +62,7 @@ var _ = Describe("DataVolume Integration", func() {
 			obj, err = virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
 			return err
 		}, timeout, 1*time.Second).ShouldNot(HaveOccurred())
+
 		By("Waiting until the VirtualMachineInstance will start")
 		tests.WaitForSuccessfulVMIStartWithTimeout(obj, timeout)
 		return obj
@@ -77,7 +81,7 @@ var _ = Describe("DataVolume Integration", func() {
 				num := 2
 				By("Starting and stopping the VirtualMachineInstance a number of times")
 				for i := 1; i <= num; i++ {
-					vmi := runVMIAndExpectLaunch(vmi, 120)
+					vmi := runVMIAndExpectLaunch(vmi, 240)
 
 					// Verify console on last iteration to verify the VirtualMachineInstance is still booting properly
 					// after being restarted multiple times

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/goexpect"
+	expect "github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	v13 "k8s.io/api/core/v1"
@@ -35,7 +35,7 @@ import (
 	v12 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/util/net/dns"
 	"kubevirt.io/kubevirt/pkg/virtctl/vm"
@@ -56,7 +56,7 @@ var _ = Describe("VirtualMachine", func() {
 	Context("An invalid VirtualMachine given", func() {
 
 		It("should be rejected on POST", func() {
-			vmiImage := tests.RegistryDiskFor(tests.RegistryDiskCirros)
+			vmiImage := tests.ContainerDiskFor(tests.ContainerDiskCirros)
 			template := tests.NewRandomVMIWithEphemeralDiskAndUserdata(vmiImage, "echo Hi\n")
 			newVMI := NewRandomVirtualMachine(template, false)
 			newVMI.TypeMeta = v12.TypeMeta{
@@ -79,13 +79,12 @@ var _ = Describe("VirtualMachine", func() {
 
 		})
 		It("should reject POST if validation webhoook deems the spec is invalid", func() {
-			vmiImage := tests.RegistryDiskFor(tests.RegistryDiskCirros)
+			vmiImage := tests.ContainerDiskFor(tests.ContainerDiskCirros)
 			template := tests.NewRandomVMIWithEphemeralDiskAndUserdata(vmiImage, "echo Hi\n")
 			// Add a disk that doesn't map to a volume.
 			// This should get rejected which tells us the webhook validator is working.
 			template.Spec.Domain.Devices.Disks = append(template.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			newVMI := NewRandomVirtualMachine(template, false)
 			newVMI.TypeMeta = v12.TypeMeta{
@@ -106,14 +105,14 @@ var _ = Describe("VirtualMachine", func() {
 			Expect(err).To(BeNil())
 
 			Expect(len(reviewResponse.Details.Causes)).To(Equal(1))
-			Expect(reviewResponse.Details.Causes[0].Field).To(Equal("spec.template.spec.domain.devices.disks[2].volumeName"))
+			Expect(reviewResponse.Details.Causes[0].Field).To(Equal("spec.template.spec.domain.devices.disks[2].name"))
 		})
 	})
 
 	Context("A valid VirtualMachine given", func() {
 
 		newVirtualMachine := func(running bool) *v1.VirtualMachine {
-			vmiImage := tests.RegistryDiskFor(tests.RegistryDiskCirros)
+			vmiImage := tests.ContainerDiskFor(tests.ContainerDiskCirros)
 			template := tests.NewRandomVMIWithEphemeralDiskAndUserdata(vmiImage, "echo Hi\n")
 
 			var newVMI *v1.VirtualMachine

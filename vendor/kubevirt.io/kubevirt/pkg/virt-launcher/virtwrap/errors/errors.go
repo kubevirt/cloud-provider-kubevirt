@@ -22,7 +22,7 @@ package errors
 import (
 	"fmt"
 
-	"github.com/libvirt/libvirt-go"
+	libvirt "github.com/libvirt/libvirt-go"
 )
 
 func checkError(err error, expectedError libvirt.ErrorNumber) bool {
@@ -37,6 +37,11 @@ func checkError(err error, expectedError libvirt.ErrorNumber) bool {
 // IsNotFound detects libvirt's ERR_NO_DOMAIN. It accepts both error and libvirt.Error (as returned by GetLastError function).
 func IsNotFound(err error) bool {
 	return checkError(err, libvirt.ERR_NO_DOMAIN)
+}
+
+// IsInvalidOperation detects libvirt's VIR_ERR_OPERATION_INVALID. It accepts both error and libvirt.Error (as returned by GetLastError function).
+func IsInvalidOperation(err error) bool {
+	return checkError(err, libvirt.ERR_OPERATION_INVALID)
 }
 
 // IsOk detects libvirt's ERR_OK. It accepts both error and libvirt.Error (as returned by GetLastError function).

@@ -21,23 +21,5 @@ spec:
           values:
           - node01
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: local
+  storageClassName: local-block
   volumeMode: Block
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: local-block-storage-cirros
-  labels:
-    kubevirt.io: ""
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  volumeMode: Block
-  storageClassName: local
-  selector:
-    matchLabels:
-      blockstorage: "cirros"

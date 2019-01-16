@@ -55,6 +55,7 @@ func addInfoToSwaggerObject(swo *spec.Swagger) {
 			},
 		},
 	}
+	swo.Swagger = "2.0"
 	swo.Security = make([]map[string][]string, 1)
 	swo.Security[0] = map[string][]string{"BearerToken": {}}
 }
@@ -67,10 +68,12 @@ func LoadOpenAPISpec(webServices []*restful.WebService) *spec.Swagger {
 	// https://github.com/kubernetes/kubernetes/issues/66899 is ready
 	// Otherwise CRDs can't use templates which contain metadata and controllers
 	// can't set conditions without timestamps
-	objectMeta := openapispec.Definitions["v1.ObjectMeta"]
-	prop := objectMeta.Properties["creationTimestamp"]
-	prop.Type = spec.StringOrArray{"string", "null"}
-	objectMeta.Properties["creationTimestamp"] = prop
+	objectMeta, exists := openapispec.Definitions["v1.ObjectMeta"]
+	if exists {
+		prop := objectMeta.Properties["creationTimestamp"]
+		prop.Type = spec.StringOrArray{"string", "null"}
+		objectMeta.Properties["creationTimestamp"] = prop
+	}
 
 	for k, s := range openapispec.Definitions {
 		if strings.HasSuffix(k, "Condition") {
@@ -80,6 +83,16 @@ func LoadOpenAPISpec(webServices []*restful.WebService) *spec.Swagger {
 			prop = s.Properties["lastTransitionTime"]
 			prop.Type = spec.StringOrArray{"string", "null"}
 			s.Properties["lastTransitionTime"] = prop
+		}
+		if k == "v1.HTTPGetAction" {
+			prop := s.Properties["port"]
+			prop.Type = spec.StringOrArray{"string", "number"}
+			s.Properties["port"] = prop
+		}
+		if k == "v1.TCPSocketAction" {
+			prop := s.Properties["port"]
+			prop.Type = spec.StringOrArray{"string", "number"}
+			s.Properties["port"] = prop
 		}
 	}
 

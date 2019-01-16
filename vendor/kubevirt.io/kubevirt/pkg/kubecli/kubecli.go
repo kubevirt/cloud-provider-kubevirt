@@ -23,8 +23,11 @@ package kubecli
 import (
 	"flag"
 	"os"
+	"sync"
 
+	secv1 "github.com/openshift/client-go/security/clientset/versioned/typed/security/v1"
 	"github.com/spf13/pflag"
+	extclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
@@ -33,14 +36,19 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	networkclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
+
 	cdiclient "kubevirt.io/containerized-data-importer/pkg/client/clientset/versioned"
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 )
 
 var (
 	kubeconfig string
 	master     string
 )
+
+var virtclient KubevirtClient
+var once sync.Once
 
 func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
@@ -73,12 +81,30 @@ func GetKubevirtSubresourceClientFromFlags(master string, kubeconfig string) (Ku
 		return nil, err
 	}
 
+	networkClient, err := networkclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	extensionsClient, err := extclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	secClient, err := secv1.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	return &kubevirt{
 		master,
 		kubeconfig,
 		restClient,
 		config,
 		cdiClient,
+		networkClient,
+		extensionsClient,
+		secClient,
 		coreClient,
 	}, nil
 }
@@ -177,12 +203,30 @@ func GetKubevirtClientFromRESTConfig(config *rest.Config) (KubevirtClient, error
 		return nil, err
 	}
 
+	networkClient, err := networkclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	extensionsClient, err := extclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	secClient, err := secv1.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	return &kubevirt{
 		master,
 		kubeconfig,
 		restClient,
 		config,
 		cdiClient,
+		networkClient,
+		extensionsClient,
+		secClient,
 		coreClient,
 	}, nil
 }
@@ -196,7 +240,11 @@ func GetKubevirtClientFromFlags(master string, kubeconfig string) (KubevirtClien
 }
 
 func GetKubevirtClient() (KubevirtClient, error) {
-	return GetKubevirtClientFromFlags(master, kubeconfig)
+	var err error
+	once.Do(func() {
+		virtclient, err = GetKubevirtClientFromFlags(master, kubeconfig)
+	})
+	return virtclient, err
 }
 
 func GetKubevirtSubresourceClient() (KubevirtClient, error) {

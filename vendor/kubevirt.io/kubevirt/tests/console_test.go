@@ -23,12 +23,12 @@ import (
 	"flag"
 	"time"
 
-	"github.com/google/goexpect"
+	expect "github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	k8sv1 "k8s.io/api/core/v1"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
 )
@@ -49,7 +49,7 @@ var _ = Describe("Console", func() {
 		Expect(virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()).To(Succeed())
 
 		By("Waiting until it starts")
-		tests.WaitForSuccessfulVMIStartWithTimeout(vmi, 90)
+		tests.WaitForSuccessfulVMIStart(vmi)
 	}
 
 	ExpectConsoleOutput := func(vmi *v1.VirtualMachineInstance, expected string) {
@@ -79,8 +79,9 @@ var _ = Describe("Console", func() {
 	Describe("A new VirtualMachineInstance", func() {
 		Context("with a serial console", func() {
 			Context("with a cirros image", func() {
+
 				It("should return that we are running cirros", func() {
-					vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.RegistryDiskFor(tests.RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+					vmi := tests.NewRandomVMIWithEphemeralDiskAndUserdata(tests.ContainerDiskFor(tests.ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 					RunVMIAndWaitForStart(vmi)
 					ExpectConsoleOutput(
 						vmi,
@@ -91,7 +92,7 @@ var _ = Describe("Console", func() {
 
 			Context("with a fedora image", func() {
 				It("should return that we are running fedora", func() {
-					vmi := tests.NewRandomVMIWithEphemeralDiskHighMemory(tests.RegistryDiskFor(tests.RegistryDiskFedora))
+					vmi := tests.NewRandomVMIWithEphemeralDiskHighMemory(tests.ContainerDiskFor(tests.ContainerDiskFedora))
 					RunVMIAndWaitForStart(vmi)
 					ExpectConsoleOutput(
 						vmi,
@@ -101,7 +102,7 @@ var _ = Describe("Console", func() {
 			})
 
 			It("should be able to reconnect to console multiple times", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 
 				RunVMIAndWaitForStart(vmi)
 
@@ -110,8 +111,8 @@ var _ = Describe("Console", func() {
 				}
 			}, 220)
 
-			It("should close console connection when new console connection is opened", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+			It("should close console connection when new console connection is opened", func(done Done) {
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 
 				RunVMIAndWaitForStart(vmi)
 
@@ -124,7 +125,8 @@ var _ = Describe("Console", func() {
 					defer GinkgoRecover()
 					select {
 					case receivedErr := <-errChan:
-						Expect(receivedErr.Error()).To(ContainSubstring("closed"))
+						Expect(receivedErr.Error()).To(ContainSubstring("close"))
+						close(done)
 					case <-time.After(60 * time.Second):
 						Fail("timed out waiting for closed 1st connection")
 					}
@@ -132,20 +134,20 @@ var _ = Describe("Console", func() {
 
 				By("opening 2nd console connection")
 				ExpectConsoleOutput(vmi, "login")
-
 			}, 220)
 
 			It("should wait until the virtual machine is in running state and return a stream interface", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 				By("Creating a new VirtualMachineInstance")
-				Expect(virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Error()).To(Succeed())
+				_, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
+				Expect(err).ToNot(HaveOccurred())
 
-				_, err := virtClient.VirtualMachineInstance(vmi.Namespace).SerialConsole(vmi.Name, 30*time.Second)
+				_, err = virtClient.VirtualMachineInstance(vmi.Namespace).SerialConsole(vmi.Name, 30*time.Second)
 				Expect(err).ToNot(HaveOccurred())
 			}, 220)
 
 			It("should fail waiting for the virtual machine instance to be running", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 				vmi.Spec.Affinity = &k8sv1.Affinity{
 					NodeAffinity: &k8sv1.NodeAffinity{
 						RequiredDuringSchedulingIgnoredDuringExecution: &k8sv1.NodeSelector{
@@ -169,7 +171,7 @@ var _ = Describe("Console", func() {
 			}, 180)
 
 			It("should fail waiting for the expecter", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 				vmi.Spec.Affinity = &k8sv1.Affinity{
 					NodeAffinity: &k8sv1.NodeAffinity{
 						RequiredDuringSchedulingIgnoredDuringExecution: &k8sv1.NodeSelector{

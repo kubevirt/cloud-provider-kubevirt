@@ -30,26 +30,42 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/config"
+	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	"kubevirt.io/kubevirt/pkg/hooks"
+	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
 	"kubevirt.io/kubevirt/pkg/precond"
-	"kubevirt.io/kubevirt/pkg/registry-disk"
 	"kubevirt.io/kubevirt/pkg/util"
+	"kubevirt.io/kubevirt/pkg/util/hardware"
 	"kubevirt.io/kubevirt/pkg/util/net/dns"
 	"kubevirt.io/kubevirt/pkg/util/types"
+	"kubevirt.io/kubevirt/pkg/virt-config"
 )
 
 const configMapName = "kubevirt-config"
 const UseEmulationKey = "debug.useEmulation"
 const ImagePullPolicyKey = "dev.imagePullPolicy"
+const LessPVCSpaceTolerationKey = "pvc-tolerate-less-space-up-to-percent"
 const KvmDevice = "devices.kubevirt.io/kvm"
 const TunDevice = "devices.kubevirt.io/tun"
 const VhostNetDevice = "devices.kubevirt.io/vhost-net"
 
 const CAP_NET_ADMIN = "NET_ADMIN"
 const CAP_SYS_NICE = "SYS_NICE"
+
+// LibvirtStartupDelay is added to custom liveness and readiness probes initial delay value.
+// Libvirt needs roughly 10 seconds to start.
+const LibvirtStartupDelay = 10
+
+//This is a perfix for node feature discovery, used in a NodeSelector on the pod
+//to match a VirtualMachineInstance CPU model(Family) to nodes that support this model.
+const NFD_CPU_MODEL_PREFIX = "feature.node.kubernetes.io/cpu-model-"
+
+const MULTUS_RESOURCE_NAME_ANNOTATION = "k8s.v1.cni.cncf.io/resourceName"
 
 type TemplateService interface {
 	RenderLaunchManifest(*v1.VirtualMachineInstance) (*k8sv1.Pod, error)
@@ -62,6 +78,7 @@ type templateService struct {
 	imagePullSecret            string
 	configMapStore             cache.Store
 	persistentVolumeClaimStore cache.Store
+	virtClient                 kubecli.KubevirtClient
 }
 
 type PvcNotFoundError error
@@ -110,6 +127,96 @@ func GetImagePullPolicy(store cache.Store) (policy k8sv1.PullPolicy, err error) 
 	return
 }
 
+func GetlessPVCSpaceToleration(store cache.Store) (toleration int, err error) {
+	var value string
+	if value, err = getConfigMapEntry(store, LessPVCSpaceTolerationKey); err != nil || value == "" {
+		toleration = 10 // Default if not specified
+	} else {
+		toleration, err = strconv.Atoi(value)
+		if err != nil || toleration < 0 || toleration > 100 {
+			err = fmt.Errorf("Invalid lessPVCSpaceToleration in ConfigMap: %s", value)
+			return
+		}
+	}
+	return
+}
+
+func isSRIOVVmi(vmi *v1.VirtualMachineInstance) bool {
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.SRIOV != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func IsCPUNodeDiscoveryEnabled(store cache.Store) bool {
+	if value, err := getConfigMapEntry(store, virtconfig.FeatureGatesKey); err != nil {
+		return false
+	} else if strings.Contains(value, virtconfig.CPUNodeDiscoveryGate) {
+		return true
+	}
+	return false
+}
+
+func CPUModelLabelFromCPUModel(vmi *v1.VirtualMachineInstance) (label string, err error) {
+	if vmi.Spec.Domain.CPU == nil || vmi.Spec.Domain.CPU.Model == "" {
+		err = fmt.Errorf("Cannot create CPU Model label, vmi spec is mising CPU model")
+		return
+	}
+	label = NFD_CPU_MODEL_PREFIX + vmi.Spec.Domain.CPU.Model
+	return
+}
+
+// Request a resource by name. This function bumps the number of resources,
+// both its limits and requests attributes.
+//
+// If we were operating with a regular resource (CPU, memory, network
+// bandwidth), we would need to take care of QoS. For example,
+// https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/#create-a-pod-that-gets-assigned-a-qos-class-of-guaranteed
+// explains that when Limits are set but Requests are not then scheduler
+// assumes that Requests are the same as Limits for a particular resource.
+//
+// But this function is not called for this standard resources but for
+// resources managed by device plugins. The device plugin design document says
+// the following on the matter:
+// https://github.com/kubernetes/community/blob/master/contributors/design-proposals/resource-management/device-plugin.md#end-user-story
+//
+// ```
+// Devices can be selected using the same process as for OIRs in the pod spec.
+// Devices have no impact on QOS. However, for the alpha, we expect the request
+// to have limits == requests.
+// ```
+//
+// Which suggests that, for resources managed by device plugins, 1) limits
+// should be equal to requests; and 2) QoS rules do not apply.
+//
+// Hence we don't copy Limits value to Requests if the latter is missing.
+func requestResource(resources *k8sv1.ResourceRequirements, resourceName string) {
+	name := k8sv1.ResourceName(resourceName)
+
+	// assume resources are countable, singular, and cannot be divided
+	unitQuantity := *resource.NewQuantity(1, resource.DecimalSI)
+
+	// Fill in limits
+	val, ok := resources.Limits[name]
+	if ok {
+		val.Add(unitQuantity)
+		resources.Limits[name] = val
+	} else {
+		resources.Limits[name] = unitQuantity
+	}
+
+	// Fill in requests
+	val, ok = resources.Requests[name]
+	if ok {
+		val.Add(unitQuantity)
+		resources.Requests[name] = val
+	} else {
+		resources.Requests[name] = unitQuantity
+	}
+}
+
 func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (*k8sv1.Pod, error) {
 	precond.MustNotBeNil(vmi)
 	domain := precond.MustNotBeEmpty(vmi.GetObjectMeta().GetName())
@@ -125,6 +232,7 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 	var volumes []k8sv1.Volume
 	var volumeDevices []k8sv1.VolumeDevice
 	var userId int64 = 0
+	// Privileged mode is disabled by default.
 	var privileged bool = false
 	var volumeMounts []k8sv1.VolumeMount
 	var imagePullSecrets []k8sv1.LocalObjectReference
@@ -148,6 +256,60 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		Name:      "libvirt-runtime",
 		MountPath: "/var/run/libvirt",
 	})
+
+	if isSRIOVVmi(vmi) {
+		// libvirt needs this volume to unbind the device from kernel
+		// driver, and register it with vfio userspace driver
+		volumeMounts = append(volumeMounts, k8sv1.VolumeMount{
+			Name:      "pci-bus",
+			MountPath: "/sys/bus/pci/",
+		})
+		volumes = append(volumes, k8sv1.Volume{
+			Name: "pci-bus",
+			VolumeSource: k8sv1.VolumeSource{
+				HostPath: &k8sv1.HostPathVolumeSource{
+					Path: "/sys/bus/pci/",
+				},
+			},
+		})
+
+		// libvirt needs this volume to determine iommu group assigned
+		// to the device
+		volumeMounts = append(volumeMounts, k8sv1.VolumeMount{
+			Name:      "pci-devices",
+			MountPath: "/sys/devices/",
+		})
+		volumes = append(volumes, k8sv1.Volume{
+			Name: "pci-devices",
+			VolumeSource: k8sv1.VolumeSource{
+				HostPath: &k8sv1.HostPathVolumeSource{
+					Path: "/sys/devices/",
+				},
+			},
+		})
+
+		// libvirt uses vfio-pci to pass host devices through
+		volumeMounts = append(volumeMounts, k8sv1.VolumeMount{
+			Name:      "dev-vfio",
+			MountPath: "/dev/vfio/",
+		})
+		volumes = append(volumes, k8sv1.Volume{
+			Name: "dev-vfio",
+			VolumeSource: k8sv1.VolumeSource{
+				HostPath: &k8sv1.HostPathVolumeSource{
+					Path: "/dev/vfio/",
+				},
+			},
+		})
+
+		// todo: revisit when SR-IOV DP registers /dev/vfio/NN with pod
+		// device group:
+		// https://github.com/intel/sriov-network-device-plugin/pull/26
+		//
+		// Run virt-launcher compute container privileged to allow qemu
+		// to open /dev/vfio/NN for PCI passthrough
+		privileged = true
+	}
 
 	serviceAccountName := ""
 
@@ -192,9 +354,9 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 				},
 			})
 		}
-		if volume.RegistryDisk != nil && volume.RegistryDisk.ImagePullSecret != "" {
+		if volume.ContainerDisk != nil && volume.ContainerDisk.ImagePullSecret != "" {
 			imagePullSecrets = appendUniqueImagePullSecret(imagePullSecrets, k8sv1.LocalObjectReference{
-				Name: volume.RegistryDisk.ImagePullSecret,
+				Name: volume.ContainerDisk.ImagePullSecret,
 			})
 		}
 		if volume.HostDisk != nil {
@@ -294,6 +456,7 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 	vmiResources := vmi.Spec.Domain.Resources
 
 	resources.Requests = make(k8sv1.ResourceList)
+	resources.Limits = make(k8sv1.ResourceList)
 
 	// Copy vmi resources requests to a container
 	for key, value := range vmiResources.Requests {
@@ -301,20 +464,12 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 	}
 
 	// Copy vmi resources limits to a container
-	if vmiResources.Limits != nil {
-		resources.Limits = make(k8sv1.ResourceList)
-	}
-
 	for key, value := range vmiResources.Limits {
 		resources.Limits[key] = value
 	}
 
 	// Consider hugepages resource for pod scheduling
 	if vmi.Spec.Domain.Memory != nil && vmi.Spec.Domain.Memory.Hugepages != nil {
-		if resources.Limits == nil {
-			resources.Limits = make(k8sv1.ResourceList)
-		}
-
 		hugepageType := k8sv1.ResourceName(k8sv1.ResourceHugePagesPrefix + vmi.Spec.Domain.Memory.Hugepages.PageSize)
 		resources.Requests[hugepageType] = resources.Requests[k8sv1.ResourceMemory]
 		resources.Limits[hugepageType] = resources.Requests[k8sv1.ResourceMemory]
@@ -376,15 +531,10 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		// schedule only on nodes with a running cpu manager
 		nodeSelector[v1.CPUManager] = "true"
 
-		if resources.Limits == nil {
-			resources.Limits = make(k8sv1.ResourceList)
-		}
-		cores := uint32(0)
-		if vmi.Spec.Domain.CPU != nil {
-			cores = vmi.Spec.Domain.CPU.Cores
-		}
-		if cores != 0 {
-			resources.Limits[k8sv1.ResourceCPU] = *resource.NewQuantity(int64(cores), resource.BinarySI)
+		vcpus := hardware.GetNumberOfVCPUs(vmi.Spec.Domain.CPU)
+
+		if vcpus != 0 {
+			resources.Limits[k8sv1.ResourceCPU] = *resource.NewQuantity(vcpus, resource.BinarySI)
 		} else {
 			if cpuLimit, ok := resources.Limits[k8sv1.ResourceCPU]; ok {
 				resources.Requests[k8sv1.ResourceCPU] = cpuLimit
@@ -395,6 +545,11 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		resources.Limits[k8sv1.ResourceMemory] = *resources.Requests.Memory()
 	}
 
+	lessPVCSpaceToleration, err := GetlessPVCSpaceToleration(t.configMapStore)
+	if err != nil {
+		return nil, err
+	}
+
 	command := []string{"/usr/bin/virt-launcher",
 		"--qemu-timeout", "5m",
 		"--name", domain,
@@ -402,9 +557,10 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		"--namespace", namespace,
 		"--kubevirt-share-dir", t.virtShareDir,
 		"--ephemeral-disk-dir", t.ephemeralDiskDir,
-		"--readiness-file", "/tmp/healthy",
+		"--readiness-file", "/var/run/kubevirt-infra/healthy",
 		"--grace-period-seconds", strconv.Itoa(int(gracePeriodSeconds)),
 		"--hook-sidecars", strconv.Itoa(len(requestedHookSidecarList)),
+		"--less-pvc-space-toleration", strconv.Itoa(lessPVCSpaceToleration),
 	}
 
 	useEmulation, err := IsEmulationAllowed(t.configMapStore)
@@ -437,41 +593,80 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 
 	capabilities := getRequiredCapabilities(vmi)
 
+	volumeMounts = append(volumeMounts, k8sv1.VolumeMount{
+		Name:      "infra-ready-mount",
+		MountPath: "/var/run/kubevirt-infra",
+	})
+
+	defaultReadinessProbe := &k8sv1.Probe{
+		Handler: k8sv1.Handler{
+			Exec: &k8sv1.ExecAction{
+				Command: []string{
+					"cat",
+					"/var/run/kubevirt-infra/healthy",
+				},
+			},
+		},
+		InitialDelaySeconds: int32(initialDelaySeconds),
+		PeriodSeconds:       int32(periodSeconds),
+		TimeoutSeconds:      int32(timeoutSeconds),
+		SuccessThreshold:    int32(successThreshold),
+		FailureThreshold:    int32(failureThreshold),
+	}
+
+	volumes = append(volumes, k8sv1.Volume{Name: "infra-ready-mount", VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}}})
+
+	containers := containerdisk.GenerateContainers(vmi, "ephemeral-disks", t.ephemeralDiskDir)
+
+	networkToResourceMap, err := getNetworkToResourceMap(t.virtClient, vmi)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register resource requests and limits corresponding to attached multus networks.
+	// TODO(ihar) remove when we adopt Multus mutating webhook that handles the job.
+	for _, resourceName := range networkToResourceMap {
+		if resourceName != "" {
+			requestResource(&resources, resourceName)
+		}
+	}
+
 	// VirtualMachineInstance target container
 	container := k8sv1.Container{
 		Name:            "compute",
 		Image:           t.launcherImage,
 		ImagePullPolicy: imagePullPolicy,
 		SecurityContext: &k8sv1.SecurityContext{
-			RunAsUser: &userId,
-			// Privileged mode is disabled.
+			RunAsUser:  &userId,
 			Privileged: &privileged,
 			Capabilities: &k8sv1.Capabilities{
 				Add: capabilities,
 			},
 		},
-		Command:       command,
-		VolumeDevices: volumeDevices,
-		VolumeMounts:  volumeMounts,
-		ReadinessProbe: &k8sv1.Probe{
-			Handler: k8sv1.Handler{
-				Exec: &k8sv1.ExecAction{
-					Command: []string{
-						"cat",
-						"/tmp/healthy",
-					},
-				},
-			},
-			InitialDelaySeconds: int32(initialDelaySeconds),
-			PeriodSeconds:       int32(periodSeconds),
-			TimeoutSeconds:      int32(timeoutSeconds),
-			SuccessThreshold:    int32(successThreshold),
-			FailureThreshold:    int32(failureThreshold),
-		},
-		Resources: resources,
-		Ports:     ports,
+		Command:        command,
+		VolumeDevices:  volumeDevices,
+		VolumeMounts:   volumeMounts,
+		Resources:      resources,
+		Ports:          ports,
+		ReadinessProbe: defaultReadinessProbe,
 	}
-	containers := registrydisk.GenerateContainers(vmi, "ephemeral-disks", t.ephemeralDiskDir)
+
+	if vmi.Spec.ReadinessProbe != nil {
+		container.ReadinessProbe = copyProbe(vmi.Spec.ReadinessProbe)
+		container.ReadinessProbe.InitialDelaySeconds = container.ReadinessProbe.InitialDelaySeconds + LibvirtStartupDelay
+	}
+
+	if vmi.Spec.LivenessProbe != nil {
+		container.LivenessProbe = copyProbe(vmi.Spec.LivenessProbe)
+		container.LivenessProbe.InitialDelaySeconds = container.LivenessProbe.InitialDelaySeconds + LibvirtStartupDelay
+	}
+
+	for networkName, resourceName := range networkToResourceMap {
+		varName := fmt.Sprintf("KUBEVIRT_RESOURCE_NAME_%s", networkName)
+		container.Env = append(container.Env, k8sv1.EnvVar{Name: varName, Value: resourceName})
+	}
+
+	containers = append(containers, container)
 
 	volumes = append(volumes, k8sv1.Volume{
 		Name: "virt-share-dir",
@@ -498,6 +693,14 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		nodeSelector[k] = v
 
 	}
+	if IsCPUNodeDiscoveryEnabled(t.configMapStore) {
+		if cpuModelLabel, err := CPUModelLabelFromCPUModel(vmi); err == nil {
+			if vmi.Spec.Domain.CPU.Model != v1.CPUModeHostModel && vmi.Spec.Domain.CPU.Model != v1.CPUModeHostPassthrough {
+				nodeSelector[cpuModelLabel] = "true"
+			}
+		}
+	}
+
 	nodeSelector[v1.NodeSchedulable] = "true"
 
 	podLabels := map[string]string{}
@@ -507,8 +710,6 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 	}
 	podLabels[v1.AppLabel] = "virt-launcher"
 	podLabels[v1.CreatedByLabel] = string(vmi.UID)
-
-	containers = append(containers, container)
 
 	for i, requestedHookSidecar := range requestedHookSidecarList {
 		resources := k8sv1.ResourceRequirements{}
@@ -533,11 +734,36 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 		})
 	}
 
+	// XXX: reduce test time. Adding one more container delays the start.
+	// First stdci has issues with that and second we don't want to increase the startup time even more.
+	// At the end the infra container needs to be always there, to allow better default readiness checks.
+	if vmi.Spec.ReadinessProbe != nil {
+		// Infra-ready container
+		readyContainer := k8sv1.Container{
+			Name:            "kubevirt-infra",
+			Image:           t.launcherImage,
+			ImagePullPolicy: imagePullPolicy,
+			SecurityContext: &k8sv1.SecurityContext{
+				RunAsUser: &userId,
+			},
+			Resources: k8sv1.ResourceRequirements{
+				Limits: map[k8sv1.ResourceName]resource.Quantity{
+					k8sv1.ResourceCPU:    resource.MustParse("1m"),
+					k8sv1.ResourceMemory: resource.MustParse("5Mi"),
+				},
+			},
+			Command:        []string{"/usr/bin/tail", "-f", "/dev/null"},
+			VolumeDevices:  volumeDevices,
+			VolumeMounts:   volumeMounts,
+			ReadinessProbe: defaultReadinessProbe,
+		}
+		containers = append(containers, readyContainer)
+	}
+
 	hostName := dns.SanitizeHostname(vmi)
 
 	annotationsList := map[string]string{
-		v1.DomainAnnotation:  domain,
-		v1.OwnedByAnnotation: "virt-controller",
+		v1.DomainAnnotation: domain,
 	}
 
 	cniNetworks, cniAnnotation := getCniInterfaceList(vmi)
@@ -546,20 +772,14 @@ func (t *templateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (
 	}
 
 	// TODO use constants for podLabels
-	trueVar := true
 	pod := k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "virt-launcher-" + domain + "-",
 			Labels:       podLabels,
 			Annotations:  annotationsList,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         v1.VirtualMachineInstanceGroupVersionKind.GroupVersion().String(),
-				Kind:               v1.VirtualMachineInstanceGroupVersionKind.Kind,
-				Name:               vmi.Name,
-				UID:                vmi.UID,
-				Controller:         &trueVar,
-				BlockOwnerDeletion: &trueVar,
-			}},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(vmi, v1.VirtualMachineInstanceGroupVersionKind),
+			},
 		},
 		Spec: k8sv1.PodSpec{
 			Hostname:  hostName,
@@ -718,6 +938,40 @@ func getPortsFromVMI(vmi *v1.VirtualMachineInstance) []k8sv1.ContainerPort {
 	return ports
 }
 
+func getResourceNameForNetwork(network *networkv1.NetworkAttachmentDefinition) string {
+	resourceName, ok := network.Annotations[MULTUS_RESOURCE_NAME_ANNOTATION]
+	if ok {
+		return resourceName
+	}
+	return "" // meaning the network is not served by resources
+}
+
+func getNamespaceAndNetworkName(vmi *v1.VirtualMachineInstance, fullNetworkName string) (namespace string, networkName string) {
+	if strings.Contains(fullNetworkName, "/") {
+		res := strings.SplitN(fullNetworkName, "/", 2)
+		namespace, networkName = res[0], res[1]
+	} else {
+		namespace = precond.MustNotBeEmpty(vmi.GetObjectMeta().GetNamespace())
+		networkName = fullNetworkName
+	}
+	return
+}
+
+func getNetworkToResourceMap(virtClient kubecli.KubevirtClient, vmi *v1.VirtualMachineInstance) (networkToResourceMap map[string]string, err error) {
+	networkToResourceMap = make(map[string]string)
+	for _, network := range vmi.Spec.Networks {
+		if network.Multus != nil {
+			namespace, networkName := getNamespaceAndNetworkName(vmi, network.Multus.NetworkName)
+			crd, err := virtClient.NetworkClient().K8sCniCncfIo().NetworkAttachmentDefinitions(namespace).Get(networkName, metav1.GetOptions{})
+			if err != nil {
+				return map[string]string{}, fmt.Errorf("Failed to locate network attachment definition %s/%s", namespace, networkName)
+			}
+			networkToResourceMap[network.Name] = getResourceNameForNetwork(crd)
+		}
+	}
+	return
+}
+
 func getCniInterfaceList(vmi *v1.VirtualMachineInstance) (ifaceListString string, cniAnnotation string) {
 	ifaceList := make([]string, 0)
 
@@ -746,7 +1000,8 @@ func NewTemplateService(launcherImage string,
 	ephemeralDiskDir string,
 	imagePullSecret string,
 	configMapCache cache.Store,
-	persistentVolumeClaimCache cache.Store) TemplateService {
+	persistentVolumeClaimCache cache.Store,
+	virtClient kubecli.KubevirtClient) TemplateService {
 
 	precond.MustNotBeEmpty(launcherImage)
 	svc := templateService{
@@ -756,6 +1011,24 @@ func NewTemplateService(launcherImage string,
 		imagePullSecret:            imagePullSecret,
 		configMapStore:             configMapCache,
 		persistentVolumeClaimStore: persistentVolumeClaimCache,
+		virtClient:                 virtClient,
 	}
 	return &svc
+}
+
+func copyProbe(probe *v1.Probe) *k8sv1.Probe {
+	if probe == nil {
+		return nil
+	}
+	return &k8sv1.Probe{
+		InitialDelaySeconds: probe.InitialDelaySeconds,
+		TimeoutSeconds:      probe.TimeoutSeconds,
+		PeriodSeconds:       probe.PeriodSeconds,
+		SuccessThreshold:    probe.SuccessThreshold,
+		FailureThreshold:    probe.FailureThreshold,
+		Handler: k8sv1.Handler{
+			HTTPGet:   probe.HTTPGet,
+			TCPSocket: probe.TCPSocket,
+		},
+	}
 }

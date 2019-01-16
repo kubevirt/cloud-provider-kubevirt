@@ -26,7 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 type NetworkTemplateConfig struct {
@@ -35,11 +35,11 @@ type NetworkTemplateConfig struct {
 
 var exampleJSON = `{
   "kind": "VirtualMachineInstance",
-  "apiVersion": "kubevirt.io/v1alpha2",
+  "apiVersion": "kubevirt.io/v1alpha3",
   "metadata": {
     "name": "testvmi",
     "namespace": "default",
-    "selfLink": "/apis/kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi",
+    "selfLink": "/apis/kubevirt.io/v1alpha3/namespaces/default/virtualmachineinstances/testvmi",
     "creationTimestamp": null
   },
   "spec": {
@@ -51,6 +51,8 @@ var exampleJSON = `{
       },
       "cpu": {
         "cores": 3,
+        "sockets": 1,
+        "threads": 1,
         "model": "Conroe",
         "dedicatedCpuPlacement": true
       },
@@ -123,7 +125,6 @@ var exampleJSON = `{
         "disks": [
           {
             "name": "disk0",
-            "volumeName": "volume0",
             "disk": {
               "bus": "virtio"
             },
@@ -131,7 +132,6 @@ var exampleJSON = `{
           },
           {
             "name": "cdrom0",
-            "volumeName": "volume1",
             "cdrom": {
               "bus": "virtio",
               "readonly": true,
@@ -140,7 +140,6 @@ var exampleJSON = `{
           },
           {
             "name": "floppy0",
-            "volumeName": "volume2",
             "floppy": {
               "readonly": true,
               "tray": "open"
@@ -148,7 +147,6 @@ var exampleJSON = `{
           },
           {
             "name": "lun0",
-            "volumeName": "volume3",
             "lun": {
               "bus": "virtio",
               "readonly": true
@@ -156,7 +154,6 @@ var exampleJSON = `{
           },
           {
             "name": "disk1",
-            "volumeName": "volume4",
             "disk": {
               "bus": "virtio"
             },
@@ -176,13 +173,14 @@ var exampleJSON = `{
     },
     "volumes": [
       {
-        "name": "volume0",
-        "registryDisk": {
-          "image": "test/image"
+        "name": "disk0",
+        "containerDisk": {
+          "image": "test/image",
+          "path": "/disk.img"
         }
       },
       {
-        "name": "volume1",
+        "name": "cdrom0",
         "cloudInitNoCloud": {
           "secretRef": {
             "name": "testsecret"
@@ -190,7 +188,7 @@ var exampleJSON = `{
         }
       },
       {
-        "name": "volume2",
+        "name": "floppy0",
         "persistentVolumeClaim": {
           "claimName": "testclaim"
         }
@@ -215,8 +213,7 @@ var _ = Describe("Schema", func() {
 
 		exampleVMI.Spec.Domain.Devices.Disks = []Disk{
 			{
-				Name:       "disk0",
-				VolumeName: "volume0",
+				Name: "disk0",
 				DiskDevice: DiskDevice{
 					Disk: &DiskTarget{
 						Bus:      "virtio",
@@ -226,8 +223,7 @@ var _ = Describe("Schema", func() {
 				DedicatedIOThread: _true,
 			},
 			{
-				Name:       "cdrom0",
-				VolumeName: "volume1",
+				Name: "cdrom0",
 				DiskDevice: DiskDevice{
 					CDRom: &CDRomTarget{
 						Bus:      "virtio",
@@ -237,8 +233,7 @@ var _ = Describe("Schema", func() {
 				},
 			},
 			{
-				Name:       "floppy0",
-				VolumeName: "volume2",
+				Name: "floppy0",
 				DiskDevice: DiskDevice{
 					Floppy: &FloppyTarget{
 						ReadOnly: true,
@@ -247,8 +242,7 @@ var _ = Describe("Schema", func() {
 				},
 			},
 			{
-				Name:       "lun0",
-				VolumeName: "volume3",
+				Name: "lun0",
 				DiskDevice: DiskDevice{
 					LUN: &LunTarget{
 						Bus:      "virtio",
@@ -257,9 +251,8 @@ var _ = Describe("Schema", func() {
 				},
 			},
 			{
-				Name:       "disk1",
-				VolumeName: "volume4",
-				Serial:     "sn-11223344",
+				Name:   "disk1",
+				Serial: "sn-11223344",
 				DiskDevice: DiskDevice{
 					Disk: &DiskTarget{
 						Bus:      "virtio",
@@ -274,15 +267,16 @@ var _ = Describe("Schema", func() {
 
 		exampleVMI.Spec.Volumes = []Volume{
 			{
-				Name: "volume0",
+				Name: "disk0",
 				VolumeSource: VolumeSource{
-					RegistryDisk: &RegistryDiskSource{
+					ContainerDisk: &ContainerDiskSource{
 						Image: "test/image",
+						Path:  "/disk.img",
 					},
 				},
 			},
 			{
-				Name: "volume1",
+				Name: "cdrom0",
 				VolumeSource: VolumeSource{
 					CloudInitNoCloud: &CloudInitNoCloudSource{
 						UserDataSecretRef: &v1.LocalObjectReference{
@@ -292,7 +286,7 @@ var _ = Describe("Schema", func() {
 				},
 			},
 			{
-				Name: "volume2",
+				Name: "floppy0",
 				VolumeSource: VolumeSource{
 					PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
 						ClaimName: "testclaim",
@@ -331,8 +325,10 @@ var _ = Describe("Schema", func() {
 			UUID: "28a42a60-44ef-4428-9c10-1a6aee94627f",
 		}
 		exampleVMI.Spec.Domain.CPU = &CPU{
-			Cores: 3,
-			Model: "Conroe",
+			Cores:   3,
+			Sockets: 1,
+			Threads: 1,
+			Model:   "Conroe",
 			DedicatedCPUPlacement: true,
 		}
 		exampleVMI.Spec.Networks = []Network{

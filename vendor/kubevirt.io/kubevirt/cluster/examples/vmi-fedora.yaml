@@ -1,7 +1,7 @@
-apiVersion: kubevirt.io/v1alpha2
+---
+apiVersion: kubevirt.io/v1alpha3
 kind: VirtualMachineInstance
 metadata:
-  creationTimestamp: null
   labels:
     special: vmi-fedora
   name: vmi-fedora
@@ -11,12 +11,10 @@ spec:
       disks:
       - disk:
           bus: virtio
-        name: registrydisk
-        volumeName: registryvolume
+        name: containerdisk
       - disk:
           bus: virtio
         name: cloudinitdisk
-        volumeName: cloudinitvolume
     machine:
       type: ""
     resources:
@@ -24,13 +22,12 @@ spec:
         memory: 1024M
   terminationGracePeriodSeconds: 0
   volumes:
-  - name: registryvolume
-    registryDisk:
-      image: registry:5000/kubevirt/fedora-cloud-registry-disk-demo:devel
+  - containerDisk:
+      image: registry:5000/kubevirt/fedora-cloud-container-disk-demo:devel
+    name: containerdisk
   - cloudInitNoCloud:
       userData: |-
         #cloud-config
         password: fedora
         chpasswd: { expire: False }
-    name: cloudinitvolume
-status: {}
+    name: cloudinitdisk

@@ -33,6 +33,7 @@ import (
 	dhcpConn "github.com/krolaw/dhcp4/conn"
 	"github.com/vishvananda/netlink"
 
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/log"
 )
 
@@ -40,6 +41,7 @@ const (
 	infiniteLease             = 999 * 24 * time.Hour
 	errorSearchDomainNotValid = "Search domain is not valid"
 	errorSearchDomainTooLong  = "Search domains length exceeded allowable size"
+	errorNTPConfiguration     = "Could not parse NTP server as IPv4 address: %s"
 )
 
 // simple domain validation regex. Put it here to avoid compiling each time.
@@ -56,7 +58,8 @@ func SingleClientDHCPServer(
 	dnsIPs [][]byte,
 	routes *[]netlink.Route,
 	searchDomains []string,
-	mtu uint16) error {
+	mtu uint16,
+	customDHCPOptions *v1.DHCPOptions) error {
 
 	log.Log.Info("Starting SingleClientDHCPServer")
 
@@ -65,7 +68,7 @@ func SingleClientDHCPServer(
 		return fmt.Errorf("reading the pods hostname failed: %v", err)
 	}
 
-	options, err := prepareDHCPOptions(clientMask, routerIP, dnsIPs, routes, searchDomains, mtu, hostname)
+	options, err := prepareDHCPOptions(clientMask, routerIP, dnsIPs, routes, searchDomains, mtu, hostname, customDHCPOptions)
 	if err != nil {
 		return err
 	}
@@ -76,6 +79,12 @@ func SingleClientDHCPServer(
 		serverIP:      serverIP.To4(),
 		leaseDuration: infiniteLease,
 		options:       options,
+	}
+
+	// turn TX offload checksum because it causes dhcp failures
+	if err := EthtoolTXOff(serverIface); err != nil {
+		log.Log.Reason(err).Errorf("Failed to set tx offload for interface %s off", serverIface)
+		return err
 	}
 
 	l, err := dhcpConn.NewUDP4BoundListener(serverIface, ":67")
@@ -97,7 +106,8 @@ func prepareDHCPOptions(
 	routes *[]netlink.Route,
 	searchDomains []string,
 	mtu uint16,
-	hostname string) (dhcp.Options, error) {
+	hostname string,
+	customDHCPOptions *v1.DHCPOptions) (dhcp.Options, error) {
 
 	mtuArray := make([]byte, 2)
 	binary.BigEndian.PutUint16(mtuArray, mtu)
@@ -130,6 +140,36 @@ func prepareDHCPOptions(
 	if len(domainName) > 0 {
 		dhcpOptions[dhcp.OptionDomainName] = []byte(domainName)
 	}
+
+	if customDHCPOptions != nil {
+		if customDHCPOptions.TFTPServerName != "" {
+			log.Log.Infof("Setting dhcp option tftp server name to %s", customDHCPOptions.TFTPServerName)
+			dhcpOptions[dhcp.OptionTFTPServerName] = []byte(customDHCPOptions.TFTPServerName)
+		}
+		if customDHCPOptions.BootFileName != "" {
+			log.Log.Infof("Setting dhcp option boot file name to %s", customDHCPOptions.BootFileName)
+			dhcpOptions[dhcp.OptionBootFileName] = []byte(customDHCPOptions.BootFileName)
+		}
+
+		if len(customDHCPOptions.NTPServers) > 0 {
+			log.Log.Infof("Setting dhcp option NTP server name to %s", customDHCPOptions.NTPServers)
+
+			ntpServers := [][]byte{}
+
+			for _, server := range customDHCPOptions.NTPServers {
+				ip := net.ParseIP(server).To4()
+
+				if ip == nil {
+					return nil, fmt.Errorf(errorNTPConfiguration, server)
+				}
+
+				ntpServers = append(ntpServers, []byte(ip))
+			}
+
+			dhcpOptions[dhcp.OptionNetworkTimeProtocolServers] = bytes.Join(ntpServers, nil)
+		}
+	}
+
 	return dhcpOptions, nil
 }
 
@@ -153,12 +193,12 @@ func (h *DHCPHandler) ServeDHCP(p dhcp.Packet, msgType dhcp.MessageType, options
 	case dhcp.Discover:
 		log.Log.V(4).Info("The request has message type DISCOVER")
 		return dhcp.ReplyPacket(p, dhcp.Offer, h.serverIP, h.clientIP, h.leaseDuration,
-			h.options.SelectOrderOrAll(options[dhcp.OptionParameterRequestList]))
+			h.options.SelectOrderOrAll(nil))
 
 	case dhcp.Request:
 		log.Log.V(4).Info("The request has message type REQUEST")
 		return dhcp.ReplyPacket(p, dhcp.ACK, h.serverIP, h.clientIP, h.leaseDuration,
-			h.options.SelectOrderOrAll(options[dhcp.OptionParameterRequestList]))
+			h.options.SelectOrderOrAll(nil))
 
 	default:
 		log.Log.V(4).Info("The request has unhandled message type")

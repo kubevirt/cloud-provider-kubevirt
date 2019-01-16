@@ -25,7 +25,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/emicklei/go-restful"
+	restful "github.com/emicklei/go-restful"
 	"github.com/gorilla/websocket"
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -37,7 +37,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
 	"kubevirt.io/kubevirt/pkg/util/subresources"
@@ -54,14 +54,14 @@ type requestType struct {
 var CONSOLE = requestType{socketName: "serial0"}
 var VNC = requestType{socketName: "vnc"}
 
-func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response *restful.Response, requestType requestType) {
+func (app *SubresourceAPIApp) streamRequestHandler(request *restful.Request, response *restful.Response, requestType requestType) {
 
 	vmiName := request.PathParameter("name")
 	namespace := request.PathParameter("namespace")
 
 	vmi, code, err := app.fetchVirtualMachineInstance(vmiName, namespace)
 	if err != nil {
-		log.Log.Reason(err).Error("Failed to gather remote exec info for subresource request.")
+		log.Log.Reason(err).Errorf("Failed to gather remote exec info for subresource request.")
 		response.WriteError(code, err)
 		return
 	}
@@ -80,7 +80,7 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 
 	podName, httpStatusCode, err := app.remoteExecInfo(vmi)
 	if err != nil {
-		log.Log.Reason(err).Error("Failed to gather remote exec info for subresource request.")
+		log.Log.Object(vmi).Reason(err).Error("Failed to gather remote exec info for subresource request.")
 		response.WriteError(httpStatusCode, err)
 		return
 	}
@@ -96,13 +96,13 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 
 	clientSocket, err := upgrader.Upgrade(response.ResponseWriter, request.Request, nil)
 	if err != nil {
-		log.Log.Reason(err).Error("Failed to upgrade client websocket connection")
+		log.Log.Object(vmi).Reason(err).Error("Failed to upgrade client websocket connection")
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
 	defer clientSocket.Close()
 
-	log.Log.Infof("Websocket connection upgraded")
+	log.Log.Object(vmi).Infof("Websocket connection upgraded")
 	wsReadWriter := &kubecli.BinaryReadWriter{Conn: clientSocket}
 
 	inReader, inWriter := io.Pipe()
@@ -112,19 +112,19 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 	copyErr := make(chan error)
 	go func() {
 		httpCode, err := remoteExecHelper(podName, vmi.Namespace, cmd, inReader, outWriter, requestType)
-		log.Log.Errorf("%v", err)
+		log.Log.Object(vmi).Errorf("failed to exectue command %v on the pod %v", cmd, err)
 		httpResponseChan <- httpCode
 	}()
 
 	go func() {
 		_, err := io.Copy(wsReadWriter, outReader)
-		log.Log.Reason(err).Error("error ecountered reading from remote podExec stream")
+		log.Log.Object(vmi).Reason(err).Error("error ecountered reading from remote podExec stream")
 		copyErr <- err
 	}()
 
 	go func() {
 		_, err := io.Copy(inWriter, wsReadWriter)
-		log.Log.Reason(err).Error("error ecountered reading from websocket stream")
+		log.Log.Object(vmi).Reason(err).Error("error ecountered reading from websocket stream")
 		copyErr <- err
 	}()
 
@@ -133,7 +133,7 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 	case httpResponseCode = <-httpResponseChan:
 	case err := <-copyErr:
 		if err != nil {
-			log.Log.Reason(err).Error("Error in websocket proxy")
+			log.Log.Object(vmi).Reason(err).Error("Error in websocket proxy")
 			httpResponseCode = http.StatusInternalServerError
 		}
 	}
@@ -141,11 +141,38 @@ func (app *SubresourceAPIApp) requestHandler(request *restful.Request, response 
 }
 
 func (app *SubresourceAPIApp) VNCRequestHandler(request *restful.Request, response *restful.Response) {
-	app.requestHandler(request, response, VNC)
+	app.streamRequestHandler(request, response, VNC)
 }
 
 func (app *SubresourceAPIApp) ConsoleRequestHandler(request *restful.Request, response *restful.Response) {
-	app.requestHandler(request, response, CONSOLE)
+	app.streamRequestHandler(request, response, CONSOLE)
+}
+
+func (app *SubresourceAPIApp) RestartVMRequestHandler(request *restful.Request, response *restful.Response) {
+	name := request.PathParameter("name")
+	namespace := request.PathParameter("namespace")
+
+	vm, code, err := app.fetchVirtualMachine(name, namespace)
+	if err != nil {
+		response.WriteError(code, err)
+		return
+	}
+
+	if !vm.Spec.Running {
+		response.WriteError(http.StatusNotFound, fmt.Errorf("Not found running %s VM", vm.Name))
+		return
+	}
+
+	err = app.VirtCli.VirtualMachineInstance(namespace).Delete(name, &k8smetav1.DeleteOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			response.WriteError(http.StatusNotFound, err)
+		} else {
+			response.WriteError(http.StatusInternalServerError, err)
+		}
+		return
+	}
+	response.WriteHeader(http.StatusOK)
 }
 
 func (app *SubresourceAPIApp) findPod(namespace string, uid string) (string, error) {
@@ -165,6 +192,18 @@ func (app *SubresourceAPIApp) findPod(namespace string, uid string) (string, err
 		return "", goerror.New("connection failed. No VirtualMachineInstance pod is running")
 	}
 	return podList.Items[0].ObjectMeta.Name, nil
+}
+
+func (app *SubresourceAPIApp) fetchVirtualMachine(name string, namespace string) (*v1.VirtualMachine, int, error) {
+
+	vm, err := app.VirtCli.VirtualMachine(namespace).Get(name, &k8smetav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, http.StatusNotFound, fmt.Errorf("VirtualMachine %s in namespace %s not found", name, namespace)
+		}
+		return nil, http.StatusInternalServerError, err
+	}
+	return vm, http.StatusOK, nil
 }
 
 func (app *SubresourceAPIApp) fetchVirtualMachineInstance(name string, namespace string) (*v1.VirtualMachineInstance, int, error) {

@@ -354,11 +354,31 @@ var _ = Describe("Replicaset", func() {
 			controller.Execute()
 		})
 
+		It("should detect that it has to update the labelSelector in the status", func() {
+			rs, vmi := DefaultReplicaSet(1)
+			rs.Status.Replicas = 1
+			rs.Status.LabelSelector = ""
+			s, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: vmi.ObjectMeta.Labels,
+			})
+			Expect(err).ToNot(HaveOccurred())
+			addReplicaSet(rs)
+			vmiFeeder.Add(vmi)
+
+			// We should see the failed condition, replicas should stay at 0
+			rsInterface.EXPECT().Update(gomock.Any()).Do(func(obj interface{}) {
+				objRS := obj.(*v1.VirtualMachineInstanceReplicaSet)
+				Expect(objRS.Status.LabelSelector).To(Equal(s.String()))
+			})
+			controller.Execute()
+		})
+
 		It("should be woken by a stopped VirtualMachineInstance and create a new one", func() {
 			rs, vmi := DefaultReplicaSet(1)
 			rs.Status.Replicas = 1
 			rs.Status.ReadyReplicas = 1
 			vmi.Status.Phase = v1.Running
+			markAsReady(vmi)
 
 			rsCopy := rs.DeepCopy()
 			rsCopy.Status.Replicas = 0
@@ -406,6 +426,36 @@ var _ = Describe("Replicaset", func() {
 			// Move one VirtualMachineInstance to a final state
 			modifiedVMI := vmi.DeepCopy()
 			modifiedVMI.Status.Phase = v1.Running
+			markAsReady(modifiedVMI)
+			modifiedVMI.ResourceVersion = "1"
+			vmiFeeder.Modify(modifiedVMI)
+
+			// Run the controller again
+			controller.Execute()
+		})
+
+		It("should be woken by a not ready but running VirtualMachineInstance and update the readyReplicas counter", func() {
+			rs, vmi := DefaultReplicaSet(1)
+			rs.Status.Replicas = 1
+			rs.Status.ReadyReplicas = 1
+			vmi.Status.Phase = v1.Running
+			markAsReady(vmi)
+
+			expectedRS := rs.DeepCopy()
+			expectedRS.Status.Replicas = 1
+			expectedRS.Status.ReadyReplicas = 0
+
+			addReplicaSet(rs)
+			vmiFeeder.Add(vmi)
+
+			rsInterface.EXPECT().Update(expectedRS).Times(1)
+
+			// First make sure that we don't have to do anything
+			controller.Execute()
+
+			// Move one VirtualMachineInstance to a final state
+			modifiedVMI := vmi.DeepCopy()
+			markAsNonReady(modifiedVMI)
 			modifiedVMI.ResourceVersion = "1"
 			vmiFeeder.Modify(modifiedVMI)
 
@@ -447,6 +497,7 @@ var _ = Describe("Replicaset", func() {
 			rs.Status.Replicas = 1
 			rs.Status.ReadyReplicas = 1
 			vmi.Status.Phase = v1.Running
+			markAsReady(vmi)
 
 			addReplicaSet(rs)
 			vmiFeeder.Add(vmi)
@@ -630,6 +681,10 @@ var _ = Describe("Replicaset", func() {
 })
 
 func ReplicaSetFromVMI(name string, vmi *v1.VirtualMachineInstance, replicas int32) *v1.VirtualMachineInstanceReplicaSet {
+	s, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: vmi.ObjectMeta.Labels,
+	})
+	Expect(err).ToNot(HaveOccurred())
 	rs := &v1.VirtualMachineInstanceReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: vmi.ObjectMeta.Namespace, ResourceVersion: "1"},
 		Spec: v1.VirtualMachineInstanceReplicaSetSpec{
@@ -645,6 +700,7 @@ func ReplicaSetFromVMI(name string, vmi *v1.VirtualMachineInstance, replicas int
 				Spec: vmi.Spec,
 			},
 		},
+		Status: v1.VirtualMachineInstanceReplicaSetStatus{LabelSelector: s.String()},
 	}
 	return rs
 }

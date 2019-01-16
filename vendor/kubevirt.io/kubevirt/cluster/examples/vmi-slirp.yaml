@@ -1,7 +1,7 @@
-apiVersion: kubevirt.io/v1alpha2
+---
+apiVersion: kubevirt.io/v1alpha3
 kind: VirtualMachineInstance
 metadata:
-  creationTimestamp: null
   labels:
     special: vmi-slirp
   name: vmi-slirp
@@ -11,12 +11,10 @@ spec:
       disks:
       - disk:
           bus: virtio
-        name: registrydisk
-        volumeName: registryvolume
+        name: containerdisk
       - disk:
           bus: virtio
         name: cloudinitdisk
-        volumeName: cloudinitvolume
       interfaces:
       - name: testSlirp
         ports:
@@ -34,9 +32,9 @@ spec:
     pod: {}
   terminationGracePeriodSeconds: 0
   volumes:
-  - name: registryvolume
-    registryDisk:
-      image: registry:5000/kubevirt/fedora-cloud-registry-disk-demo:devel
+  - containerDisk:
+      image: registry:5000/kubevirt/fedora-cloud-container-disk-demo:devel
+    name: containerdisk
   - cloudInitNoCloud:
       userData: |-
         #!/bin/bash
@@ -44,5 +42,4 @@ spec:
         yum install -y nginx
         systemctl enable nginx
         systemctl start nginx
-    name: cloudinitvolume
-status: {}
+    name: cloudinitdisk

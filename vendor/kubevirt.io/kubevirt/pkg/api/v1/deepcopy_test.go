@@ -3,7 +3,7 @@ package v1
 import (
 	"reflect"
 
-	"github.com/google/gofuzz"
+	fuzz "github.com/google/gofuzz"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -28,7 +28,7 @@ var _ = Describe("Generated deepcopy functions", func() {
 			&CDRomTarget{},
 			&Volume{},
 			&VolumeSource{},
-			&RegistryDiskSource{},
+			&ContainerDiskSource{},
 			&ClockOffset{},
 			&ClockOffsetUTC{},
 			&Clock{},
@@ -68,6 +68,14 @@ var _ = Describe("Generated deepcopy functions", func() {
 			&VirtualMachineInstancePreset{},
 			&VirtualMachineInstancePresetList{},
 			&VirtualMachineInstancePresetSpec{},
+			&Probe{},
+			&Handler{},
+			&Hugepages{},
+			&Interface{},
+			&Memory{},
+			&Machine{},
+			&InterfaceBridge{},
+			&InterfaceSlirp{},
 		}
 	})
 

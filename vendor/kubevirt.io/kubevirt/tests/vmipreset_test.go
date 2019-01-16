@@ -33,7 +33,7 @@ import (
 	k8smetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
 )
@@ -59,7 +59,7 @@ var _ = Describe("VMIPreset", func() {
 
 	BeforeEach(func() {
 		tests.BeforeTestCleanup()
-		vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+		vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 		vmi.Labels = map[string]string{flavorKey: memoryFlavor}
 
 		selector := k8smetav1.LabelSelector{MatchLabels: map[string]string{flavorKey: memoryFlavor}}
@@ -90,7 +90,7 @@ var _ = Describe("VMIPreset", func() {
 
 		It("Should reject POST if schema is invalid", func() {
 			// Preset with missing selector should fail CRD validation
-			jsonString := "{\"kind\":\"VirtualMachineInstancePreset\",\"apiVersion\":\"kubevirt.io/v1alpha2\",\"metadata\":{\"generateName\":\"test-memory-\",\"creationTimestamp\":null},\"spec\":{}}"
+			jsonString := "{\"kind\":\"VirtualMachineInstancePreset\",\"apiVersion\":\"kubevirt.io/v1alpha3\",\"metadata\":{\"generateName\":\"test-memory-\",\"creationTimestamp\":null},\"spec\":{}}"
 
 			result := virtClient.RestClient().Post().Resource("virtualmachineinstancepresets").Namespace(tests.NamespaceTestDefault).Body([]byte(jsonString)).SetHeader("Content-Type", "application/json").Do()
 
@@ -109,8 +109,7 @@ var _ = Describe("VMIPreset", func() {
 			}
 			// disk with two targets is invalid
 			preset.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk:   &v1.DiskTarget{},
 					Floppy: &v1.FloppyTarget{},
@@ -188,7 +187,7 @@ var _ = Describe("VMIPreset", func() {
 
 			newPreset := waitForPreset(virtClient, cpuPrefix)
 
-			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 			vmi.Labels = map[string]string{flavorKey: cpuFlavor}
 
 			newVMI, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
@@ -200,7 +199,7 @@ var _ = Describe("VMIPreset", func() {
 
 			// check the annotations
 			annotationKey := fmt.Sprintf("virtualmachinepreset.%s/%s", v1.GroupName, newPreset.Name)
-			Expect(newVMI.Annotations[annotationKey]).To(Equal("kubevirt.io/v1alpha2"))
+			Expect(newVMI.Annotations[annotationKey]).To(Equal("kubevirt.io/v1alpha3"))
 
 			// check a setting from the preset itself to show it was applied
 			Expect(int(newVMI.Spec.Domain.CPU.Cores)).To(Equal(cores))
@@ -213,7 +212,7 @@ var _ = Describe("VMIPreset", func() {
 			newPreset := waitForPreset(virtClient, memoryPrefix)
 
 			// reset the label so it will not match
-			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 			newVMI, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -253,7 +252,7 @@ var _ = Describe("VMIPreset", func() {
 
 			newPreset := waitForPreset(virtClient, cpuPrefix)
 
-			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskAlpine))
+			vmi = tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
 			vmi.Labels = map[string]string{flavorKey: cpuFlavor}
 			exclusionMarking := "virtualmachineinstancepresets.admission.kubevirt.io/exclude"
 			vmi.Annotations = map[string]string{exclusionMarking: "true"}

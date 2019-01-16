@@ -6,11 +6,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	"k8s.io/api/core/v1"
+
 	"kubevirt.io/containerized-data-importer/tests/framework"
 	"kubevirt.io/containerized-data-importer/tests/utils"
 )
-
-const testFile = utils.DefaultPvcMountPath + "/disk.img"
 
 var _ = Describe("Upload tests", func() {
 
@@ -44,8 +44,11 @@ var _ = Describe("Upload tests", func() {
 		err = utils.UploadImageFromNode(f.K8sClient, f.GoCLIPath, token)
 		Expect(err).ToNot(HaveOccurred())
 
+		err = f.WaitForPersistentVolumeClaimPhase(v1.ClaimBound, pvc.Name)
+		Expect(err).ToNot(HaveOccurred())
+
 		By("Verify content")
-		same := f.VerifyTargetPVCContentMD5(f.Namespace, pvc, testFile, utils.UploadFileMD5)
+		same := f.VerifyTargetPVCContentMD5(f.Namespace, pvc, utils.DefaultImagePath, utils.UploadFileMD5)
 		Expect(same).To(BeTrue())
 
 		By("Delete upload PVC")

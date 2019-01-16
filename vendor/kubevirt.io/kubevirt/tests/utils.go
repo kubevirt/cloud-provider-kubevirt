@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,21 +38,26 @@ import (
 	"strings"
 	"time"
 
+	ghodssyaml "github.com/ghodss/yaml"
 	"github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
 	k8sv1 "k8s.io/api/core/v1"
+	k8sextv1beta1 "k8s.io/api/extensions/v1beta1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	k8sversion "k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -62,6 +68,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
 	"kubevirt.io/kubevirt/pkg/util/net/dns"
+	"kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 	"kubevirt.io/kubevirt/pkg/virtctl"
 	vmsgen "kubevirt.io/kubevirt/tools/vms-generator/utils"
@@ -69,18 +76,25 @@ import (
 
 var KubeVirtVersionTag = "latest"
 var KubeVirtRepoPrefix = "kubevirt"
+var ContainerizedDataImporterNamespace = "kube-system"
 var KubeVirtKubectlPath = ""
 var KubeVirtOcPath = ""
 var KubeVirtVirtctlPath = ""
 var KubeVirtInstallNamespace string
 
+var DeployTestingInfrastructureFlag = false
+var PathToTestingInfrastrucureManifests = ""
+
 func init() {
-	flag.StringVar(&KubeVirtVersionTag, "tag", "latest", "Set the image tag or digest to use")
-	flag.StringVar(&KubeVirtRepoPrefix, "prefix", "kubevirt", "Set the repository prefix for all images")
+	flag.StringVar(&KubeVirtVersionTag, "container-tag", "latest", "Set the image tag or digest to use")
+	flag.StringVar(&KubeVirtRepoPrefix, "container-prefix", "kubevirt", "Set the repository prefix for all images")
+	flag.StringVar(&ContainerizedDataImporterNamespace, "cdi-namespace", "kube-system", "Set the repository prefix for CDI components")
 	flag.StringVar(&KubeVirtKubectlPath, "kubectl-path", "", "Set path to kubectl binary")
 	flag.StringVar(&KubeVirtOcPath, "oc-path", "", "Set path to oc binary")
 	flag.StringVar(&KubeVirtVirtctlPath, "virtctl-path", "", "Set path to virtctl binary")
 	flag.StringVar(&KubeVirtInstallNamespace, "installed-namespace", "kubevirt", "Set the namespace KubeVirt is installed in")
+	flag.BoolVar(&DeployTestingInfrastructureFlag, "deploy-testing-infra", false, "Deploy testing infrastructure if set")
+	flag.StringVar(&PathToTestingInfrastrucureManifests, "path-to-testing-infra-manifests", "manifests/testing", "Set path to testing infrastructure manifests")
 }
 
 type EventType string
@@ -93,8 +107,8 @@ const (
 )
 
 const (
-	AlpineHttpUrl     = "http://cdi-http-import-server.kube-system/images/alpine.iso"
-	GuestAgentHttpUrl = "http://cdi-http-import-server.kube-system/qemu-ga"
+	AlpineHttpUrl     = "http://cdi-http-import-server.kubevirt/images/alpine.iso"
+	GuestAgentHttpUrl = "http://cdi-http-import-server.kubevirt/qemu-ga"
 )
 
 const (
@@ -120,7 +134,13 @@ const (
 	NamespaceTestAlternative = "kubevirt-test-alternative"
 )
 
-const LocalStorageClass = "local"
+const (
+	LocalStorageClass = "local"
+
+	HostPathStorageClass = "host-path"
+
+	BlockVolumeStorageClass = "block-volume"
+)
 
 var testNamespaces = []string{NamespaceTestDefault, NamespaceTestAlternative}
 
@@ -173,11 +193,13 @@ const (
 type ProcessFunc func(event *k8sv1.Event) (done bool)
 
 type ObjectEventWatcher struct {
-	object          runtime.Object
-	timeout         *time.Duration
-	failOnWarnings  bool
-	resourceVersion string
-	startType       startType
+	object                 runtime.Object
+	timeout                *time.Duration
+	failOnWarnings         bool
+	resourceVersion        string
+	startType              startType
+	dontFailOnMissingEvent bool
+	abort                  chan struct{}
 }
 
 func NewObjectEventWatcher(object runtime.Object) *ObjectEventWatcher {
@@ -233,7 +255,7 @@ func (w *ObjectEventWatcher) SinceResourceVersion(rv string) *ObjectEventWatcher
 	return w
 }
 
-func (w *ObjectEventWatcher) Watch(processFunc ProcessFunc) {
+func (w *ObjectEventWatcher) Watch(abortChan chan struct{}, processFunc ProcessFunc) {
 	Expect(w.startType).ToNot(Equal(invalidWatch))
 	resourceVersion := ""
 
@@ -257,12 +279,13 @@ func (w *ObjectEventWatcher) Watch(processFunc ProcessFunc) {
 
 	if w.failOnWarnings {
 		f = func(event *k8sv1.Event) bool {
+			msg := fmt.Sprintf("Event(%#v): type: '%v' reason: '%v' %v", event.InvolvedObject, event.Type, event.Reason, event.Message)
 			if event.Type == string(WarningEvent) {
-				log.Log.Reason(fmt.Errorf("unexpected warning event received")).ObjectRef(&event.InvolvedObject).Error(event.Message)
+				log.Log.Reason(fmt.Errorf("unexpected warning event received")).ObjectRef(&event.InvolvedObject).Error(msg)
 			} else {
-				log.Log.ObjectRef(&event.InvolvedObject).Infof(event.Message)
+				log.Log.ObjectRef(&event.InvolvedObject).Info(msg)
 			}
-			Expect(event.Type).NotTo(Equal(string(WarningEvent)), "Unexpected Warning event received: %s,%s: %s", event.InvolvedObject.Name, event.InvolvedObject.UID, event.Message)
+			ExpectWithOffset(1, event.Type).NotTo(Equal(string(WarningEvent)), "Unexpected Warning event received: %s,%s: %s", event.InvolvedObject.Name, event.InvolvedObject.UID, event.Message)
 			return processFunc(event)
 		}
 
@@ -302,15 +325,22 @@ func (w *ObjectEventWatcher) Watch(processFunc ProcessFunc) {
 	if w.timeout != nil {
 		select {
 		case <-done:
+		case <-w.abort:
 		case <-time.After(*w.timeout):
+			if !w.dontFailOnMissingEvent {
+				Fail(fmt.Sprintf("Waited for %v seconds on the event stream to match a specific event", w.timeout.Seconds()), 1)
+			}
 		}
 	} else {
-		<-done
+		select {
+		case <-done:
+		case <-w.abort:
+		}
 	}
 }
 
-func (w *ObjectEventWatcher) WaitFor(eventType EventType, reason interface{}) (e *k8sv1.Event) {
-	w.Watch(func(event *k8sv1.Event) bool {
+func (w *ObjectEventWatcher) WaitFor(stopChan chan struct{}, eventType EventType, reason interface{}) (e *k8sv1.Event) {
+	w.Watch(stopChan, func(event *k8sv1.Event) bool {
 		if event.Type == string(eventType) && event.Reason == reflect.ValueOf(reason).String() {
 			e = event
 			return true
@@ -318,6 +348,83 @@ func (w *ObjectEventWatcher) WaitFor(eventType EventType, reason interface{}) (e
 		return false
 	})
 	return
+}
+
+func (w *ObjectEventWatcher) WaitNotFor(stopChan chan struct{}, eventType EventType, reason interface{}) (e *k8sv1.Event) {
+	w.dontFailOnMissingEvent = true
+	w.Watch(stopChan, func(event *k8sv1.Event) bool {
+		if event.Type == string(eventType) && event.Reason == reflect.ValueOf(reason).String() {
+			e = event
+			Fail(fmt.Sprintf("Did not expect %s with reason %s", string(eventType), reflect.ValueOf(reason).String()), 1)
+			return true
+		}
+		return false
+	})
+	return
+}
+
+// Do scale and retuns error, replicas-before.
+func DoScaleDeployment(namespace string, name string, desired int32) (error, int32) {
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	deployment, err := virtCli.ExtensionsV1beta1().Deployments(namespace).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return err, -1
+	}
+	scale := &k8sextv1beta1.Scale{Spec: k8sextv1beta1.ScaleSpec{Replicas: desired}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+	scale, err = virtCli.ExtensionsV1beta1().Deployments(namespace).UpdateScale(name, scale)
+	if err != nil {
+		return err, -1
+	}
+	return nil, *deployment.Spec.Replicas
+}
+
+func DoScaleVirtHandler(namespace string, name string, selector map[string]string) (int32, map[string]string, int64, error) {
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	d, err := virtCli.ExtensionsV1beta1().DaemonSets(namespace).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	sel := d.Spec.Template.Spec.NodeSelector
+	ready := d.Status.DesiredNumberScheduled
+	d.Spec.Template.Spec.NodeSelector = selector
+	d, err = virtCli.ExtensionsV1beta1().DaemonSets(namespace).Update(d)
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	return ready, sel, d.ObjectMeta.Generation, nil
+}
+
+func WaitForAllPodsReady(timeout time.Duration, listOptions metav1.ListOptions) {
+	checkForPodsToBeReady := func() []string {
+		podsNotReady := make([]string, 0)
+		virtClient, err := kubecli.GetKubevirtClient()
+		PanicOnError(err)
+
+		podsList, err := virtClient.CoreV1().Pods(k8sv1.NamespaceAll).List(listOptions)
+		PanicOnError(err)
+		for _, pod := range podsList.Items {
+			for _, status := range pod.Status.ContainerStatuses {
+				if status.State.Terminated != nil {
+					break // We don't care about terminated pods
+				} else if status.State.Running != nil {
+					if !status.Ready { // We need to wait for this one
+						podsNotReady = append(podsNotReady, pod.Name)
+						break
+					}
+				} else {
+					// It is in Waiting state, We need to wait for this one
+					podsNotReady = append(podsNotReady, pod.Name)
+					break
+				}
+			}
+		}
+		return podsNotReady
+	}
+	Eventually(checkForPodsToBeReady, timeout, 2*time.Second).Should(BeEmpty(), "The are pods in system which are not ready.")
 }
 
 func AfterTestSuitCleanup() {
@@ -332,7 +439,11 @@ func AfterTestSuitCleanup() {
 	DeletePVC(osAlpineHostPath)
 	DeletePV(osAlpineHostPath)
 
+	if DeployTestingInfrastructureFlag {
+		WipeTestingInfrastructure()
+	}
 	removeNamespaces()
+
 }
 
 func BeforeTestCleanup() {
@@ -345,12 +456,16 @@ func BeforeTestSuitSetup() {
 
 	createNamespaces()
 	createServiceAccounts()
+	if DeployTestingInfrastructureFlag {
+		WipeTestingInfrastructure()
+		DeployTestingInfrastructure()
+	}
 
 	CreateHostPathPv(osAlpineHostPath, HostPathAlpine)
-	CreatePVC(osAlpineHostPath, defaultDiskSize)
+	CreateHostPathPVC(osAlpineHostPath, defaultDiskSize)
 
-	CreatePVC(osWindows, defaultWindowsDiskSize)
-	CreatePVC(osRhel, defaultRhelDiskSize)
+	CreateLocalPVC(osWindows, defaultWindowsDiskSize)
+	CreateLocalPVC(osRhel, defaultRhelDiskSize)
 
 	EnsureKVMPresent()
 
@@ -424,22 +539,29 @@ func CreateSecret(name string, data map[string]string) {
 	}
 }
 
-func CreatePVC(os string, size string) {
+func CreateHostPathPVC(os, size string) {
+	CreatePVC(os, size, HostPathStorageClass)
+}
+
+func CreateLocalPVC(os, size string) {
+	CreatePVC(os, size, LocalStorageClass)
+}
+
+func CreatePVC(os, size, storageClass string) {
 	virtCli, err := kubecli.GetKubevirtClient()
 	PanicOnError(err)
 
-	_, err = virtCli.CoreV1().PersistentVolumeClaims(NamespaceTestDefault).Create(newPVC(os, size))
+	_, err = virtCli.CoreV1().PersistentVolumeClaims(NamespaceTestDefault).Create(newPVC(os, size, storageClass))
 	if !errors.IsAlreadyExists(err) {
 		PanicOnError(err)
 	}
 }
 
-func newPVC(os string, size string) *k8sv1.PersistentVolumeClaim {
+func newPVC(os, size, storageClass string) *k8sv1.PersistentVolumeClaim {
 	quantity, err := resource.ParseQuantity(size)
 	PanicOnError(err)
 
 	name := fmt.Sprintf("disk-%s", os)
-	storageClass := LocalStorageClass
 
 	return &k8sv1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -461,10 +583,14 @@ func newPVC(os string, size string) *k8sv1.PersistentVolumeClaim {
 }
 
 func CreateHostPathPv(osName string, hostPath string) {
+	CreateHostPathPvWithSize(osName, hostPath, "1Gi")
+}
+
+func CreateHostPathPvWithSize(osName string, hostPath string, size string) {
 	virtCli, err := kubecli.GetKubevirtClient()
 	PanicOnError(err)
 
-	quantity, err := resource.ParseQuantity("1Gi")
+	quantity, err := resource.ParseQuantity(size)
 	PanicOnError(err)
 
 	hostPathType := k8sv1.HostPathDirectoryOrCreate
@@ -489,7 +615,7 @@ func CreateHostPathPv(osName string, hostPath string) {
 					Type: &hostPathType,
 				},
 			},
-			StorageClassName: LocalStorageClass,
+			StorageClassName: HostPathStorageClass,
 			NodeAffinity: &k8sv1.VolumeNodeAffinity{
 				Required: &k8sv1.NodeSelector{
 					NodeSelectorTerms: []k8sv1.NodeSelectorTerm{
@@ -512,6 +638,204 @@ func CreateHostPathPv(osName string, hostPath string) {
 	if !errors.IsAlreadyExists(err) {
 		PanicOnError(err)
 	}
+}
+
+func GetListOfManifests(pathToManifestsDir string) []string {
+	var manifests []string
+	isOpenshift := IsOpenShift()
+	matchFileName := func(pattern, filename string) bool {
+		match, err := filepath.Match(pattern, filename)
+		if err != nil {
+			panic(err)
+		}
+		return match
+	}
+	err := filepath.Walk(pathToManifestsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("ERROR: Can not access a path %q: %v\n", path, err)
+			return err
+		}
+		if !info.IsDir() {
+			if matchFileName("*-for-ocp.yaml", info.Name()) {
+				if isOpenshift {
+					manifests = append(manifests, path)
+				}
+			} else if matchFileName("*-for-k8s.yaml", info.Name()) {
+				if !isOpenshift {
+					manifests = append(manifests, path)
+				}
+			} else if matchFileName("*.yaml", info.Name()) {
+				manifests = append(manifests, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("ERROR: Walking the path %q: %v\n", pathToManifestsDir, err)
+		panic(err)
+	}
+	return manifests
+}
+
+func ReadManifestYamlFile(pathToManifest string) []unstructured.Unstructured {
+	var objects []unstructured.Unstructured
+	stream, err := os.Open(pathToManifest)
+	PanicOnError(err)
+
+	decoder := yaml.NewYAMLOrJSONDecoder(stream, 1024)
+	for {
+		obj := map[string]interface{}{}
+		err := decoder.Decode(&obj)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			panic(err)
+		}
+		if len(obj) == 0 {
+			continue
+		}
+		objects = append(objects, unstructured.Unstructured{Object: obj})
+	}
+	return objects
+}
+
+func isNamespaceScoped(kind schema.GroupVersionKind) bool {
+	switch kind.Kind {
+	case "ClusterRole", "ClusterRoleBinding":
+		return false
+	}
+	return true
+}
+
+func IsOpenShift() bool {
+	virtClient, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	result := virtClient.RestClient().Get().AbsPath("/version/openshift").Do()
+
+	var statusCode int
+	result.StatusCode(&statusCode)
+
+	if result.Error() == nil {
+		// It is OpenShift
+		if statusCode == http.StatusOK {
+			return true
+		}
+	} else {
+		// Got 404 so this is not Openshift
+		if statusCode == http.StatusNotFound {
+			return false
+		}
+	}
+	fmt.Printf(fmt.Sprintf("ERROR: Can not determine cluster type %#v\n", result))
+	panic(err)
+}
+
+func composeResourceURI(object unstructured.Unstructured) string {
+	uri := "/api"
+	if object.GetAPIVersion() != "v1" {
+		uri += "s"
+	}
+	uri += "/" + object.GetAPIVersion()
+	if object.GetNamespace() != "" && isNamespaceScoped(object.GroupVersionKind()) {
+		uri += "/namespaces/" + object.GetNamespace()
+	}
+	uri += "/" + strings.ToLower(object.GetKind())
+	if !strings.HasSuffix(object.GetKind(), "s") {
+		uri += "s"
+	}
+	return uri
+}
+
+func ApplyRawManifest(object unstructured.Unstructured) error {
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	uri := composeResourceURI(object)
+	jsonbody, err := object.MarshalJSON()
+	PanicOnError(err)
+	b, err := virtCli.CoreV1().RESTClient().Post().RequestURI(uri).Body(jsonbody).DoRaw()
+	if err != nil {
+		fmt.Printf(fmt.Sprintf("ERROR: Can not apply %s\n", object))
+		panic(err)
+	}
+	status := unstructured.Unstructured{}
+	return json.Unmarshal(b, &status)
+}
+
+func DeleteRawManifest(object unstructured.Unstructured) error {
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	uri := composeResourceURI(object)
+	uri = uri + "/" + object.GetName()
+	result := virtCli.CoreV1().RESTClient().Delete().RequestURI(uri).Do()
+	if result.Error() != nil && !errors.IsNotFound(result.Error()) {
+		fmt.Printf(fmt.Sprintf("ERROR: Can not delete %s err: %#v %s\n", object.GetName(), result.Error(), object))
+		panic(err)
+	}
+	return nil
+}
+
+func deployOrWipeTestingInfrastrucure(actionOnObject func(unstructured.Unstructured) error) {
+	// Scale down KubeVirt
+	err, replicasApi := DoScaleDeployment(KubeVirtInstallNamespace, "virt-api", 0)
+	PanicOnError(err)
+	err, replicasController := DoScaleDeployment(KubeVirtInstallNamespace, "virt-controller", 0)
+	PanicOnError(err)
+	daemonInstances, selector, _, err := DoScaleVirtHandler(KubeVirtInstallNamespace, "virt-handler", map[string]string{"kubevirt.io": "scaletozero"})
+	PanicOnError(err)
+	// Deploy / delete test infrastructure / dependencies
+	manifests := GetListOfManifests(PathToTestingInfrastrucureManifests)
+	for _, manifest := range manifests {
+		objects := ReadManifestYamlFile(manifest)
+		for _, obj := range objects {
+			err := actionOnObject(obj)
+			PanicOnError(err)
+		}
+	}
+	// Scale KubeVirt back
+	err, _ = DoScaleDeployment(KubeVirtInstallNamespace, "virt-api", replicasApi)
+	PanicOnError(err)
+	err, _ = DoScaleDeployment(KubeVirtInstallNamespace, "virt-controller", replicasController)
+	PanicOnError(err)
+	_, _, newGeneration, err := DoScaleVirtHandler(KubeVirtInstallNamespace, "virt-handler", selector)
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	Eventually(func() int32 {
+		d, err := virtCli.ExtensionsV1beta1().Deployments(KubeVirtInstallNamespace).Get("virt-api", metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		return d.Status.ReadyReplicas
+	}, 3*time.Minute, 2*time.Second).Should(Equal(replicasApi), "virt-api is not ready")
+
+	Eventually(func() int32 {
+		d, err := virtCli.ExtensionsV1beta1().Deployments(KubeVirtInstallNamespace).Get("virt-controller", metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		return d.Status.ReadyReplicas
+	}, 3*time.Minute, 2*time.Second).Should(Equal(replicasController), "virt-controller is not ready")
+
+	Eventually(func() int64 {
+		d, err := virtCli.ExtensionsV1beta1().DaemonSets(KubeVirtInstallNamespace).Get("virt-handler", metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		return d.Status.ObservedGeneration
+	}, 1*time.Minute, 2*time.Second).Should(Equal(newGeneration), "virt-handler did not bump the generation")
+
+	Eventually(func() int32 {
+		d, err := virtCli.ExtensionsV1beta1().DaemonSets(KubeVirtInstallNamespace).Get("virt-handler", metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		return d.Status.NumberAvailable
+	}, 1*time.Minute, 2*time.Second).Should(Equal(daemonInstances), "virt-handler is not ready")
+
+	WaitForAllPodsReady(3*time.Minute, metav1.ListOptions{})
+}
+
+func DeployTestingInfrastructure() {
+	deployOrWipeTestingInfrastrucure(ApplyRawManifest)
+}
+
+func WipeTestingInfrastructure() {
+	deployOrWipeTestingInfrastrucure(DeleteRawManifest)
 }
 
 func cleanupSubresourceServiceAccount() {
@@ -767,8 +1091,9 @@ func GetRunningPodByLabel(label string, labelType string, namespace string) *k8s
 	for _, pod := range pods.Items {
 		ready := true
 		for _, status := range pod.Status.ContainerStatuses {
-			if !status.Ready {
-				ready = false
+			if status.Name == "kubevirt-infra" {
+				ready = status.Ready
+				break
 			}
 		}
 		if ready {
@@ -793,6 +1118,9 @@ func cleanNamespaces() {
 		if err != nil {
 			continue
 		}
+
+		//Remove all HPA
+		PanicOnError(virtCli.AutoscalingV1().RESTClient().Delete().Namespace(namespace).Resource("horizontalpodautoscalers").Do().Error())
 
 		// Remove all VirtualMachines
 		PanicOnError(virtCli.RestClient().Delete().Namespace(namespace).Resource("virtualmachines").Do().Error())
@@ -913,6 +1241,7 @@ func NewRandomDataVolumeWithHttpImport(imageUrl string, namespace string) *cdiv1
 		APIVersion: "cdi.kubevirt.io/v1alpha1",
 		Kind:       "DataVolume",
 	}
+
 	return dataVolume
 }
 
@@ -936,8 +1265,7 @@ func NewRandomVMIWithDataVolume(dataVolumeName string) *v1.VirtualMachineInstanc
 	diskName := "disk0"
 	bus := "virtio"
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       diskName,
-		VolumeName: diskName,
+		Name: diskName,
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: bus,
@@ -1009,8 +1337,7 @@ func NewRandomVMIWithEphemeralDisk(containerImage string) *v1.VirtualMachineInst
 
 func AddEphemeralDisk(vmi *v1.VirtualMachineInstance, name string, bus string, image string) *v1.VirtualMachineInstance {
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       name,
-		VolumeName: name,
+		Name: name,
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: bus,
@@ -1020,7 +1347,7 @@ func AddEphemeralDisk(vmi *v1.VirtualMachineInstance, name string, bus string, i
 	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 		Name: name,
 		VolumeSource: v1.VolumeSource{
-			RegistryDisk: &v1.RegistryDiskSource{
+			ContainerDisk: &v1.ContainerDiskSource{
 				Image: image,
 			},
 		},
@@ -1041,8 +1368,7 @@ func AddBootOrderToDisk(vmi *v1.VirtualMachineInstance, diskName string, bootord
 
 func AddPVCDisk(vmi *v1.VirtualMachineInstance, name string, bus string, claimName string) *v1.VirtualMachineInstance {
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       name,
-		VolumeName: name,
+		Name: name,
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: bus,
@@ -1063,8 +1389,7 @@ func AddPVCDisk(vmi *v1.VirtualMachineInstance, name string, bus string, claimNa
 
 func AddEphemeralFloppy(vmi *v1.VirtualMachineInstance, name string, image string) *v1.VirtualMachineInstance {
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       name,
-		VolumeName: name,
+		Name: name,
 		DiskDevice: v1.DiskDevice{
 			Floppy: &v1.FloppyTarget{},
 		},
@@ -1072,7 +1397,28 @@ func AddEphemeralFloppy(vmi *v1.VirtualMachineInstance, name string, image strin
 	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 		Name: name,
 		VolumeSource: v1.VolumeSource{
-			RegistryDisk: &v1.RegistryDiskSource{
+			ContainerDisk: &v1.ContainerDiskSource{
+				Image: image,
+			},
+		},
+	})
+
+	return vmi
+}
+
+func AddEphemeralCdrom(vmi *v1.VirtualMachineInstance, name string, bus string, image string) *v1.VirtualMachineInstance {
+	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+		Name: name,
+		DiskDevice: v1.DiskDevice{
+			CDRom: &v1.CDRomTarget{
+				Bus: bus,
+			},
+		},
+	})
+	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
+		Name: name,
+		VolumeSource: v1.VolumeSource{
+			ContainerDisk: &v1.ContainerDiskSource{
 				Image: image,
 			},
 		},
@@ -1089,8 +1435,7 @@ func NewRandomVMIWithEphemeralDiskAndUserdata(containerImage string, userData st
 
 func AddUserData(vmi *v1.VirtualMachineInstance, name string, userData string) {
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       name,
-		VolumeName: name,
+		Name: name,
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: "virtio",
@@ -1113,8 +1458,7 @@ func NewRandomVMIWithPVC(claimName string) *v1.VirtualMachineInstance {
 
 	vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceMemory] = resource.MustParse("64M")
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       "disk0",
-		VolumeName: "disk0",
+		Name: "disk0",
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: "virtio",
@@ -1154,7 +1498,7 @@ func newBlockVolumePV(name string, labelSelector map[string]string, size string)
 	quantity, err := resource.ParseQuantity(size)
 	PanicOnError(err)
 
-	storageClass := LocalStorageClass
+	storageClass := BlockVolumeStorageClass
 	volumeMode := k8sv1.PersistentVolumeBlock
 
 	// Note: the path depends on kubevirtci!
@@ -1200,7 +1544,7 @@ func newBlockVolumePVC(name string, labelSelector map[string]string, size string
 	quantity, err := resource.ParseQuantity(size)
 	PanicOnError(err)
 
-	storageClass := LocalStorageClass
+	storageClass := BlockVolumeStorageClass
 	volumeMode := k8sv1.PersistentVolumeBlock
 
 	return &k8sv1.PersistentVolumeClaim{
@@ -1237,8 +1581,7 @@ func NewRandomVMIWithCDRom(claimName string) *v1.VirtualMachineInstance {
 
 	vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceMemory] = resource.MustParse("64M")
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       "disk0",
-		VolumeName: "disk0",
+		Name: "disk0",
 		DiskDevice: v1.DiskDevice{
 			CDRom: &v1.CDRomTarget{
 				// Do not specify ReadOnly flag so that
@@ -1263,8 +1606,7 @@ func NewRandomVMIWithEphemeralPVC(claimName string) *v1.VirtualMachineInstance {
 
 	vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceMemory] = resource.MustParse("64M")
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       "disk0",
-		VolumeName: "disk0",
+		Name: "disk0",
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: "sata",
@@ -1295,8 +1637,7 @@ func AddHostDisk(vmi *v1.VirtualMachineInstance, path string, diskType v1.HostDi
 	}
 
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       name,
-		VolumeName: name,
+		Name: name,
 		DiskDevice: v1.DiskDevice{
 			Disk: &v1.DiskTarget{
 				Bus: "virtio",
@@ -1337,7 +1678,7 @@ func NewRandomVMIWithHostDisk(diskPath string, diskType v1.HostDiskType, nodeNam
 }
 
 func NewRandomVMIWithWatchdog() *v1.VirtualMachineInstance {
-	vmi := NewRandomVMIWithEphemeralDisk(RegistryDiskFor(RegistryDiskAlpine))
+	vmi := NewRandomVMIWithEphemeralDisk(ContainerDiskFor(ContainerDiskAlpine))
 
 	vmi.Spec.Domain.Devices.Watchdog = &v1.Watchdog{
 		Name: "mywatchdog",
@@ -1357,9 +1698,8 @@ func NewRandomVMIWithConfigMap(configMapName string) *v1.VirtualMachineInstance 
 }
 
 func AddConfigMapDisk(vmi *v1.VirtualMachineInstance, configMapName string) {
-	volumeName := configMapName + "-vol"
 	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-		Name: volumeName,
+		Name: configMapName + "-disk",
 		VolumeSource: v1.VolumeSource{
 			ConfigMap: &v1.ConfigMapVolumeSource{
 				LocalObjectReference: k8sv1.LocalObjectReference{
@@ -1369,8 +1709,7 @@ func AddConfigMapDisk(vmi *v1.VirtualMachineInstance, configMapName string) {
 		},
 	})
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       configMapName + "-disk",
-		VolumeName: volumeName,
+		Name: configMapName + "-disk",
 	})
 }
 
@@ -1381,9 +1720,8 @@ func NewRandomVMIWithSecret(secretName string) *v1.VirtualMachineInstance {
 }
 
 func AddSecretDisk(vmi *v1.VirtualMachineInstance, secretName string) {
-	volumeName := secretName + "-vol"
 	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-		Name: volumeName,
+		Name: secretName + "-disk",
 		VolumeSource: v1.VolumeSource{
 			Secret: &v1.SecretVolumeSource{
 				SecretName: secretName,
@@ -1391,8 +1729,7 @@ func AddSecretDisk(vmi *v1.VirtualMachineInstance, secretName string) {
 		},
 	})
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       secretName + "-disk",
-		VolumeName: volumeName,
+		Name: secretName + "-disk",
 	})
 }
 
@@ -1403,7 +1740,7 @@ func NewRandomVMIWithServiceAccount(serviceAccountName string) *v1.VirtualMachin
 }
 
 func AddServiceAccountDisk(vmi *v1.VirtualMachineInstance, serviceAccountName string) {
-	volumeName := serviceAccountName + "-vol"
+	volumeName := serviceAccountName + "-disk"
 	vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 		Name: volumeName,
 		VolumeSource: v1.VolumeSource{
@@ -1413,8 +1750,7 @@ func AddServiceAccountDisk(vmi *v1.VirtualMachineInstance, serviceAccountName st
 		},
 	})
 	vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-		Name:       serviceAccountName + "-disk",
-		VolumeName: volumeName,
+		Name: serviceAccountName + "-disk",
 	})
 }
 
@@ -1441,17 +1777,35 @@ func AddExplicitPodNetworkInterface(vmi *v1.VirtualMachineInstance) {
 
 func NewRandomVMIWithe1000NetworkInterface() *v1.VirtualMachineInstance {
 	// Use alpine because cirros dhcp client starts prematurily before link is ready
-	vmi := NewRandomVMIWithEphemeralDisk(RegistryDiskFor(RegistryDiskAlpine))
+	vmi := NewRandomVMIWithEphemeralDisk(ContainerDiskFor(ContainerDiskAlpine))
 	AddExplicitPodNetworkInterface(vmi)
 	vmi.Spec.Domain.Devices.Interfaces[0].Model = "e1000"
 	return vmi
 }
 
 func NewRandomVMIWithCustomMacAddress() *v1.VirtualMachineInstance {
-	vmi := NewRandomVMIWithEphemeralDisk(RegistryDiskFor(RegistryDiskAlpine))
+	vmi := NewRandomVMIWithEphemeralDisk(ContainerDiskFor(ContainerDiskAlpine))
 	AddExplicitPodNetworkInterface(vmi)
 	vmi.Spec.Domain.Devices.Interfaces[0].MacAddress = "de:ad:00:00:be:af"
 	return vmi
+}
+
+// Block until DataVolume succeeds.
+func WaitForSuccessfulDataVolumeImport(obj runtime.Object, seconds int) {
+	vmi, ok := obj.(*v1.VirtualMachineInstance)
+	ExpectWithOffset(1, ok).To(BeTrue(), "Object is not of type *v1.VMI")
+
+	virtClient, err := kubecli.GetKubevirtClient()
+	ExpectWithOffset(1, err).ToNot(HaveOccurred())
+
+	EventuallyWithOffset(1, func() cdiv1.DataVolumePhase {
+		dv, err := virtClient.CdiClient().CdiV1alpha1().DataVolumes(vmi.Namespace).Get(vmi.Spec.Volumes[0].DataVolume.Name, metav1.GetOptions{})
+		ExpectWithOffset(1, err).ToNot(HaveOccurred())
+
+		return dv.Status.Phase
+	}, time.Duration(seconds)*time.Second, 1*time.Second).Should(Equal(cdiv1.Succeeded), "Timed out waiting for DataVolume to enter Succeeded phase")
+
+	return
 }
 
 // Block until the specified VirtualMachineInstance started and return the target node name.
@@ -1462,35 +1816,42 @@ func waitForVMIStart(obj runtime.Object, seconds int, ignoreWarnings bool) (node
 	virtClient, err := kubecli.GetKubevirtClient()
 	ExpectWithOffset(1, err).ToNot(HaveOccurred())
 
-	// Fetch the VirtualMachineInstance, to make sure we have a resourceVersion as a starting point for the watch
-	vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
-	ExpectWithOffset(1, err).ToNot(HaveOccurred())
-
-	objectEventWatcher := NewObjectEventWatcher(vmi).SinceWatchedObjectResourceVersion().Timeout(time.Duration(seconds) * time.Second)
+	// In case we don't want errors, start an event watcher and  check in parallel if we receive some warnings
 	if ignoreWarnings != true {
+
+		// Fetch the VirtualMachineInstance, to make sure we have a resourceVersion as a starting point for the watch
+		// FIXME: This may start watching too late and we may miss some warnings
+		if vmi.ResourceVersion == "" {
+			vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
+			ExpectWithOffset(1, err).ToNot(HaveOccurred())
+		}
+
+		objectEventWatcher := NewObjectEventWatcher(vmi).SinceWatchedObjectResourceVersion().Timeout(time.Duration(seconds+2) * time.Second)
 		objectEventWatcher.FailOnWarnings()
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		go func() {
+			defer GinkgoRecover()
+			objectEventWatcher.WaitFor(stopChan, NormalEvent, v1.Started)
+		}()
 	}
-	objectEventWatcher.WaitFor(NormalEvent, v1.Started)
 
 	// FIXME the event order is wrong. First the document should be updated
-	EventuallyWithOffset(1, func() bool {
+	EventuallyWithOffset(1, func() v1.VirtualMachineInstancePhase {
 		vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(vmi.Name, &metav1.GetOptions{})
 		ExpectWithOffset(1, err).ToNot(HaveOccurred())
 
 		nodeName = vmi.Status.NodeName
-
-		// wait on both phase and graphics
-		if vmi.Status.Phase == v1.Running {
-			return true
-		}
-		return false
-	}, time.Duration(seconds)*time.Second, 1*time.Second).Should(Equal(true), "Timed out waiting for VMI to enter Running phase")
+		Expect(vmi.IsFinal()).To(BeFalse(), "VMI unexpectedly stopped. State: %s", vmi.Status.Phase)
+		return vmi.Status.Phase
+	}, time.Duration(seconds)*time.Second, 1*time.Second).Should(Equal(v1.Running), "Timed out waiting for VMI to enter Running phase")
 
 	return
 }
 
 func WaitForSuccessfulVMIStartIgnoreWarnings(vmi runtime.Object) string {
-	return waitForVMIStart(vmi, 30, true)
+	return waitForVMIStart(vmi, 180, true)
 }
 
 func WaitForSuccessfulVMIStartWithTimeout(vmi runtime.Object, seconds int) (nodeName string) {
@@ -1507,7 +1868,7 @@ func WaitForVirtualMachineToDisappearWithTimeout(vmi *v1.VirtualMachineInstance,
 }
 
 func WaitForSuccessfulVMIStart(vmi runtime.Object) string {
-	return waitForVMIStart(vmi, 90, false)
+	return waitForVMIStart(vmi, 180, false)
 }
 
 func WaitUntilVMIReady(vmi *v1.VirtualMachineInstance, expecterFactory VMIExpecterFactory) *v1.VirtualMachineInstance {
@@ -1637,21 +1998,24 @@ func NewConsoleExpecter(virtCli kubecli.KubevirtClient, vmi *v1.VirtualMachineIn
 	}, timeout, opts...)
 }
 
-type RegistryDisk string
+type ContainerDisk string
 
 const (
-	RegistryDiskCirros RegistryDisk = "cirros"
-	RegistryDiskAlpine RegistryDisk = "alpine"
-	RegistryDiskFedora RegistryDisk = "fedora-cloud"
+	ContainerDiskCirros ContainerDisk = "cirros"
+	ContainerDiskAlpine ContainerDisk = "alpine"
+	ContainerDiskFedora ContainerDisk = "fedora-cloud"
+	ContainerDiskVirtio ContainerDisk = "virtio-container-disk"
 )
 
-// RegistryDiskFor takes the name of an image and returns the full
+// ContainerDiskFor takes the name of an image and returns the full
 // registry diks image path.
 // Supported values are: cirros, fedora, alpine, guest-agent
-func RegistryDiskFor(name RegistryDisk) string {
+func ContainerDiskFor(name ContainerDisk) string {
 	switch name {
-	case RegistryDiskCirros, RegistryDiskAlpine, RegistryDiskFedora:
-		return fmt.Sprintf("%s/%s-registry-disk-demo:%s", KubeVirtRepoPrefix, name, KubeVirtVersionTag)
+	case ContainerDiskCirros, ContainerDiskAlpine, ContainerDiskFedora:
+		return fmt.Sprintf("%s/%s-container-disk-demo:%s", KubeVirtRepoPrefix, name, KubeVirtVersionTag)
+	case ContainerDiskVirtio:
+		return fmt.Sprintf("%s/virtio-container-disk:%s", KubeVirtRepoPrefix, KubeVirtVersionTag)
 	}
 	panic(fmt.Sprintf("Unsupported registry disk %s", name))
 }
@@ -1902,15 +2266,22 @@ func SkipIfNoRhelImage(virtClient kubecli.KubevirtClient) {
 	}
 }
 
+func SkipIfNoSriovDevicePlugin(virtClient kubecli.KubevirtClient) {
+	_, err := virtClient.ExtensionsV1beta1().DaemonSets(metav1.NamespaceSystem).Get("kube-sriov-device-plugin-amd64", metav1.GetOptions{})
+	if err != nil {
+		Skip("Skip srio tests that required sriov device plugin")
+	}
+}
+
 func SkipIfNoMultusProvider(virtClient kubecli.KubevirtClient) {
-	_, err := virtClient.ExtensionsV1beta1().DaemonSets(KubeVirtInstallNamespace).Get("kube-multus-ds-amd64", metav1.GetOptions{})
+	_, err := virtClient.ExtensionsV1beta1().DaemonSets(metav1.NamespaceSystem).Get("kube-multus-ds-amd64", metav1.GetOptions{})
 	if err != nil {
 		Skip("Skip multus tests that required multus cni plugin")
 	}
 }
 
 func SkipIfNoGenieProvider(virtClient kubecli.KubevirtClient) {
-	_, err := virtClient.ExtensionsV1beta1().DaemonSets("kube-system").Get("genie-plugin", metav1.GetOptions{})
+	_, err := virtClient.ExtensionsV1beta1().DaemonSets(metav1.NamespaceSystem).Get("genie-plugin", metav1.GetOptions{})
 	if err != nil {
 		Skip("Skip genie tests that required genie cni plugin")
 	}
@@ -2220,12 +2591,127 @@ func RemoveHostDiskImage(diskPath string, nodeName string) {
 	Eventually(getStatus, 30, 1).Should(Equal(k8sv1.PodSucceeded))
 }
 
+func CreateISCSITargetPOD() (iscsiTargetIP string) {
+	virtClient, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+	image := fmt.Sprintf("%s/cdi-http-import-server:%s", KubeVirtRepoPrefix, KubeVirtVersionTag)
+	resources := k8sv1.ResourceRequirements{}
+	resources.Limits = make(k8sv1.ResourceList)
+	resources.Limits[k8sv1.ResourceMemory] = resource.MustParse("64M")
+	pod := &k8sv1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-iscsi-target",
+			Labels: map[string]string{
+				v1.AppLabel: "test-iscsi-target",
+			},
+		},
+		Spec: k8sv1.PodSpec{
+			RestartPolicy: k8sv1.RestartPolicyNever,
+			Containers: []k8sv1.Container{
+				{
+					Name:      "test-iscsi-target",
+					Image:     image,
+					Resources: resources,
+					Env: []k8sv1.EnvVar{
+						{
+							Name:  "AS_ISCSI",
+							Value: "true",
+						},
+					},
+				},
+			},
+		},
+	}
+	pod, err = virtClient.CoreV1().Pods(NamespaceTestDefault).Create(pod)
+	PanicOnError(err)
+
+	getStatus := func() k8sv1.PodPhase {
+		pod, err := virtClient.CoreV1().Pods(NamespaceTestDefault).Get(pod.Name, metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		iscsiTargetIP = pod.Status.PodIP
+		return pod.Status.Phase
+	}
+	Eventually(getStatus, 120, 1).Should(Equal(k8sv1.PodRunning))
+	return
+}
+
+func CreateISCSIPvAndPvc(name string, size string, iscsiTargetIP string) {
+	virtCli, err := kubecli.GetKubevirtClient()
+	PanicOnError(err)
+
+	_, err = virtCli.CoreV1().PersistentVolumes().Create(newISCSIPV(name, size, iscsiTargetIP))
+	if !errors.IsAlreadyExists(err) {
+		PanicOnError(err)
+	}
+
+	_, err = virtCli.CoreV1().PersistentVolumeClaims(NamespaceTestDefault).Create(newISCSIPVC(name, size))
+	if !errors.IsAlreadyExists(err) {
+		PanicOnError(err)
+	}
+}
+
+func newISCSIPV(name string, size string, iscsiTargetIP string) *k8sv1.PersistentVolume {
+	quantity, err := resource.ParseQuantity(size)
+	PanicOnError(err)
+
+	storageClass := LocalStorageClass
+	volumeMode := k8sv1.PersistentVolumeBlock
+
+	return &k8sv1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: k8sv1.PersistentVolumeSpec{
+			AccessModes: []k8sv1.PersistentVolumeAccessMode{k8sv1.ReadWriteMany},
+			Capacity: k8sv1.ResourceList{
+				"storage": quantity,
+			},
+			ClaimRef: &k8sv1.ObjectReference{
+				Name:      name,
+				Namespace: NamespaceTestDefault,
+			},
+			StorageClassName: storageClass,
+			VolumeMode:       &volumeMode,
+			PersistentVolumeSource: k8sv1.PersistentVolumeSource{
+				ISCSI: &k8sv1.ISCSIPersistentVolumeSource{
+					TargetPortal: iscsiTargetIP,
+					IQN:          "iqn.2018-01.io.kubevirt:wrapper",
+					Lun:          1,
+					ReadOnly:     false,
+				},
+			},
+		},
+	}
+}
+
+func newISCSIPVC(name string, size string) *k8sv1.PersistentVolumeClaim {
+	quantity, err := resource.ParseQuantity(size)
+	PanicOnError(err)
+
+	storageClass := LocalStorageClass
+	volumeMode := k8sv1.PersistentVolumeBlock
+
+	return &k8sv1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: k8sv1.PersistentVolumeClaimSpec{
+			AccessModes: []k8sv1.PersistentVolumeAccessMode{k8sv1.ReadWriteMany},
+			Resources: k8sv1.ResourceRequirements{
+				Requests: k8sv1.ResourceList{
+					"storage": quantity,
+				},
+			},
+			StorageClassName: &storageClass,
+			VolumeMode:       &volumeMode,
+		},
+	}
+}
+
 func CreateHostDiskImage(diskPath string) *k8sv1.Pod {
 	hostPathType := k8sv1.HostPathDirectoryOrCreate
 	dir := filepath.Dir(diskPath)
 
 	args := []string{fmt.Sprintf(`dd if=/dev/zero of=%s bs=1 count=0 seek=1G && ls -l %s`, diskPath, dir)}
-	job := renderHostPathJob("hostdisk-create-job", dir, hostPathType, []string{"/bin/bash", "-c"}, args)
+	job := RenderHostPathJob("hostdisk-create-job", dir, hostPathType, k8sv1.MountPropagationNone, []string{"/bin/bash", "-c"}, args)
 
 	return job
 }
@@ -2234,16 +2720,17 @@ func newDeleteHostDisksJob(diskPath string) *k8sv1.Pod {
 	hostPathType := k8sv1.HostPathDirectoryOrCreate
 
 	args := []string{fmt.Sprintf(`rm -f %s`, diskPath)}
-	job := renderHostPathJob("hostdisk-delete-job", filepath.Dir(diskPath), hostPathType, []string{"/bin/bash", "-c"}, args)
+	job := RenderHostPathJob("hostdisk-delete-job", filepath.Dir(diskPath), hostPathType, k8sv1.MountPropagationNone, []string{"/bin/bash", "-c"}, args)
 
 	return job
 }
 
-func renderHostPathJob(jobName string, dir string, hostPathType k8sv1.HostPathType, cmd []string, args []string) *k8sv1.Pod {
+func RenderHostPathJob(jobName string, dir string, hostPathType k8sv1.HostPathType, mountPropagation k8sv1.MountPropagationMode, cmd []string, args []string) *k8sv1.Pod {
 	job := RenderJob(jobName, cmd, args)
 	job.Spec.Containers[0].VolumeMounts = append(job.Spec.Containers[0].VolumeMounts, k8sv1.VolumeMount{
-		Name:      "hostpath-mount",
-		MountPath: dir,
+		Name:             "hostpath-mount",
+		MountPropagation: &mountPropagation,
+		MountPath:        dir,
 	})
 	job.Spec.Volumes = append(job.Spec.Volumes, k8sv1.Volume{
 		Name: "hostpath-mount",
@@ -2327,12 +2814,7 @@ func SkipIfVersionBelow(message string, expectedVersion string) {
 }
 
 func SkipIfOpenShift(message string) {
-	virtClient, err := kubecli.GetKubevirtClient()
-	PanicOnError(err)
-
-	result := virtClient.RestClient().Get().AbsPath("/version/openshift").Do()
-
-	if result.Error() == nil {
+	if IsOpenShift() {
 		Skip("Openshift detected: " + message)
 	}
 }
@@ -2385,7 +2867,7 @@ func RunCommandOnVmiPod(vmi *v1.VirtualMachineInstance, command []string) string
 // GetNodeLibvirtCapabilities returns node libvirt capabilities
 func GetNodeLibvirtCapabilities(nodeName string) string {
 	// Create a virt-launcher pod to fetch virsh capabilities
-	vmi := NewRandomVMIWithEphemeralDiskAndUserdata(RegistryDiskFor(RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+	vmi := NewRandomVMIWithEphemeralDiskAndUserdata(ContainerDiskFor(ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 	StartVmOnNode(vmi, nodeName)
 
 	return RunCommandOnVmiPod(vmi, []string{"virsh", "-r", "capabilities"})
@@ -2393,7 +2875,7 @@ func GetNodeLibvirtCapabilities(nodeName string) string {
 
 // GetNodeCPUInfo returns output of lscpu on the pod that runs on the specified node
 func GetNodeCPUInfo(nodeName string) string {
-	vmi := NewRandomVMIWithEphemeralDiskAndUserdata(RegistryDiskFor(RegistryDiskCirros), "#!/bin/bash\necho 'hello'\n")
+	vmi := NewRandomVMIWithEphemeralDiskAndUserdata(ContainerDiskFor(ContainerDiskCirros), "#!/bin/bash\necho 'hello'\n")
 	StartVmOnNode(vmi, nodeName)
 
 	return RunCommandOnVmiPod(vmi, []string{"lscpu"})
@@ -2413,20 +2895,33 @@ func KubevirtFailHandler(message string, callerSkip ...int) {
 	}
 
 	for _, ns := range []string{KubeVirtInstallNamespace, metav1.NamespaceSystem, NamespaceTestDefault} {
-		// Get KubeVirt specific pods information
-		pods, err := virtClient.CoreV1().Pods(ns).List(metav1.ListOptions{LabelSelector: "kubevirt.io"})
-		if err != nil {
-			fmt.Println(err)
-			Fail(message, callerSkip...)
-			return
+		// Get KubeVirt and CDI specific pods information
+		labels := []string{"kubevirt.io", "cdi.kubevirt.io"}
+		allPods := []k8sv1.Pod{}
+
+		for _, label := range labels {
+			pods, err := virtClient.CoreV1().Pods(ns).List(metav1.ListOptions{LabelSelector: label})
+			if err != nil {
+				fmt.Println(err)
+				Fail(message, callerSkip...)
+				return
+			}
+			allPods = append(allPods, pods.Items...)
 		}
 
-		for _, pod := range pods.Items {
+		for _, pod := range allPods {
 			fmt.Printf("\nPod name: %s\t Pod phase: %s\n\n", pod.Name, pod.Status.Phase)
 			var tailLines int64 = 15
 			var containerName = ""
 			if strings.HasPrefix(pod.Name, "virt-launcher") {
+				tailLines = 45
 				containerName = "compute"
+				data, err := ghodssyaml.Marshal(pod)
+				if err != nil {
+					log.DefaultLogger().Reason(err).Errorf("Failed to marshal pod %s", pod.Name)
+					continue
+				}
+				fmt.Println(string(data))
 			}
 			logsRaw, err := virtClient.CoreV1().Pods(ns).GetLogs(
 				pod.Name, &k8sv1.PodLogOptions{
@@ -2447,7 +2942,12 @@ func KubevirtFailHandler(message string, callerSkip ...int) {
 		}
 
 		for _, vmi := range vmis.Items {
-			fmt.Printf("%v\n", vmi)
+			data, err := ghodssyaml.Marshal(vmi)
+			if err != nil {
+				log.DefaultLogger().Reason(err).Errorf("Failed to marshal vmi %s", vmi.Name)
+				continue
+			}
+			fmt.Println(string(data))
 		}
 	}
 	Fail(message, callerSkip...)
@@ -2539,7 +3039,7 @@ func HasCDI() bool {
 	options := metav1.GetOptions{}
 	cfgMap, err := virtClient.CoreV1().ConfigMaps(KubeVirtInstallNamespace).Get("kubevirt-config", options)
 	if err == nil {
-		val, ok := cfgMap.Data["feature-gates"]
+		val, ok := cfgMap.Data[virtconfig.FeatureGatesKey]
 		if !ok {
 			return hasCDI
 		}
@@ -2550,4 +3050,38 @@ func HasCDI() bool {
 		}
 	}
 	return hasCDI
+}
+
+func StartTCPServer(vmi *v1.VirtualMachineInstance, port int) {
+	expecter, err := LoggedInCirrosExpecter(vmi)
+	Expect(err).ToNot(HaveOccurred())
+	defer expecter.Close()
+
+	resp, err := expecter.ExpectBatch([]expect.Batcher{
+		&expect.BSnd{S: "\n"},
+		&expect.BExp{R: "\\$ "},
+		&expect.BSnd{S: fmt.Sprintf("screen -d -m nc -klp %d -e echo -e \"Hello World!\"\n", port)},
+		&expect.BExp{R: "\\$ "},
+		&expect.BSnd{S: "echo $?\n"},
+		&expect.BExp{R: "0"},
+	}, 60*time.Second)
+	log.DefaultLogger().Infof("%v", resp)
+	Expect(err).ToNot(HaveOccurred())
+}
+
+func StartHTTPServer(vmi *v1.VirtualMachineInstance, port int) {
+	expecter, err := LoggedInCirrosExpecter(vmi)
+	Expect(err).ToNot(HaveOccurred())
+	defer expecter.Close()
+
+	resp, err := expecter.ExpectBatch([]expect.Batcher{
+		&expect.BSnd{S: "\n"},
+		&expect.BExp{R: "\\$ "},
+		&expect.BSnd{S: fmt.Sprintf("screen -d -m nc -klp %d -e echo -e \"HTTP/1.1 200 OK\\n\\nHello World!\"\n", port)},
+		&expect.BExp{R: "\\$ "},
+		&expect.BSnd{S: "echo $?\n"},
+		&expect.BExp{R: "0"},
+	}, 60*time.Second)
+	log.DefaultLogger().Infof("%v", resp)
+	Expect(err).ToNot(HaveOccurred())
 }

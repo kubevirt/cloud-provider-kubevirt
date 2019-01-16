@@ -18,9 +18,28 @@ function build_func_tests() {
     ginkgo build ${KUBEVIRT_DIR}/tests
     mv ${KUBEVIRT_DIR}/tests/tests.test ${TESTS_OUT_DIR}/
 }
+function build_func_tests_container() {
+    local bin_name=tests
+    cp ${KUBEVIRT_DIR}/tests/{Dockerfile,entrypoint.sh} \
+        ${KUBEVIRT_DIR}/tools/manifest-templator/manifest-templator \
+        ${TESTS_OUT_DIR}/
+    rsync -ar ${KUBEVIRT_DIR}/manifests/ ${TESTS_OUT_DIR}/manifests
+    cd ${TESTS_OUT_DIR}
+    docker build \
+        -t ${docker_prefix}/${bin_name}:${docker_tag} \
+        --label ${job_prefix} \
+        --label ${bin_name} .
+}
 
-KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER:-k8s-1.10.4}
+KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER:-k8s-1.10.11}
 KUBEVIRT_NUM_NODES=${KUBEVIRT_NUM_NODES:-1}
+KUBEVIRT_MEMORY_SIZE=${KUBEVIRT_MEMORY_SIZE:-5120M}
+
+# If set to the name of a branch, the builds will try to use an image of the form kubevirt/{name}:{branche}
+# as cache source (--cache-from)
+KUBEVIRT_CACHE_FROM=${KUBEVIRT_CACHE_FROM}
+# Push images in the form kubevirt/{name}:{branche} to update the build cache for this branch
+KUBEVIRT_UPDATE_CACHE_FROM=${KUBEVIRT_UPDATE_CACHE_FROM}
 
 # Use this environment variable to set a custom pkgdir path
 # Useful for cross-compilation where the default -pkdir for cross-builds may not be writable

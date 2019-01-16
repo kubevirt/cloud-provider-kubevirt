@@ -1,5 +1,5 @@
-hash: c67563ac0c5cde968a9daa7c285af38caab4fdbbfd3ad25d58fbad62a20cf2ed
-updated: 2018-11-27T22:58:30.001837+01:00
+hash: 8cc1310185bfbc66f38c3eea15e86bd07daf1bf84a0661a9cf1727a41862c79e
+updated: 2019-01-16T21:41:11.487776+01:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -173,6 +173,16 @@ imports:
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/json-iterator/go
   version: f2b4162afba35581b6d4a50d3b8f34e33c144682
+- name: github.com/k8snetworkplumbingwg/network-attachment-definition-client
+  version: 379ff533bf290f5bd6a5dfed0ca382cc3c7cc8d2
+  repo: https://github.com/booxter/network-attachment-definition-client.git
+  vcs: git
+  subpackages:
+  - pkg/apis/k8s.cni.cncf.io
+  - pkg/apis/k8s.cni.cncf.io/v1
+  - pkg/client/clientset/versioned
+  - pkg/client/clientset/versioned/scheme
+  - pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1
 - name: github.com/mailru/easyjson
   version: 2f5df55504ebc322e4d52d34df6a1f5b503bf26d
   subpackages:
@@ -191,6 +201,15 @@ imports:
   version: 56545f4a5d46df9a6648819d1664c3a03a13ffdb
 - name: github.com/opencontainers/go-digest
   version: a6d0ee40d4207ea02364bd3b9e8e77b9159ba1eb
+- name: github.com/openshift/api
+  version: 7e08e1ffe8147ffd3d4b798f4fa7527296580fec
+  subpackages:
+  - security/v1
+- name: github.com/openshift/client-go
+  version: 431ec9a26e5021f35fa41ee9a89842db9bfdb370
+  subpackages:
+  - security/clientset/versioned/scheme
+  - security/clientset/versioned/typed/security/v1
 - name: github.com/pborman/uuid
   version: ca53cad383cad2479bbba7f7a1a05797ec1386e4
 - name: github.com/peterbourgon/diskv
@@ -345,6 +364,11 @@ imports:
 - name: k8s.io/apiextensions-apiserver
   version: 67bb9d92aa024a38a3e323cbb9e115e82c0d50b3
   subpackages:
+  - pkg/apis/apiextensions
+  - pkg/apis/apiextensions/v1beta1
+  - pkg/client/clientset/clientset
+  - pkg/client/clientset/clientset/scheme
+  - pkg/client/clientset/clientset/typed/apiextensions/v1beta1
   - pkg/features
 - name: k8s.io/apimachinery
   version: 8ee1a638bafa4ae9691077e690cb45dd54f45111
@@ -688,7 +712,7 @@ imports:
   - pkg/version/prometheus
   - pkg/version/verflag
 - name: kubevirt.io/containerized-data-importer
-  version: 8d7a20b86c9a2ed8ac31e26aab50e362f0c84475
+  version: 254749a63d335a4ec1ef919a971cab0b68cf4980
   repo: https://github.com/kubevirt/containerized-data-importer.git
   subpackages:
   - pkg/apis/datavolumecontroller
@@ -700,7 +724,7 @@ imports:
   - pkg/client/clientset/versioned/typed/datavolumecontroller/v1alpha1
   - pkg/client/clientset/versioned/typed/uploadcontroller/v1alpha1
 - name: kubevirt.io/kubevirt
-  version: 6ddf4f4e2db4924ac0725676db72bb78acc6cca2
+  version: f6a440c81b74a47259aa3697763e91bc19e6e663
   subpackages:
   - pkg/api/v1
   - pkg/kubecli

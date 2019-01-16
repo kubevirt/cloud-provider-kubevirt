@@ -5,30 +5,39 @@ import (
 	"fmt"
 	"net/rpc"
 	"path/filepath"
+	"time"
 
-	"github.com/libvirt/libvirt-go"
+	"k8s.io/client-go/tools/reference"
+
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
+
+	k8sv1 "k8s.io/api/core/v1"
+
+	libvirt "github.com/libvirt/libvirt-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"kubevirt.io/kubevirt/pkg/log"
 	notifyserver "kubevirt.io/kubevirt/pkg/virt-handler/notify-server"
+	agentpoller "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/agent-poller"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
 	domainerrors "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/errors"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/util"
 )
 
-type DomainEventClient struct {
+type NotifyClient struct {
 	client *rpc.Client
 }
 
-type LibvirtEvent struct {
-	Domain string
-	Event  *libvirt.DomainEventLifecycle
+type libvirtEvent struct {
+	Domain     string
+	Event      *libvirt.DomainEventLifecycle
+	AgentEvent *libvirt.DomainEventAgentLifecycle
 }
 
-func NewDomainEventClient(virtShareDir string) (*DomainEventClient, error) {
+func NewNotifyClient(virtShareDir string) (*NotifyClient, error) {
 	socketPath := filepath.Join(virtShareDir, "domain-notify.sock")
 	conn, err := rpc.Dial("unix", socketPath)
 	if err != nil {
@@ -36,10 +45,10 @@ func NewDomainEventClient(virtShareDir string) (*DomainEventClient, error) {
 		return nil, err
 	}
 
-	return &DomainEventClient{client: conn}, nil
+	return &NotifyClient{client: conn}, nil
 }
 
-func (c *DomainEventClient) SendDomainEvent(event watch.Event) error {
+func (c *NotifyClient) SendDomainEvent(event watch.Event) error {
 
 	var domainJSON []byte
 	var statusJSON []byte
@@ -58,12 +67,11 @@ func (c *DomainEventClient) SendDomainEvent(event watch.Event) error {
 			return err
 		}
 	}
-	args := &notifyserver.Args{
+	args := &notifyserver.DomainEventArgs{
 		DomainJSON: string(domainJSON),
 		StatusJSON: string(statusJSON),
 		EventType:  string(event.Type),
 	}
-
 	reply := &notifyserver.Reply{}
 
 	err = c.client.Call("Notify.DomainEvent", args, reply)
@@ -81,8 +89,7 @@ func newWatchEventError(err error) watch.Event {
 	return watch.Event{Type: watch.Error, Object: &metav1.Status{Status: metav1.StatusFailure, Message: err.Error()}}
 }
 
-func libvirtEventCallback(c cli.Connection, domain *api.Domain, libvirtEvent LibvirtEvent, client *DomainEventClient, events chan watch.Event) {
-
+func eventCallback(c cli.Connection, domain *api.Domain, libvirtEvent libvirtEvent, client *NotifyClient, events chan watch.Event, interfaceStatus *[]api.InterfaceStatus) {
 	d, err := c.LookupDomainByName(util.DomainFromNamespaceName(domain.ObjectMeta.Namespace, domain.ObjectMeta.Name))
 	if err != nil {
 		if !domainerrors.IsNotFound(err) {
@@ -111,14 +118,17 @@ func libvirtEventCallback(c cli.Connection, domain *api.Domain, libvirtEvent Lib
 
 		spec, err := util.GetDomainSpecWithRuntimeInfo(status, d)
 		if err != nil {
-			if !domainerrors.IsNotFound(err) {
+			// NOTE: Getting domain metadata for a live-migrating VM isn't allowed
+			if !domainerrors.IsNotFound(err) && !domainerrors.IsInvalidOperation(err) {
 				log.Log.Reason(err).Error("Could not fetch the Domain specification.")
 				client.SendDomainEvent(newWatchEventError(err))
 				return
 			}
 		} else {
-			domain.Spec = *spec
 			domain.ObjectMeta.UID = spec.Metadata.KubeVirt.UID
+		}
+		if spec != nil {
+			domain.Spec = *spec
 		}
 
 		log.Log.Infof("kubevirt domain status: %v(%v):%v(%v)", domain.Status.Status, status, domain.Status.Reason, reason)
@@ -141,40 +151,49 @@ func libvirtEventCallback(c cli.Connection, domain *api.Domain, libvirtEvent Lib
 				events <- event
 			}
 		}
+		if interfaceStatus != nil {
+			domain.Status.Interfaces = *interfaceStatus
+			event := watch.Event{Type: watch.Modified, Object: domain}
+			client.SendDomainEvent(event)
+			events <- event
+		}
 		client.SendDomainEvent(watch.Event{Type: watch.Modified, Object: domain})
 	}
 }
 
-func StartNotifier(virtShareDir string, domainConn cli.Connection, deleteNotificationSent chan watch.Event, vmiUID types.UID) error {
+func (c *NotifyClient) StartDomainNotifier(domainConn cli.Connection, deleteNotificationSent chan watch.Event, vmiUID types.UID, qemuAgentPollerInterval *time.Duration) error {
+	eventChan := make(chan libvirtEvent, 10)
+	agentUpdateChan := make(chan agentpoller.AgentUpdateEvent, 10)
 
-	eventChan := make(chan LibvirtEvent, 10)
 	reconnectChan := make(chan bool, 10)
 
 	domainConn.SetReconnectChan(reconnectChan)
 
+	agentPoller := agentpoller.CreatePoller(domainConn, vmiUID, agentUpdateChan, qemuAgentPollerInterval)
+
 	// Run the event process logic in a separate go-routine to not block libvirt
 	go func() {
+		var interfaceStatuses *[]api.InterfaceStatus
 		for {
 			select {
 			case event := <-eventChan:
-				// TODO don't make a client every single time
-				client, err := NewDomainEventClient(virtShareDir)
-				if err != nil {
-					log.Log.Reason(err).Error("Unable to create domain event notify client")
-					continue
+				domain := util.NewDomainFromName(event.Domain, vmiUID)
+				eventCallback(domainConn, domain, event, c, deleteNotificationSent, interfaceStatuses)
+				agentPoller.UpdateDomain(domain)
+				if event.AgentEvent != nil {
+					if event.AgentEvent.State == libvirt.CONNECT_DOMAIN_EVENT_AGENT_LIFECYCLE_STATE_CONNECTED {
+						agentPoller.Start()
+					} else if event.AgentEvent.State == libvirt.CONNECT_DOMAIN_EVENT_AGENT_LIFECYCLE_STATE_DISCONNECTED {
+						agentPoller.Stop()
+					}
 				}
-
-				libvirtEventCallback(domainConn, util.NewDomainFromName(event.Domain, vmiUID), event, client, deleteNotificationSent)
 				log.Log.Info("processed event")
+			case agentUpdate := <-agentUpdateChan:
+				interfaceStatuses = agentUpdate.InterfaceStatuses
+				domainName := agentUpdate.DomainName
+				eventCallback(domainConn, util.NewDomainFromName(domainName, vmiUID), libvirtEvent{}, c, deleteNotificationSent, interfaceStatuses)
 			case <-reconnectChan:
-				// TODO don't make a client every single time
-				client, err := NewDomainEventClient(virtShareDir)
-				if err != nil {
-					log.Log.Reason(err).Error("Unable to create domain event notify client")
-					continue
-				}
-
-				client.SendDomainEvent(newWatchEventError(fmt.Errorf("Libvirt reconnect")))
+				c.SendDomainEvent(newWatchEventError(fmt.Errorf("Libvirt reconnect")))
 				return
 			}
 		}
@@ -187,7 +206,7 @@ func StartNotifier(virtShareDir string, domainConn cli.Connection, deleteNotific
 			log.Log.Reason(err).Info("Could not determine name of libvirt domain in event callback.")
 		}
 		select {
-		case eventChan <- LibvirtEvent{Event: event, Domain: name}:
+		case eventChan <- libvirtEvent{Event: event, Domain: name}:
 		default:
 			log.Log.Infof("Libvirt event channel is full, dropping event.")
 		}
@@ -205,7 +224,7 @@ func StartNotifier(virtShareDir string, domainConn cli.Connection, deleteNotific
 			log.Log.Reason(err).Info("Could not determine name of libvirt domain in event callback.")
 		}
 		select {
-		case eventChan <- LibvirtEvent{Domain: name}:
+		case eventChan <- libvirtEvent{AgentEvent: event, Domain: name}:
 		default:
 			log.Log.Infof("Libvirt event channel is full, dropping event.")
 		}
@@ -217,5 +236,32 @@ func StartNotifier(virtShareDir string, domainConn cli.Connection, deleteNotific
 	}
 
 	log.Log.Infof("Registered libvirt event notify callback")
+	return nil
+}
+
+func (c *NotifyClient) SendK8sEvent(vmi *v1.VirtualMachineInstance, severity string, reason string, message string) error {
+
+	reply := &notifyserver.Reply{}
+
+	vmiRef, err := reference.GetReference(v1.Scheme, vmi)
+	if err != nil {
+		return err
+	}
+
+	event := k8sv1.Event{
+		InvolvedObject: *vmiRef,
+		Type:           severity,
+		Reason:         reason,
+		Message:        message,
+	}
+
+	err = c.client.Call("Notify.K8sEvent", event, reply)
+	if err != nil {
+		return err
+	} else if reply.Success != true {
+		msg := fmt.Sprintf("failed to notify k8s event: %s", reply.Message)
+		return fmt.Errorf(msg)
+	}
+
 	return nil
 }

@@ -1,7 +1,7 @@
 export GO15VENDOREXPERIMENT := 1
 
 all:
-	hack/dockerized "./hack/check.sh && KUBEVIRT_VERSION=${KUBEVIRT_VERSION} ./hack/build-go.sh install ${WHAT} && ./hack/build-copy-artifacts.sh ${WHAT} && DOCKER_PREFIX=${DOCKER_PREFIX} DOCKER_TAG=${DOCKER_TAG} ./hack/build-manifests.sh"
+	hack/dockerized "./hack/check.sh && KUBEVIRT_VERSION=${KUBEVIRT_VERSION} ./hack/build-go.sh install ${WHAT} && ./hack/build-copy-artifacts.sh ${WHAT} && DOCKER_PREFIX=${DOCKER_PREFIX} DOCKER_TAG=${DOCKER_TAG} IMAGE_PULL_POLICY=${IMAGE_PULL_POLICY} VERBOSITY=${VERBOSITY} ./hack/build-manifests.sh"
 
 generate:
 	hack/dockerized "./hack/generate.sh"
@@ -15,6 +15,9 @@ client-python:
 build:
 	hack/dockerized "./hack/check.sh && KUBEVIRT_VERSION=${KUBEVIRT_VERSION} ./hack/build-go.sh install ${WHAT}" && ./hack/build-copy-artifacts.sh ${WHAT}
 
+coverage:
+	hack/dockerized "./hack/check.sh && ./hack/coverage.sh ${WHAT}"
+
 goveralls:
 	SYNC_OUT=false hack/dockerized "./hack/check.sh && TRAVIS_JOB_ID=${TRAVIS_JOB_ID} TRAVIS_PULL_REQUEST=${TRAVIS_PULL_REQUEST} TRAVIS_BRANCH=${TRAVIS_BRANCH} ./hack/goveralls.sh"
 
@@ -27,7 +30,7 @@ functest:
 
 clean:
 	hack/dockerized "./hack/build-go.sh clean ${WHAT} && rm _out/* -rf"
-	rm -f tools/openapispec/openapispec tools/crd-generator/crd-generator tools/manifest-templator/manifests-templator tools/vms-generator/vms-generator
+	rm -f tools/openapispec/openapispec tools/resource-generator/resource-generator tools/manifest-templator/manifests-templator tools/vms-generator/vms-generator
 
 distclean: clean
 	hack/dockerized "rm -rf vendor/ && rm -f .glide.*.hash && glide cc"
@@ -47,6 +50,12 @@ docker: build
 push: docker
 	hack/build-docker.sh push ${WHAT}
 
+push-cache:
+	hack/build-docker.sh push-cache ${WHAT}
+
+pull-cache:
+	hack/build-docker.sh pull-cache ${WHAT}
+
 publish: docker verify-build
 	hack/build-docker.sh push ${WHAT}
 
@@ -54,7 +63,7 @@ verify-build:
 	hack/verify-build.sh
 
 manifests:
-	hack/dockerized "DOCKER_PREFIX=${DOCKER_PREFIX} DOCKER_TAG=${DOCKER_TAG} ./hack/build-manifests.sh"
+	hack/dockerized "DOCKER_PREFIX=${DOCKER_PREFIX} DOCKER_TAG=${DOCKER_TAG} IMAGE_PULL_POLICY=${IMAGE_PULL_POLICY} VERBOSITY=${VERBOSITY} ./hack/build-manifests.sh"
 
 .release-functest:
 	make functest > .release-functest 2>&1
@@ -78,5 +87,10 @@ cluster-deploy: cluster-clean
 	./cluster/deploy.sh
 
 cluster-sync: cluster-build cluster-deploy
+
+cluster-deploy-operator: cluster-clean
+	./cluster/deploy-operator.sh
+
+cluster-sync-operator: cluster-build cluster-deploy-operator
 
 .PHONY: build test clean distclean checksync sync docker manifests publish functest release-announce cluster-up cluster-down cluster-clean cluster-deploy cluster-sync

@@ -17,27 +17,31 @@
  *
  */
 
-package services_test
+package services
 
 import (
 	"errors"
+	"strconv"
 	"testing"
-	"time"
 
+	"github.com/golang/mock/gomock"
+	networkv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	fakenetworkclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 	kubev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/cache"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/hooks"
+	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
-	. "kubevirt.io/kubevirt/pkg/virt-controller/services"
+	"kubevirt.io/kubevirt/pkg/virt-config"
 )
 
 const namespaceKubevirt = "kubevirt"
@@ -45,14 +49,48 @@ const namespaceKubevirt = "kubevirt"
 var _ = Describe("Template", func() {
 
 	log.Log.SetIOWriter(GinkgoWriter)
-	configCache := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, nil)
+
 	pvcCache := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, nil)
-	svc := NewTemplateService("kubevirt/virt-launcher",
-		"/var/run/kubevirt",
-		"/var/run/kubevirt-ephemeral-disks",
-		"pull-secret-1",
-		configCache,
-		pvcCache)
+	var cmCache cache.Indexer
+	var svc TemplateService
+
+	ctrl := gomock.NewController(GinkgoT())
+	virtClient := kubecli.NewMockKubevirtClient(ctrl)
+
+	BeforeEach(func() {
+		cmCache = cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, nil)
+		svc = NewTemplateService("kubevirt/virt-launcher",
+			"/var/run/kubevirt",
+			"/var/run/kubevirt-ephemeral-disks",
+			"pull-secret-1",
+			cmCache,
+			pvcCache,
+			virtClient)
+
+		// Set up mock clients
+		networkClient := fakenetworkclient.NewSimpleClientset()
+		virtClient.EXPECT().NetworkClient().Return(networkClient).AnyTimes()
+		// Sadly, we cannot pass desired attachment objects into
+		// Clientset constructor because UnsafeGuessKindToResource
+		// calculates incorrect object kind (without dashes). Instead
+		// of that, we use tracker Create function to register objects
+		// under explicitly defined schema name
+		gvr := schema.GroupVersionResource{
+			Group:    "k8s.cni.cncf.io",
+			Version:  "v1",
+			Resource: "network-attachment-definitions",
+		}
+		for _, name := range []string{"default", "test1"} {
+			network := &networkv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+			}
+			err := networkClient.Tracker().Create(gvr, network, "default")
+			Expect(err).To(Not(HaveOccurred()))
+		}
+	})
 
 	Describe("Rendering", func() {
 		Context("launch template with correct parameters", func() {
@@ -71,8 +109,7 @@ var _ = Describe("Template", func() {
 					v1.CreatedByLabel: "1234",
 				}))
 				Expect(pod.ObjectMeta.Annotations).To(Equal(map[string]string{
-					v1.DomainAnnotation:  "testvmi",
-					v1.OwnedByAnnotation: "virt-controller",
+					v1.DomainAnnotation: "testvmi",
 				}))
 				Expect(pod.ObjectMeta.OwnerReferences).To(Equal([]metav1.OwnerReference{{
 					APIVersion:         v1.VirtualMachineInstanceGroupVersionKind.GroupVersion().String(),
@@ -93,9 +130,10 @@ var _ = Describe("Template", func() {
 					"--namespace", "testns",
 					"--kubevirt-share-dir", "/var/run/kubevirt",
 					"--ephemeral-disk-dir", "/var/run/kubevirt-ephemeral-disks",
-					"--readiness-file", "/tmp/healthy",
+					"--readiness-file", "/var/run/kubevirt-infra/healthy",
 					"--grace-period-seconds", "45",
-					"--hook-sidecars", "1"}))
+					"--hook-sidecars", "1",
+					"--less-pvc-space-toleration", "10"}))
 				Expect(pod.Spec.Containers[1].Name).To(Equal("hook-sidecar-0"))
 				Expect(pod.Spec.Containers[1].Image).To(Equal("some-image:v1"))
 				Expect(pod.Spec.Containers[1].ImagePullPolicy).To(Equal(kubev1.PullPolicy("IfNotPresent")))
@@ -198,18 +236,54 @@ var _ = Describe("Template", func() {
 					"--namespace", "default",
 					"--kubevirt-share-dir", "/var/run/kubevirt",
 					"--ephemeral-disk-dir", "/var/run/kubevirt-ephemeral-disks",
-					"--readiness-file", "/tmp/healthy",
+					"--readiness-file", "/var/run/kubevirt-infra/healthy",
 					"--grace-period-seconds", "45",
-					"--hook-sidecars", "1"}))
+					"--hook-sidecars", "1",
+					"--less-pvc-space-toleration", "10"}))
 				Expect(pod.Spec.Containers[1].Name).To(Equal("hook-sidecar-0"))
 				Expect(pod.Spec.Containers[1].Image).To(Equal("some-image:v1"))
 				Expect(pod.Spec.Containers[1].ImagePullPolicy).To(Equal(kubev1.PullPolicy("IfNotPresent")))
 				Expect(pod.Spec.Containers[1].VolumeMounts[0].MountPath).To(Equal(hooks.HookSocketsSharedDirectory))
 				Expect(pod.Spec.Volumes[0].EmptyDir.Medium).To(Equal(kubev1.StorageMedium("")))
-				Expect(pod.Spec.Volumes[1].HostPath.Path).To(Equal("/var/run/kubevirt"))
+				Expect(pod.Spec.Volumes[2].HostPath.Path).To(Equal("/var/run/kubevirt"))
 				Expect(pod.Spec.Containers[0].VolumeMounts[1].MountPath).To(Equal("/var/run/kubevirt"))
 				Expect(*pod.Spec.TerminationGracePeriodSeconds).To(Equal(int64(60)))
 			})
+
+			It("should add node selector for node discovery feature to template", func() {
+
+				cfgMap := kubev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespaceKubevirt,
+						Name:      "kubevirt-config",
+					},
+					Data: map[string]string{virtconfig.FeatureGatesKey: virtconfig.CPUNodeDiscoveryGate},
+				}
+				cmCache.Add(&cfgMap)
+
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							CPU: &v1.CPU{
+								Model: "Conroe",
+							},
+						},
+					},
+				}
+
+				cpuModelLabel, err := CPUModelLabelFromCPUModel(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(cpuModelLabel, "true"))
+			})
+
 			It("should add default cpu/memory resources to the sidecar container if cpu pinning was requested", func() {
 				nodeSelector := map[string]string{
 					"kubernetes.io/hostname": "master",
@@ -542,11 +616,11 @@ var _ = Describe("Template", func() {
 				Expect(hugepagesRequest.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 				Expect(hugepagesLimit.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 
-				Expect(len(pod.Spec.Volumes)).To(Equal(4))
+				Expect(len(pod.Spec.Volumes)).To(Equal(5))
 				Expect(pod.Spec.Volumes[0].EmptyDir).ToNot(BeNil())
 				Expect(pod.Spec.Volumes[0].EmptyDir.Medium).To(Equal(kubev1.StorageMediumHugePages))
 
-				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(4))
+				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(5))
 				Expect(pod.Spec.Containers[0].VolumeMounts[3].MountPath).To(Equal("/dev/hugepages"))
 			},
 				table.Entry("hugepages-2Mi", "2Mi"),
@@ -587,11 +661,11 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].VolumeDevices).To(BeEmpty(), "No devices in manifest for 1st container")
 
 				Expect(pod.Spec.Containers[0].VolumeMounts).ToNot(BeEmpty(), "Some mounts in manifest for 1st container")
-				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(4), "4 mounts in manifest for 1st container")
+				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(5), "4 mounts in manifest for 1st container")
 				Expect(pod.Spec.Containers[0].VolumeMounts[3].Name).To(Equal(volumeName), "1st mount in manifest for 1st container has correct name")
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty(), "Found some volumes in manifest")
-				Expect(len(pod.Spec.Volumes)).To(Equal(4), "Found 4 volumes in manifest")
+				Expect(len(pod.Spec.Volumes)).To(Equal(5), "Found 4 volumes in manifest")
 				Expect(pod.Spec.Volumes[0].PersistentVolumeClaim).ToNot(BeNil(), "Found PVC volume")
 				Expect(pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName).To(Equal(pvcName), "Found PVC volume with correct name")
 			})
@@ -635,10 +709,10 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].VolumeDevices[0].Name).To(Equal(volumeName), "Found device for 1st container with correct name")
 
 				Expect(pod.Spec.Containers[0].VolumeMounts).ToNot(BeEmpty(), "Found some mounts in manifest for 1st container")
-				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(3), "Found 3 mounts in manifest for 1st container")
+				Expect(len(pod.Spec.Containers[0].VolumeMounts)).To(Equal(4), "Found 3 mounts in manifest for 1st container")
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty(), "Found some volumes in manifest")
-				Expect(len(pod.Spec.Volumes)).To(Equal(4), "Found 4 volumes in manifest")
+				Expect(len(pod.Spec.Volumes)).To(Equal(5), "Found 4 volumes in manifest")
 				Expect(pod.Spec.Volumes[0].PersistentVolumeClaim).ToNot(BeNil(), "Found PVC volume")
 				Expect(pod.Spec.Volumes[0].PersistentVolumeClaim.ClaimName).To(Equal(pvcName), "Found PVC volume with correct name")
 			})
@@ -688,21 +762,21 @@ var _ = Describe("Template", func() {
 
 		})
 
-		Context("with RegistryDisk pull secrets", func() {
+		Context("with ContainerDisk pull secrets", func() {
 			volumes := []v1.Volume{
 				{
-					Name: "registrydisk1",
+					Name: "containerdisk1",
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{
+						ContainerDisk: &v1.ContainerDiskSource{
 							Image:           "my-image-1",
 							ImagePullSecret: "pull-secret-2",
 						},
 					},
 				},
 				{
-					Name: "registrydisk2",
+					Name: "containerdisk2",
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{
+						ContainerDisk: &v1.ContainerDiskSource{
 							Image: "my-image-2",
 						},
 					},
@@ -722,25 +796,67 @@ var _ = Describe("Template", func() {
 
 				Expect(len(pod.Spec.ImagePullSecrets)).To(Equal(2))
 
-				// RegistryDisk secrets come first
+				// ContainerDisk secrets come first
 				Expect(pod.Spec.ImagePullSecrets[0].Name).To(Equal("pull-secret-2"))
 				Expect(pod.Spec.ImagePullSecrets[1].Name).To(Equal("pull-secret-1"))
 			})
 
 			It("should deduplicate identical secrets", func() {
-				volumes[1].VolumeSource.RegistryDisk.ImagePullSecret = "pull-secret-2"
+				volumes[1].VolumeSource.ContainerDisk.ImagePullSecret = "pull-secret-2"
 
 				pod, err := svc.RenderLaunchManifest(&vmi)
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(len(pod.Spec.ImagePullSecrets)).To(Equal(2))
 
-				// RegistryDisk secrets come first
+				// ContainerDisk secrets come first
 				Expect(pod.Spec.ImagePullSecrets[0].Name).To(Equal("pull-secret-2"))
 				Expect(pod.Spec.ImagePullSecrets[1].Name).To(Equal("pull-secret-1"))
 			})
 		})
 
+		Context("with sriov interface", func() {
+			It("should run privileged", func() {
+				sriovInterface := v1.InterfaceSRIOV{}
+				domain := v1.DomainSpec{}
+				domain.Devices.Interfaces = []v1.Interface{{Name: "testnet", InterfaceBindingMethod: v1.InterfaceBindingMethod{SRIOV: &sriovInterface}}}
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "testvmi", Namespace: "default", UID: "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{Domain: domain},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(len(pod.Spec.Containers)).To(Equal(1))
+				Expect(*pod.Spec.Containers[0].SecurityContext.Privileged).To(Equal(true))
+			})
+			It("should mount pci related host directories", func() {
+				sriovInterface := v1.InterfaceSRIOV{}
+				domain := v1.DomainSpec{}
+				domain.Devices.Interfaces = []v1.Interface{{Name: "testnet", InterfaceBindingMethod: v1.InterfaceBindingMethod{SRIOV: &sriovInterface}}}
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "testvmi", Namespace: "default", UID: "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{Domain: domain},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(len(pod.Spec.Containers)).To(Equal(1))
+				// Skip first three mounts that are generic for all launcher pods
+				Expect(pod.Spec.Containers[0].VolumeMounts[3].MountPath).To(Equal("/sys/bus/pci/"))
+				Expect(pod.Spec.Containers[0].VolumeMounts[4].MountPath).To(Equal("/sys/devices/"))
+				Expect(pod.Spec.Containers[0].VolumeMounts[5].MountPath).To(Equal("/dev/vfio/"))
+				Expect(pod.Spec.Volumes[0].HostPath.Path).To(Equal("/sys/bus/pci/"))
+				Expect(pod.Spec.Volumes[1].HostPath.Path).To(Equal("/sys/devices/"))
+				Expect(pod.Spec.Volumes[2].HostPath.Path).To(Equal("/dev/vfio/"))
+			})
+		})
 		Context("with slirp interface", func() {
 			It("Should have empty port list in the pod manifest", func() {
 				slirpInterface := v1.InterfaceSlirp{}
@@ -929,7 +1045,7 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-				Expect(len(pod.Spec.Volumes)).To(Equal(4))
+				Expect(len(pod.Spec.Volumes)).To(Equal(5))
 				Expect(pod.Spec.Volumes[0].ConfigMap).ToNot(BeNil())
 				Expect(pod.Spec.Volumes[0].ConfigMap.LocalObjectReference.Name).To(Equal("test-configmap"))
 			})
@@ -958,34 +1074,115 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-				Expect(len(pod.Spec.Volumes)).To(Equal(4))
+				Expect(len(pod.Spec.Volumes)).To(Equal(5))
 				Expect(pod.Spec.Volumes[0].Secret).ToNot(BeNil())
 				Expect(pod.Spec.Volumes[0].Secret.SecretName).To(Equal("test-secret"))
 			})
 		})
+		Context("with probes", func() {
+			var vmi *v1.VirtualMachineInstance
+			BeforeEach(func() {
+				vmi = &v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "testvmi", Namespace: "default", UID: "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						ReadinessProbe: &v1.Probe{
+							InitialDelaySeconds: 2,
+							TimeoutSeconds:      3,
+							PeriodSeconds:       4,
+							SuccessThreshold:    5,
+							FailureThreshold:    6,
+							Handler: v1.Handler{
+								TCPSocket: &kubev1.TCPSocketAction{
+									Port: intstr.Parse("80"),
+									Host: "123",
+								},
+								HTTPGet: &kubev1.HTTPGetAction{
+									Path: "test",
+								},
+							},
+						},
+						LivenessProbe: &v1.Probe{
+							InitialDelaySeconds: 12,
+							TimeoutSeconds:      13,
+							PeriodSeconds:       14,
+							SuccessThreshold:    15,
+							FailureThreshold:    16,
+							Handler: v1.Handler{
+								TCPSocket: &kubev1.TCPSocketAction{
+									Port: intstr.Parse("82"),
+									Host: "1234",
+								},
+								HTTPGet: &kubev1.HTTPGetAction{
+									Path: "test34",
+								},
+							},
+						},
+						Domain: v1.DomainSpec{}},
+				}
+			})
+			It("should copy all specified probes", func() {
+				pod, err := svc.RenderLaunchManifest(vmi)
+				Expect(err).ToNot(HaveOccurred())
+				livenessProbe := pod.Spec.Containers[0].LivenessProbe
+				readinessProbe := pod.Spec.Containers[0].ReadinessProbe
+				Expect(livenessProbe.Handler.TCPSocket).To(Equal(vmi.Spec.LivenessProbe.TCPSocket))
+				Expect(readinessProbe.Handler.TCPSocket).To(Equal(vmi.Spec.ReadinessProbe.TCPSocket))
+
+				Expect(livenessProbe.Handler.HTTPGet).To(Equal(vmi.Spec.LivenessProbe.HTTPGet))
+				Expect(readinessProbe.Handler.HTTPGet).To(Equal(vmi.Spec.ReadinessProbe.HTTPGet))
+
+				Expect(livenessProbe.PeriodSeconds).To(Equal(vmi.Spec.LivenessProbe.PeriodSeconds))
+				Expect(livenessProbe.InitialDelaySeconds).To(Equal(vmi.Spec.LivenessProbe.InitialDelaySeconds + LibvirtStartupDelay))
+				Expect(livenessProbe.TimeoutSeconds).To(Equal(vmi.Spec.LivenessProbe.TimeoutSeconds))
+				Expect(livenessProbe.SuccessThreshold).To(Equal(vmi.Spec.LivenessProbe.SuccessThreshold))
+				Expect(livenessProbe.FailureThreshold).To(Equal(vmi.Spec.LivenessProbe.FailureThreshold))
+
+				Expect(readinessProbe.PeriodSeconds).To(Equal(vmi.Spec.ReadinessProbe.PeriodSeconds))
+				Expect(readinessProbe.InitialDelaySeconds).To(Equal(vmi.Spec.ReadinessProbe.InitialDelaySeconds + LibvirtStartupDelay))
+				Expect(readinessProbe.TimeoutSeconds).To(Equal(vmi.Spec.ReadinessProbe.TimeoutSeconds))
+				Expect(readinessProbe.SuccessThreshold).To(Equal(vmi.Spec.ReadinessProbe.SuccessThreshold))
+				Expect(readinessProbe.FailureThreshold).To(Equal(vmi.Spec.ReadinessProbe.FailureThreshold))
+			})
+
+			It("should set a readiness probe on the pod, if no one was specified on the vmi", func() {
+				vmi.Spec.ReadinessProbe = nil
+				pod, err := svc.RenderLaunchManifest(vmi)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(pod.Spec.Containers[0].ReadinessProbe).To(Not(BeNil()))
+			})
+		})
+
+		It("should add the lessPVCSpaceToleration argument to the template", func() {
+			expectedToleration := "42"
+			cfgMap := kubev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespaceKubevirt,
+					Name:      "kubevirt-config",
+				},
+				Data: map[string]string{LessPVCSpaceTolerationKey: expectedToleration},
+			}
+			cmCache.Add(&cfgMap)
+
+			vmi := v1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testvmi", Namespace: "default", UID: "1234",
+				},
+				Spec: v1.VirtualMachineInstanceSpec{Volumes: []v1.Volume{}, Domain: v1.DomainSpec{}},
+			}
+			pod, err := svc.RenderLaunchManifest(&vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(pod.Spec.Containers[0].Command).To(ContainElement("--less-pvc-space-toleration"), "command arg key should be correct")
+			Expect(pod.Spec.Containers[0].Command).To(ContainElement("42"), "command arg value should be correct")
+		})
+
 	})
 	Describe("ConfigMap", func() {
-		var cmListWatch *cache.ListWatch
-		var cmInformer cache.SharedIndexInformer
-		var cmStore cache.Store
-		var stopChan chan struct{}
-
-		BeforeEach(func() {
-			stopChan = make(chan struct{})
-		})
-
-		AfterEach(func() {
-			close(stopChan)
-		})
 
 		It("Should return false if configmap is not present", func() {
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
-
-			result, err := IsEmulationAllowed(cmStore)
+			result, err := IsEmulationAllowed(cmCache)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(BeFalse())
 		})
@@ -998,13 +1195,9 @@ var _ = Describe("Template", func() {
 				},
 				Data: map[string]string{},
 			}
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{cfgMap})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
+			cmCache.Add(&cfgMap)
 
-			result, err := IsEmulationAllowed(cmStore)
+			result, err := IsEmulationAllowed(cmCache)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(BeFalse())
 		})
@@ -1017,13 +1210,9 @@ var _ = Describe("Template", func() {
 				},
 				Data: map[string]string{UseEmulationKey: "true"},
 			}
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{cfgMap})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
+			cmCache.Add(&cfgMap)
 
-			result, err := IsEmulationAllowed(cmStore)
+			result, err := IsEmulationAllowed(cmCache)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(BeTrue())
 		})
@@ -1036,13 +1225,9 @@ var _ = Describe("Template", func() {
 				},
 				Data: map[string]string{},
 			}
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{cfgMap})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
+			cmCache.Add(&cfgMap)
 
-			result, err := GetImagePullPolicy(cmStore)
+			result, err := GetImagePullPolicy(cmCache)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(Equal(kubev1.PullIfNotPresent))
 		})
@@ -1055,13 +1240,9 @@ var _ = Describe("Template", func() {
 				},
 				Data: map[string]string{ImagePullPolicyKey: "Always"},
 			}
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{cfgMap})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
+			cmCache.Add(&cfgMap)
 
-			result, err := GetImagePullPolicy(cmStore)
+			result, err := GetImagePullPolicy(cmCache)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result).To(Equal(kubev1.PullAlways))
 		})
@@ -1074,16 +1255,73 @@ var _ = Describe("Template", func() {
 				},
 				Data: map[string]string{ImagePullPolicyKey: "IHaveNoStrongFeelingsOneWayOrTheOther"},
 			}
-			cmListWatch = MakeFakeConfigMapWatcher([]kubev1.ConfigMap{cfgMap})
-			cmInformer = cache.NewSharedIndexInformer(cmListWatch, &v1.VirtualMachineInstance{}, time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-			cmStore = cmInformer.GetStore()
-			go cmInformer.Run(stopChan)
-			cache.WaitForCacheSync(stopChan, cmInformer.HasSynced)
+			cmCache.Add(&cfgMap)
 
-			_, err := GetImagePullPolicy(cmStore)
+			_, err := GetImagePullPolicy(cmCache)
 			Expect(err).To(HaveOccurred())
 		})
+
+		It("Should return correct lessPVCSpaceToleration", func() {
+			expectedToleration := "5"
+			cfgMap := kubev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespaceKubevirt,
+					Name:      "kubevirt-config",
+				},
+				Data: map[string]string{LessPVCSpaceTolerationKey: expectedToleration},
+			}
+			cmCache.Add(&cfgMap)
+
+			toleration, err := GetlessPVCSpaceToleration(cmCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(strconv.Itoa(toleration)).To(Equal(expectedToleration), "Toleration should be "+expectedToleration)
+		})
+
+		It("Should return default lessPVCSpaceToleration", func() {
+			expectedToleration := "10"
+			cfgMap := kubev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespaceKubevirt,
+					Name:      "kubevirt-config",
+				},
+			}
+			cmCache.Add(&cfgMap)
+
+			toleration, err := GetlessPVCSpaceToleration(cmCache)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(strconv.Itoa(toleration)).To(Equal(expectedToleration), "Toleration should be "+expectedToleration)
+		})
+
+		It("Should return error on invalid lessPVCSpaceToleration", func() {
+			cfgMap := kubev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespaceKubevirt,
+					Name:      "kubevirt-config",
+				},
+				Data: map[string]string{LessPVCSpaceTolerationKey: "-1"},
+			}
+			cmCache.Add(&cfgMap)
+
+			_, err := GetlessPVCSpaceToleration(cmCache)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should return error on invalid lessPVCSpaceToleration", func() {
+			cfgMap := kubev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespaceKubevirt,
+					Name:      "kubevirt-config",
+				},
+				Data: map[string]string{LessPVCSpaceTolerationKey: "foo"},
+			}
+			cmCache.Add(&cfgMap)
+
+			_, err := GetlessPVCSpaceToleration(cmCache)
+			Expect(err).To(HaveOccurred())
+		})
+
 	})
+
 	Describe("ServiceAccountName", func() {
 
 		It("Should add service account if present", func() {
@@ -1128,21 +1366,68 @@ var _ = Describe("Template", func() {
 	})
 })
 
-func MakeFakeConfigMapWatcher(configMaps []kubev1.ConfigMap) *cache.ListWatch {
-	cmListWatch := &cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-			return &kubev1.ConfigMapList{Items: configMaps}, nil
-		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-			fakeWatch := watch.NewFake()
-			for _, cfgMap := range configMaps {
-				fakeWatch.Add(&cfgMap)
-			}
-			return watch.NewFake(), nil
-		},
-	}
-	return cmListWatch
-}
+var _ = Describe("getResourceNameForNetwork", func() {
+	It("should return empty string when resource name is not specified", func() {
+		network := &networkv1.NetworkAttachmentDefinition{}
+		Expect(getResourceNameForNetwork(network)).To(Equal(""))
+	})
+
+	It("should return resource name if specified", func() {
+		network := &networkv1.NetworkAttachmentDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					MULTUS_RESOURCE_NAME_ANNOTATION: "fake.com/fakeResource",
+				},
+			},
+		}
+		Expect(getResourceNameForNetwork(network)).To(Equal("fake.com/fakeResource"))
+	})
+})
+
+var _ = Describe("getNamespaceAndNetworkName", func() {
+	It("should return vmi namespace when namespace is implicit", func() {
+		vmi := &v1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "testvmi", Namespace: "testns"}}
+		namespace, networkName := getNamespaceAndNetworkName(vmi, "testnet")
+		Expect(namespace).To(Equal("testns"))
+		Expect(networkName).To(Equal("testnet"))
+	})
+
+	It("should return namespace from networkName when namespace is explicit", func() {
+		vmi := &v1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "testvmi", Namespace: "testns"}}
+		namespace, networkName := getNamespaceAndNetworkName(vmi, "otherns/testnet")
+		Expect(namespace).To(Equal("otherns"))
+		Expect(networkName).To(Equal("testnet"))
+	})
+})
+
+var _ = Describe("requestResource", func() {
+	It("should register resource in limits and requests", func() {
+		resources := kubev1.ResourceRequirements{}
+		resources.Requests = make(kubev1.ResourceList)
+		resources.Limits = make(kubev1.ResourceList)
+
+		resource := "intel.com/sriov"
+		resourceName := kubev1.ResourceName(resource)
+
+		for i := int64(1); i <= 5; i++ {
+			requestResource(&resources, resource)
+
+			val, ok := resources.Limits[resourceName]
+			Expect(ok).To(BeTrue())
+
+			valInt, isInt := val.AsInt64()
+			Expect(isInt).To(BeTrue())
+			Expect(valInt).To(Equal(i))
+
+			val, ok = resources.Requests[resourceName]
+			Expect(ok).To(BeTrue())
+
+			valInt, isInt = val.AsInt64()
+			Expect(isInt).To(BeTrue())
+			Expect(valInt).To(Equal(i))
+		}
+	})
+})
 
 func True() *bool {
 	b := true

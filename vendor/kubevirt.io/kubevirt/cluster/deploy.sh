@@ -34,24 +34,15 @@ metadata:
   name: ${namespace}
 EOF
 
-# Deploy the right manifests for the right target
-if [[ -z $TARGET ]] || [[ $TARGET =~ .*-dev ]]; then
-    _kubectl create -f ${MANIFESTS_OUT_DIR}/dev -R $i
-elif [[ $TARGET =~ .*-release ]] || [[ $TARGET =~ windows.* ]]; then
-    for manifest in ${MANIFESTS_OUT_DIR}/release/*; do
-        if [[ $manifest =~ .*demo.* ]]; then
-            continue
-        fi
-        _kubectl create -f $manifest
-    done
-fi
+# Deploy infra for testing first
+_kubectl create -f ${MANIFESTS_OUT_DIR}/testing
 
-# Deploy additional infra for testing
-_kubectl create -f ${MANIFESTS_OUT_DIR}/testing -R $i
+# Deploy kubevirt
+_kubectl apply -f ${MANIFESTS_OUT_DIR}/release/kubevirt.yaml
 
 if [[ "$KUBEVIRT_PROVIDER" =~ os-* ]]; then
+    _kubectl create -f ${MANIFESTS_OUT_DIR}/testing/ocp
     _kubectl adm policy add-scc-to-user privileged -z kubevirt-controller -n ${namespace}
-    _kubectl adm policy add-scc-to-user privileged -z kubevirt-testing -n ${namespace}
     _kubectl adm policy add-scc-to-user privileged -z kubevirt-privileged -n ${namespace}
     _kubectl adm policy add-scc-to-user privileged -z kubevirt-apiserver -n ${namespace}
     # Helpful for development. Allows admin to access everything KubeVirt creates in the web console

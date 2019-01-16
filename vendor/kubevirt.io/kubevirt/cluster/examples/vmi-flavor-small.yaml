@@ -1,7 +1,7 @@
-apiVersion: kubevirt.io/v1alpha2
+---
+apiVersion: kubevirt.io/v1alpha3
 kind: VirtualMachineInstance
 metadata:
-  creationTimestamp: null
   labels:
     kubevirt.io/flavor: small
   name: vmi-flavor-small
@@ -11,8 +11,7 @@ spec:
       disks:
       - disk:
           bus: virtio
-        name: registrydisk
-        volumeName: registryvolume
+        name: containerdisk
     machine:
       type: ""
     resources:
@@ -20,7 +19,6 @@ spec:
         memory: 64M
   terminationGracePeriodSeconds: 0
   volumes:
-  - name: registryvolume
-    registryDisk:
-      image: registry:5000/kubevirt/cirros-registry-disk-demo:devel
-status: {}
+  - containerDisk:
+      image: registry:5000/kubevirt/cirros-container-disk-demo:devel
+    name: containerdisk

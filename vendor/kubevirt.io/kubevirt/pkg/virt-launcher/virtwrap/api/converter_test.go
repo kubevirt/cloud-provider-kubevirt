@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8smeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 )
 
 var _ = Describe("Converter", func() {
@@ -41,9 +41,8 @@ var _ = Describe("Converter", func() {
 		It("Should add boot order when provided", func() {
 			order := uint(1)
 			kubevirtDisk := &v1.Disk{
-				Name:       "mydisk",
-				BootOrder:  &order,
-				VolumeName: "myvolume",
+				Name:      "mydisk",
+				BootOrder: &order,
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
 						Bus: "virtio",
@@ -63,8 +62,7 @@ var _ = Describe("Converter", func() {
 
 		It("Should omit boot order when not provided", func() {
 			kubevirtDisk := &v1.Disk{
-				Name:       "mydisk",
-				VolumeName: "myvolume",
+				Name: "mydisk",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
 						Bus: "virtio",
@@ -150,10 +148,11 @@ var _ = Describe("Converter", func() {
 					VendorID:   &v1.FeatureVendorID{Enabled: &_false, VendorID: "myvendor"},
 				},
 			}
+			vmi.Spec.Domain.Resources.Limits = make(k8sv1.ResourceList)
+			vmi.Spec.Domain.Resources.Requests = make(k8sv1.ResourceList)
 			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
 				{
-					Name:       "mydisk",
-					VolumeName: "myvolume",
+					Name: "myvolume",
 					DiskDevice: v1.DiskDevice{
 						Disk: &v1.DiskTarget{
 							Bus: "virtio",
@@ -162,8 +161,7 @@ var _ = Describe("Converter", func() {
 					DedicatedIOThread: &_true,
 				},
 				{
-					Name:       "mydisk1",
-					VolumeName: "nocloud",
+					Name: "nocloud",
 					DiskDevice: v1.DiskDevice{
 						Disk: &v1.DiskTarget{
 							Bus: "virtio",
@@ -172,8 +170,7 @@ var _ = Describe("Converter", func() {
 					DedicatedIOThread: &_true,
 				},
 				{
-					Name:       "cdrom_tray_unspecified",
-					VolumeName: "volume0",
+					Name: "cdrom_tray_unspecified",
 					DiskDevice: v1.DiskDevice{
 						CDRom: &v1.CDRomTarget{
 							ReadOnly: &_false,
@@ -182,8 +179,7 @@ var _ = Describe("Converter", func() {
 					DedicatedIOThread: &_false,
 				},
 				{
-					Name:       "cdrom_tray_open",
-					VolumeName: "volume1",
+					Name: "cdrom_tray_open",
 					DiskDevice: v1.DiskDevice{
 						CDRom: &v1.CDRomTarget{
 							Tray: v1.TrayStateOpen,
@@ -191,15 +187,13 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name:       "floppy_tray_unspecified",
-					VolumeName: "volume2",
+					Name: "floppy_tray_unspecified",
 					DiskDevice: v1.DiskDevice{
 						Floppy: &v1.FloppyTarget{},
 					},
 				},
 				{
-					Name:       "floppy_tray_open",
-					VolumeName: "volume3",
+					Name: "floppy_tray_open",
 					DiskDevice: v1.DiskDevice{
 						Floppy: &v1.FloppyTarget{
 							Tray:     v1.TrayStateOpen,
@@ -208,32 +202,26 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name:       "should_default_to_disk",
-					VolumeName: "volume4",
+					Name: "should_default_to_disk",
 				},
 				{
-					Name:       "ephemeral_pvc",
-					VolumeName: "volume5",
-					Cache:      "none",
+					Name:  "ephemeral_pvc",
+					Cache: "none",
 				},
 				{
-					Name:       "secret_test",
-					VolumeName: "volume6",
-					Serial:     "D23YZ9W6WA5DJ487",
+					Name:   "secret_test",
+					Serial: "D23YZ9W6WA5DJ487",
 				},
 				{
-					Name:       "configmap_test",
-					VolumeName: "volume7",
-					Serial:     "CVLY623300HK240D",
+					Name:   "configmap_test",
+					Serial: "CVLY623300HK240D",
 				},
 				{
-					Name:       "pvc_block_test",
-					VolumeName: "volume8",
-					Cache:      "writethrough",
+					Name:  "pvc_block_test",
+					Cache: "writethrough",
 				},
 				{
-					Name:       "serviceaccount_test",
-					VolumeName: "volume9",
+					Name: "serviceaccount_test",
 				},
 			}
 			vmi.Spec.Volumes = []v1.Volume{
@@ -256,7 +244,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume0",
+					Name: "cdrom_tray_unspecified",
 					VolumeSource: v1.VolumeSource{
 						CloudInitNoCloud: &v1.CloudInitNoCloudSource{
 							UserDataBase64: "1234",
@@ -264,7 +252,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume1",
+					Name: "cdrom_tray_open",
 					VolumeSource: v1.VolumeSource{
 						HostDisk: &v1.HostDisk{
 							Path:     "/var/run/kubevirt-private/vmi-disks/volume1/disk.img",
@@ -274,7 +262,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume2",
+					Name: "floppy_tray_unspecified",
 					VolumeSource: v1.VolumeSource{
 						HostDisk: &v1.HostDisk{
 							Path:     "/var/run/kubevirt-private/vmi-disks/volume2/disk.img",
@@ -284,7 +272,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume3",
+					Name: "floppy_tray_open",
 					VolumeSource: v1.VolumeSource{
 						HostDisk: &v1.HostDisk{
 							Path:     "/var/run/kubevirt-private/vmi-disks/volume3/disk.img",
@@ -294,7 +282,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume4",
+					Name: "should_default_to_disk",
 					VolumeSource: v1.VolumeSource{
 						HostDisk: &v1.HostDisk{
 							Path:     "/var/run/kubevirt-private/vmi-disks/volume4/disk.img",
@@ -304,7 +292,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume5",
+					Name: "ephemeral_pvc",
 					VolumeSource: v1.VolumeSource{
 						Ephemeral: &v1.EphemeralVolumeSource{
 							PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -314,7 +302,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume6",
+					Name: "secret_test",
 					VolumeSource: v1.VolumeSource{
 						Secret: &v1.SecretVolumeSource{
 							SecretName: "testsecret",
@@ -322,7 +310,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume7",
+					Name: "configmap_test",
 					VolumeSource: v1.VolumeSource{
 						ConfigMap: &v1.ConfigMapVolumeSource{
 							LocalObjectReference: k8sv1.LocalObjectReference{
@@ -332,7 +320,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume8",
+					Name: "pvc_block_test",
 					VolumeSource: v1.VolumeSource{
 						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
 							ClaimName: "testblock",
@@ -340,7 +328,7 @@ var _ = Describe("Converter", func() {
 					},
 				},
 				{
-					Name: "volume9",
+					Name: "serviceaccount_test",
 					VolumeSource: v1.VolumeSource{
 						ServiceAccount: &v1.ServiceAccountVolumeSource{
 							ServiceAccountName: "testaccount",
@@ -396,13 +384,13 @@ var _ = Describe("Converter", func() {
       <source file="/var/run/kubevirt-private/vmi-disks/myvolume/disk.img"></source>
       <target bus="virtio" dev="vda"></target>
       <driver name="qemu" type="raw" iothread="2"></driver>
-      <alias name="ua-mydisk"></alias>
+      <alias name="ua-myvolume"></alias>
     </disk>
     <disk device="disk" type="file">
       <source file="/var/run/libvirt/cloud-init-dir/mynamespace/testvmi/noCloud.iso"></source>
       <target bus="virtio" dev="vdb"></target>
       <driver name="qemu" type="raw" iothread="3"></driver>
-      <alias name="ua-mydisk1"></alias>
+      <alias name="ua-nocloud"></alias>
     </disk>
     <disk device="cdrom" type="file">
       <source file="/var/run/libvirt/cloud-init-dir/mynamespace/testvmi/noCloud.iso"></source>
@@ -437,31 +425,31 @@ var _ = Describe("Converter", func() {
       <alias name="ua-should_default_to_disk"></alias>
     </disk>
     <disk device="disk" type="file">
-      <source file="/var/run/libvirt/kubevirt-ephemeral-disk/volume5/disk.qcow2"></source>
+      <source file="/var/run/libvirt/kubevirt-ephemeral-disk/ephemeral_pvc/disk.qcow2"></source>
       <target bus="sata" dev="sdd"></target>
       <driver cache="none" name="qemu" type="qcow2" iothread="1"></driver>
       <alias name="ua-ephemeral_pvc"></alias>
       <backingStore type="file">
         <format type="raw"></format>
-        <source file="/var/run/kubevirt-private/vmi-disks/volume5/disk.img"></source>
+        <source file="/var/run/kubevirt-private/vmi-disks/ephemeral_pvc/disk.img"></source>
       </backingStore>
     </disk>
     <disk device="disk" type="file">
-      <source file="/var/run/kubevirt-private/secret-disks/volume6.iso"></source>
+      <source file="/var/run/kubevirt-private/secret-disks/secret_test.iso"></source>
       <target bus="sata" dev="sde"></target>
       <serial>D23YZ9W6WA5DJ487</serial>
       <driver name="qemu" type="raw" iothread="1"></driver>
       <alias name="ua-secret_test"></alias>
     </disk>
     <disk device="disk" type="file">
-      <source file="/var/run/kubevirt-private/config-map-disks/volume7.iso"></source>
+      <source file="/var/run/kubevirt-private/config-map-disks/configmap_test.iso"></source>
       <target bus="sata" dev="sdf"></target>
       <serial>CVLY623300HK240D</serial>
       <driver name="qemu" type="raw" iothread="1"></driver>
       <alias name="ua-configmap_test"></alias>
     </disk>
     <disk device="disk" type="block">
-      <source dev="/dev/volume8"></source>
+      <source dev="/dev/pvc_block_test"></source>
       <target bus="sata" dev="sdg"></target>
       <driver cache="writethrough" name="qemu" type="raw" iothread="1"></driver>
       <alias name="ua-pvc_block_test"></alias>
@@ -516,14 +504,17 @@ var _ = Describe("Converter", func() {
       <vendor_id state="off" value="myvendor"></vendor_id>
     </hyperv>
   </features>
-  <cpu mode="host-model"></cpu>
+  <cpu mode="host-model">
+    <topology sockets="1" cores="1" threads="1"></topology>
+  </cpu>
+  <vcpu placement="static">1</vcpu>
   <iothreads>3</iothreads>
 </domain>`, domainType)
 
 		var c *ConverterContext
 
 		isBlockPVCMap := make(map[string]bool)
-		isBlockPVCMap["volume8"] = true
+		isBlockPVCMap["pvc_block_test"] = true
 		BeforeEach(func() {
 			c = &ConverterContext{
 				VirtualMachine: vmi,
@@ -536,6 +527,7 @@ var _ = Describe("Converter", func() {
 				},
 				UseEmulation: true,
 				IsBlockPVC:   isBlockPVCMap,
+				SRIOVDevices: map[string][]string{},
 			}
 		})
 
@@ -550,36 +542,131 @@ var _ = Describe("Converter", func() {
 			Expect(vmiToDomainXMLToDomainSpec(vmi, c).Type).To(Equal(domainType))
 		})
 
-		It("should convert CPU cores and model", func() {
-			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
-			vmi.Spec.Domain.CPU = &v1.CPU{
-				Cores: 3,
-				Model: "Conroe",
-			}
-			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+		Context("when CPU spec defined", func() {
+			It("should convert CPU cores and model", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Cores:   3,
+					Sockets: 2,
+					Threads: 2,
+					Model:   "Conroe",
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
 
-			Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(3)))
-			Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(1)))
-			Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)))
-			Expect(domainSpec.CPU.Mode).To(Equal("custom"))
-			Expect(domainSpec.CPU.Model).To(Equal("Conroe"))
-			Expect(domainSpec.VCPU.Placement).To(Equal("static"))
-			Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)))
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(3)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(2)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(2)), "Expect threads")
+				Expect(domainSpec.CPU.Mode).To(Equal("custom"), "Expect cpu mode")
+				Expect(domainSpec.CPU.Model).To(Equal("Conroe"), "Expect cpu model")
+				Expect(domainSpec.VCPU.Placement).To(Equal("static"), "Expect vcpu placement")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(12)), "Expect vcpus")
+			})
+
+			It("should convert CPU cores", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Cores: 3,
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(3)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(1)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should convert CPU sockets", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Sockets: 3,
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(3)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should convert CPU threads", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Threads: 3,
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(1)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(3)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should convert CPU requests to sockets", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = nil
+				vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("2200m")
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(3)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should convert CPU limits to sockets", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = nil
+				vmi.Spec.Domain.Resources.Limits[k8sv1.ResourceCPU] = resource.MustParse("2.3")
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(3)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should prefer CPU spec instead of CPU requests", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Sockets: 3,
+				}
+				vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("400m")
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(3)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			It("should prefer CPU spec instead of CPU limits", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Sockets: 3,
+				}
+				vmi.Spec.Domain.Resources.Limits[k8sv1.ResourceCPU] = resource.MustParse("400m")
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Topology.Cores).To(Equal(uint32(1)), "Expect cores")
+				Expect(domainSpec.CPU.Topology.Sockets).To(Equal(uint32(3)), "Expect sockets")
+				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(1)), "Expect threads")
+				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(3)), "Expect vcpus")
+			})
+
+			table.DescribeTable("should convert CPU model", func(model string) {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Spec.Domain.CPU = &v1.CPU{
+					Cores: 3,
+					Model: model,
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+
+				Expect(domainSpec.CPU.Mode).To(Equal(model), "Expect mode")
+			},
+				table.Entry(v1.CPUModeHostPassthrough, v1.CPUModeHostPassthrough),
+				table.Entry(v1.CPUModeHostModel, v1.CPUModeHostModel),
+			)
 		})
-
-		table.DescribeTable("should convert CPU model", func(model string) {
-			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
-			vmi.Spec.Domain.CPU = &v1.CPU{
-				Cores: 3,
-				Model: model,
-			}
-			domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
-
-			Expect(domainSpec.CPU.Mode).To(Equal(model))
-		},
-			table.Entry(CPUModeHostPassthrough, CPUModeHostPassthrough),
-			table.Entry(CPUModeHostModel, CPUModeHostModel),
-		)
 
 		Context("when CPU spec defined and model not", func() {
 			It("should set host-model CPU mode", func() {
@@ -934,6 +1021,49 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.Interfaces[0].BootOrder.Order).To(Equal(uint(bootOrder)))
 			Expect(domain.Spec.Devices.Interfaces[1].BootOrder).To(BeNil())
 		})
+		It("Should create network configuration for masquerade interface", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			name1 := "Name"
+
+			iface1 := v1.Interface{Name: name1, InterfaceBindingMethod: v1.InterfaceBindingMethod{Masquerade: &v1.InterfaceMasquerade{}}}
+			iface1.InterfaceBindingMethod.Slirp = &v1.InterfaceSlirp{}
+			net1 := v1.DefaultPodNetwork()
+			net1.Name = name1
+
+			vmi.Spec.Networks = []v1.Network{*net1}
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{iface1}
+
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(1))
+			Expect(domain.Spec.Devices.Interfaces[0].Source.Bridge).To(Equal("k6t-eth0"))
+		})
+		It("Should create network configuration for masquerade interface and the pod network and a secondary network using multus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			name1 := "Name"
+
+			iface1 := v1.Interface{Name: name1, InterfaceBindingMethod: v1.InterfaceBindingMethod{Masquerade: &v1.InterfaceMasquerade{}}}
+			iface1.InterfaceBindingMethod.Slirp = &v1.InterfaceSlirp{}
+			net1 := v1.DefaultPodNetwork()
+			net1.Name = name1
+
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{iface1, *v1.DefaultNetworkInterface()}
+			vmi.Spec.Domain.Devices.Interfaces[1].Name = "red1"
+
+			vmi.Spec.Networks = []v1.Network{*net1,
+				{
+					Name: "red1",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.CniNetwork{NetworkName: "red"},
+					},
+				}}
+
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(2))
+			Expect(domain.Spec.Devices.Interfaces[0].Source.Bridge).To(Equal("k6t-eth0"))
+			Expect(domain.Spec.Devices.Interfaces[1].Source.Bridge).To(Equal("k6t-net1"))
+		})
 	})
 
 	Context("graphics and video device", func() {
@@ -994,8 +1124,7 @@ var _ = Describe("Converter", func() {
 						Devices: v1.Devices{
 							Disks: []v1.Disk{
 								{
-									Name:       "dedicated",
-									VolumeName: "volume0",
+									Name: "dedicated",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1004,8 +1133,7 @@ var _ = Describe("Converter", func() {
 									DedicatedIOThread: &_true,
 								},
 								{
-									Name:       "shared",
-									VolumeName: "volume1",
+									Name: "shared",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1014,8 +1142,7 @@ var _ = Describe("Converter", func() {
 									DedicatedIOThread: &_false,
 								},
 								{
-									Name:       "omitted1",
-									VolumeName: "volume2",
+									Name: "omitted1",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1023,8 +1150,7 @@ var _ = Describe("Converter", func() {
 									},
 								},
 								{
-									Name:       "omitted2",
-									VolumeName: "volume3",
+									Name: "omitted2",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1032,8 +1158,7 @@ var _ = Describe("Converter", func() {
 									},
 								},
 								{
-									Name:       "omitted3",
-									VolumeName: "volume4",
+									Name: "omitted3",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1041,8 +1166,7 @@ var _ = Describe("Converter", func() {
 									},
 								},
 								{
-									Name:       "omitted4",
-									VolumeName: "volume5",
+									Name: "omitted4",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1050,8 +1174,7 @@ var _ = Describe("Converter", func() {
 									},
 								},
 								{
-									Name:       "omitted5",
-									VolumeName: "volume5",
+									Name: "omitted5",
 									DiskDevice: v1.DiskDevice{
 										Disk: &v1.DiskTarget{
 											Bus: "virtio",
@@ -1063,7 +1186,7 @@ var _ = Describe("Converter", func() {
 					},
 					Volumes: []v1.Volume{
 						{
-							Name: "volume0",
+							Name: "dedicated",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1073,7 +1196,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume1",
+							Name: "shared",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1083,7 +1206,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume2",
+							Name: "omitted1",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1093,7 +1216,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume3",
+							Name: "omitted2",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1103,7 +1226,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume4",
+							Name: "omitted3",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1113,7 +1236,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume5",
+							Name: "omitted4",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1123,7 +1246,7 @@ var _ = Describe("Converter", func() {
 							},
 						},
 						{
-							Name: "volume6",
+							Name: "omitted5",
 							VolumeSource: v1.VolumeSource{
 								Ephemeral: &v1.EphemeralVolumeSource{
 									PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
@@ -1169,8 +1292,7 @@ var _ = Describe("Converter", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
 				{
-					Name:       "mydisk",
-					VolumeName: "myvolume",
+					Name: "mydisk",
 					DiskDevice: v1.DiskDevice{
 						Disk: &v1.DiskTarget{
 							Bus: "virtio",
@@ -1180,7 +1302,7 @@ var _ = Describe("Converter", func() {
 			}
 			vmi.Spec.Volumes = []v1.Volume{
 				{
-					Name: "myvolume",
+					Name: "mydisk",
 					VolumeSource: v1.VolumeSource{
 						HostDisk: &v1.HostDisk{
 							Path:     "/var/run/kubevirt-private/vmi-disks/myvolume/disk.img",
@@ -1254,7 +1376,7 @@ var _ = Describe("Converter", func() {
 				},
 			}
 		})
-		It("assigns a set of cpus per iothread, if there are more vcpus that iothreads", func() {
+		It("assigns a set of cpus per iothread, if there are more vcpus than iothreads", func() {
 			vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceCPU] = resource.MustParse("16")
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			c := &ConverterContext{CPUSet: []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
@@ -1330,6 +1452,105 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.Interfaces[0].Driver).To(BeNil(),
 				"queues should not be set for models other than virtio")
 		})
+	})
+
+	Context("sriov", func() {
+		vmi := &v1.VirtualMachineInstance{
+			ObjectMeta: k8smeta.ObjectMeta{
+				Name:      "testvmi",
+				Namespace: "mynamespace",
+			},
+		}
+		v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+
+		sriovInterface := v1.Interface{
+			Name: "sriov",
+			InterfaceBindingMethod: v1.InterfaceBindingMethod{
+				SRIOV: &v1.InterfaceSRIOV{},
+			},
+		}
+		vmi.Spec.Domain.Devices.Interfaces = append(vmi.Spec.Domain.Devices.Interfaces, sriovInterface)
+		sriovNetwork := v1.Network{
+			Name: "sriov",
+			NetworkSource: v1.NetworkSource{
+				Multus: &v1.CniNetwork{NetworkName: "sriov"},
+			},
+		}
+		vmi.Spec.Networks = append(vmi.Spec.Networks, sriovNetwork)
+
+		sriovInterface2 := v1.Interface{
+			Name: "sriov2",
+			InterfaceBindingMethod: v1.InterfaceBindingMethod{
+				SRIOV: &v1.InterfaceSRIOV{},
+			},
+		}
+		vmi.Spec.Domain.Devices.Interfaces = append(vmi.Spec.Domain.Devices.Interfaces, sriovInterface2)
+		sriovNetwork2 := v1.Network{
+			Name: "sriov2",
+			NetworkSource: v1.NetworkSource{
+				Multus: &v1.CniNetwork{NetworkName: "sriov2"},
+			},
+		}
+		vmi.Spec.Networks = append(vmi.Spec.Networks, sriovNetwork2)
+
+		It("should convert sriov interfaces into host devices", func() {
+			c := &ConverterContext{
+				UseEmulation: true,
+				SRIOVDevices: map[string][]string{
+					"sriov":  []string{"0000:81:11.1"},
+					"sriov2": []string{"0000:81:11.2"},
+				},
+			}
+			domain := vmiToDomain(vmi, c)
+
+			// check that new sriov interfaces are *not* represented in xml domain as interfaces
+			Expect(len(domain.Spec.Devices.Interfaces)).To(Equal(1))
+
+			// check that the sriov interfaces are represented as PCI host devices
+			Expect(len(domain.Spec.Devices.HostDevices)).To(Equal(2))
+			Expect(domain.Spec.Devices.HostDevices[0].Type).To(Equal("pci"))
+			Expect(domain.Spec.Devices.HostDevices[0].Source.Address.Domain).To(Equal("0x0000"))
+			Expect(domain.Spec.Devices.HostDevices[0].Source.Address.Bus).To(Equal("0x81"))
+			Expect(domain.Spec.Devices.HostDevices[0].Source.Address.Slot).To(Equal("0x11"))
+			Expect(domain.Spec.Devices.HostDevices[0].Source.Address.Function).To(Equal("0x1"))
+			Expect(domain.Spec.Devices.HostDevices[1].Type).To(Equal("pci"))
+			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Domain).To(Equal("0x0000"))
+			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Bus).To(Equal("0x81"))
+			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Slot).To(Equal("0x11"))
+			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Function).To(Equal("0x2"))
+		})
+	})
+})
+
+var _ = Describe("popSRIOVPCIAddress", func() {
+	It("fails on empty map", func() {
+		_, _, err := popSRIOVPCIAddress("testnet", map[string][]string{})
+		Expect(err).To(HaveOccurred())
+	})
+	It("fails on empty map entry", func() {
+		_, _, err := popSRIOVPCIAddress("testnet", map[string][]string{"testnet": []string{}})
+		Expect(err).To(HaveOccurred())
+	})
+	It("pops the next address from a non-empty slice", func() {
+		addrsMap := map[string][]string{"testnet": []string{"0000:81:11.1", "0001:02:00.0"}}
+		addr, rest, err := popSRIOVPCIAddress("testnet", addrsMap)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(addr).To(Equal("0000:81:11.1"))
+		Expect(len(rest["testnet"])).To(Equal(1))
+		Expect(rest["testnet"][0]).To(Equal("0001:02:00.0"))
+	})
+	It("pops the next address from all tracked networks", func() {
+		addrsMap := map[string][]string{
+			"testnet1": []string{"0000:81:11.1", "0001:02:00.0"},
+			"testnet2": []string{"0000:81:11.1", "0001:02:00.0"},
+		}
+		addr, rest, err := popSRIOVPCIAddress("testnet1", addrsMap)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(addr).To(Equal("0000:81:11.1"))
+		Expect(len(rest["testnet1"])).To(Equal(1))
+		Expect(rest["testnet1"][0]).To(Equal("0001:02:00.0"))
+		Expect(len(rest["testnet2"])).To(Equal(1))
+		Expect(rest["testnet2"][0]).To(Equal("0001:02:00.0"))
 	})
 })
 

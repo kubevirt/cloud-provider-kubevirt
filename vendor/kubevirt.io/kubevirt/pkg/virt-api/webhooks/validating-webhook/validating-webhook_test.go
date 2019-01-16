@@ -34,11 +34,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/tools/cache"
 
 	cdiv1 "kubevirt.io/containerized-data-importer/pkg/apis/datavolumecontroller/v1alpha1"
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/testutils"
 	"kubevirt.io/kubevirt/pkg/virt-api/webhooks"
 )
@@ -57,8 +58,7 @@ var _ = Describe("Validating Webhook", func() {
 		It("should reject invalid VirtualMachineInstance spec on create", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmiBytes, _ := json.Marshal(&vmi)
 
@@ -74,19 +74,18 @@ var _ = Describe("Validating Webhook", func() {
 			resp := admitVMICreate(ar)
 			Expect(resp.Allowed).To(Equal(false))
 			Expect(len(resp.Result.Details.Causes)).To(Equal(1))
-			Expect(resp.Result.Details.Causes[0].Field).To(Equal("spec.domain.devices.disks[0].volumeName"))
+			Expect(resp.Result.Details.Causes[0].Field).To(Equal("spec.domain.devices.disks[0].name"))
 		})
 		It("should reject VMIs without memory after presets were applied", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Domain.Resources = v1.ResourceRequirements{}
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 			vmiBytes, _ := json.Marshal(&vmi)
@@ -103,16 +102,144 @@ var _ = Describe("Validating Webhook", func() {
 			Expect(resp.Allowed).To(Equal(false))
 			Expect(resp.Result.Message).To(ContainSubstring("no memory requested"))
 		})
+
+		Context("with probes given", func() {
+			It("should reject probes with not probe action configured", func() {
+				vmi := v1.NewMinimalVMI("testvmi")
+				m := resource.MustParse("64M")
+				vmi.Spec.Domain.Memory = &v1.Memory{Guest: &m}
+				vmi.Spec.Domain.Resources = v1.ResourceRequirements{}
+				vmi.Spec.ReadinessProbe = &v1.Probe{InitialDelaySeconds: 2}
+				vmi.Spec.LivenessProbe = &v1.Probe{InitialDelaySeconds: 2}
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+				vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+
+				vmiBytes, _ := json.Marshal(&vmi)
+
+				ar := &v1beta1.AdmissionReview{
+					Request: &v1beta1.AdmissionRequest{
+						Resource: webhooks.VirtualMachineInstanceGroupVersionResource,
+						Object: runtime.RawExtension{
+							Raw: vmiBytes,
+						},
+					},
+				}
+				resp := admitVMICreate(ar)
+				Expect(resp.Allowed).To(Equal(false))
+				Expect(resp.Result.Message).To(Equal(`either spec.readinessProbe.tcpSocket or spec.readinessProbe.httpGet must be set if a spec.readinessProbe is specified, either spec.livenessProbe.tcpSocket or spec.livenessProbe.httpGet must be set if a spec.livenessProbe is specified`))
+			})
+			It("should reject probes with more than one action per probe configured", func() {
+				vmi := v1.NewMinimalVMI("testvmi")
+				m := resource.MustParse("64M")
+				vmi.Spec.Domain.Memory = &v1.Memory{Guest: &m}
+				vmi.Spec.Domain.Resources = v1.ResourceRequirements{}
+				vmi.Spec.ReadinessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						HTTPGet:   &k8sv1.HTTPGetAction{Host: "test", Port: intstr.Parse("80")},
+						TCPSocket: &k8sv1.TCPSocketAction{Host: "lal", Port: intstr.Parse("80")},
+					},
+				}
+				vmi.Spec.LivenessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						HTTPGet:   &k8sv1.HTTPGetAction{Host: "test", Port: intstr.Parse("80")},
+						TCPSocket: &k8sv1.TCPSocketAction{Host: "lal", Port: intstr.Parse("80")},
+					},
+				}
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+				vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+
+				vmiBytes, _ := json.Marshal(&vmi)
+
+				ar := &v1beta1.AdmissionReview{
+					Request: &v1beta1.AdmissionRequest{
+						Resource: webhooks.VirtualMachineInstanceGroupVersionResource,
+						Object: runtime.RawExtension{
+							Raw: vmiBytes,
+						},
+					},
+				}
+				resp := admitVMICreate(ar)
+				Expect(resp.Allowed).To(Equal(false))
+				Expect(resp.Result.Message).To(Equal(`spec.readinessProbe must have exactly one probe type set, spec.livenessProbe must have exactly one probe type set`))
+			})
+			It("should accept properly configured readiness and liveness probes", func() {
+				vmi := v1.NewMinimalVMI("testvmi")
+				m := resource.MustParse("64M")
+				vmi.Spec.Domain.Memory = &v1.Memory{Guest: &m}
+				vmi.Spec.Domain.Resources = v1.ResourceRequirements{}
+				vmi.Spec.ReadinessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						TCPSocket: &k8sv1.TCPSocketAction{Host: "lal", Port: intstr.Parse("80")},
+					},
+				}
+				vmi.Spec.LivenessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						HTTPGet: &k8sv1.HTTPGetAction{Host: "test", Port: intstr.Parse("80")},
+					},
+				}
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+				vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+
+				vmiBytes, _ := json.Marshal(&vmi)
+
+				ar := &v1beta1.AdmissionReview{
+					Request: &v1beta1.AdmissionRequest{
+						Resource: webhooks.VirtualMachineInstanceGroupVersionResource,
+						Object: runtime.RawExtension{
+							Raw: vmiBytes,
+						},
+					},
+				}
+				resp := admitVMICreate(ar)
+				Expect(resp.Allowed).To(Equal(true))
+			})
+			It("should reject properly configured readiness and liveness probes if no Pod Network is present", func() {
+				vmi := v1.NewMinimalVMI("testvmi")
+				m := resource.MustParse("64M")
+				vmi.Spec.Domain.Memory = &v1.Memory{Guest: &m}
+				vmi.Spec.Domain.Resources = v1.ResourceRequirements{}
+				vmi.Spec.ReadinessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						TCPSocket: &k8sv1.TCPSocketAction{Host: "lal", Port: intstr.Parse("80")},
+					},
+				}
+				vmi.Spec.LivenessProbe = &v1.Probe{
+					InitialDelaySeconds: 2,
+					Handler: v1.Handler{
+						HTTPGet: &k8sv1.HTTPGetAction{Host: "test", Port: intstr.Parse("80")},
+					},
+				}
+
+				vmiBytes, _ := json.Marshal(&vmi)
+
+				ar := &v1beta1.AdmissionReview{
+					Request: &v1beta1.AdmissionRequest{
+						Resource: webhooks.VirtualMachineInstanceGroupVersionResource,
+						Object: runtime.RawExtension{
+							Raw: vmiBytes,
+						},
+					},
+				}
+				resp := admitVMICreate(ar)
+				Expect(resp.Allowed).To(Equal(false))
+				Expect(resp.Result.Message).To(Equal(`spec.livenessProbe is only allowed if the Pod Network is attached, spec.readinessProbe is only allowed if the Pod Network is attached`))
+			})
+		})
+
 		It("should accept valid vmi spec on create", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 			vmiBytes, _ := json.Marshal(&vmi)
@@ -207,13 +334,12 @@ var _ = Describe("Validating Webhook", func() {
 
 			updateVmi := vmi.DeepCopy()
 			updateVmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			updateVmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 			newVMIBytes, _ := json.Marshal(&updateVmi)
@@ -264,12 +390,11 @@ var _ = Describe("Validating Webhook", func() {
 						MatchLabels: map[string]string{"match": "this"},
 					},
 					Template: newVirtualMachineBuilder().WithDisk(v1.Disk{
-						Name:       "testdisk",
-						VolumeName: "testvolume",
+						Name: "testdisk",
 					}).BuildTemplate(),
 				},
 			}, []string{
-				"spec.template.spec.domain.devices.disks[0].volumeName",
+				"spec.template.spec.domain.devices.disks[0].name",
 				"spec.selector",
 			}),
 			table.Entry("with mismatching label selectors", &v1.VirtualMachineInstanceReplicaSet{
@@ -291,13 +416,12 @@ var _ = Describe("Validating Webhook", func() {
 					},
 					Template: newVirtualMachineBuilder().
 						WithDisk(v1.Disk{
-							Name:       "testdisk",
-							VolumeName: "testvolume",
+							Name: "testdisk",
 						}).
 						WithVolume(v1.Volume{
-							Name: "testvolume",
+							Name: "testdisk",
 							VolumeSource: v1.VolumeSource{
-								RegistryDisk: &v1.RegistryDiskSource{},
+								ContainerDisk: &v1.ContainerDiskSource{},
 							},
 						}).
 						WithLabel("match", "me").
@@ -324,8 +448,7 @@ var _ = Describe("Validating Webhook", func() {
 		It("reject invalid VirtualMachineInstance spec", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vm := &v1.VirtualMachine{
 				Spec: v1.VirtualMachineSpec{
@@ -349,18 +472,17 @@ var _ = Describe("Validating Webhook", func() {
 			resp := admitVMs(ar)
 			Expect(resp.Allowed).To(Equal(false))
 			Expect(len(resp.Result.Details.Causes)).To(Equal(1))
-			Expect(resp.Result.Details.Causes[0].Field).To(Equal("spec.template.spec.domain.devices.disks[0].volumeName"))
+			Expect(resp.Result.Details.Causes[0].Field).To(Equal("spec.template.spec.domain.devices.disks[0].name"))
 		})
 		It("should accept valid vmi spec", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 
@@ -390,11 +512,10 @@ var _ = Describe("Validating Webhook", func() {
 		It("should accept valid DataVolumeTemplate", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
 					DataVolume: &v1.DataVolumeSource{
 						Name: "dv1",
@@ -436,11 +557,10 @@ var _ = Describe("Validating Webhook", func() {
 		It("should reject invalid DataVolumeTemplate with no Volume reference in VMI template", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
 					DataVolume: &v1.DataVolumeSource{
 						Name: "WRONG-DATAVOLUME",
@@ -489,8 +609,7 @@ var _ = Describe("Validating Webhook", func() {
 			Expect(json.Unmarshal(vmiDomainByte, &vmiPDomain)).To(BeNil())
 
 			vmiPDomain.Devices.Disks = append(vmiPDomain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk:   &v1.DiskTarget{},
 					Floppy: &v1.FloppyTarget{},
@@ -520,8 +639,7 @@ var _ = Describe("Validating Webhook", func() {
 		It("should accept valid vmi spec", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 
 			vmiPreset := &v1.VirtualMachineInstancePreset{
@@ -740,6 +858,46 @@ var _ = Describe("Validating Webhook", func() {
 			Expect(resp.Allowed).To(Equal(false))
 		})
 
+		It("should reject Migration spec for non-migratable VMIs", func() {
+			vmi := v1.NewMinimalVMI("testmigratevmi3")
+			vmi.Status.Phase = v1.Succeeded
+			vmi.Status.Conditions = []v1.VirtualMachineInstanceCondition{
+				{
+					Type:    v1.VirtualMachineInstanceIsMigratable,
+					Status:  k8sv1.ConditionFalse,
+					Reason:  v1.VirtualMachineInstanceReasonDisksNotMigratable,
+					Message: "cannot migrate VMI with mixes shared and non-shared volumes",
+				},
+			}
+
+			informers := webhooks.GetInformers()
+			informers.VMIInformer.GetIndexer().Add(vmi)
+
+			migration := v1.VirtualMachineInstanceMigration{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: v1.VirtualMachineInstanceMigrationSpec{
+					VMIName: "testmigratevmi3",
+				},
+			}
+			migrationBytes, _ := json.Marshal(&migration)
+
+			os.Setenv("FEATURE_GATES", "LiveMigration")
+
+			ar := &v1beta1.AdmissionReview{
+				Request: &v1beta1.AdmissionRequest{
+					Resource: webhooks.MigrationGroupVersionResource,
+					Object: runtime.RawExtension{
+						Raw: migrationBytes,
+					},
+				},
+			}
+
+			resp := admitMigrationCreate(ar)
+			Expect(resp.Allowed).To(Equal(false))
+		})
+
 		It("should reject Migration on update if spec changes", func() {
 			vmi := v1.NewMinimalVMI("testmigratevmiupdate")
 
@@ -841,15 +999,13 @@ var _ = Describe("Validating Webhook", func() {
 
 			for i := 0; i < arrayLenMax; i++ {
 				diskName := fmt.Sprintf("testDisk%d", i)
-				volumeName := fmt.Sprintf("testVolume%d", i)
 				vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-					Name:       diskName,
-					VolumeName: volumeName,
+					Name: diskName,
 				})
 				vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-					Name: volumeName,
+					Name: diskName,
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{},
+						ContainerDisk: &v1.ContainerDiskSource{},
 					},
 				})
 			}
@@ -862,10 +1018,8 @@ var _ = Describe("Validating Webhook", func() {
 
 			for i := 0; i <= arrayLenMax; i++ {
 				diskName := "testDisk"
-				volumeName := "testVolume"
 				vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-					Name:       diskName,
-					VolumeName: volumeName,
+					Name: diskName,
 				})
 			}
 
@@ -883,7 +1037,7 @@ var _ = Describe("Validating Webhook", func() {
 				vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 					Name: volumeName,
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{},
+						ContainerDisk: &v1.ContainerDiskSource{},
 					},
 				})
 			}
@@ -899,43 +1053,39 @@ var _ = Describe("Validating Webhook", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 
 			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
 			Expect(len(causes)).To(Equal(1))
-			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[0].volumeName"))
+			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[0].name"))
 		})
 		It("should reject multiple disks referencing same volume", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			// verify two disks referencing the same volume are rejected
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk2",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 			})
 
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
-				Name: "testvolume",
+				Name: "testdisk",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
 			Expect(len(causes)).To(Equal(1))
-			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[1].volumeName"))
+			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[1].name"))
 		})
 		It("should generate multiple causes", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk:   &v1.DiskTarget{},
 					Floppy: &v1.FloppyTarget{},
@@ -945,7 +1095,7 @@ var _ = Describe("Validating Webhook", func() {
 			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
 			// missing volume and multiple targets set. should result in 2 causes
 			Expect(len(causes)).To(Equal(2))
-			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[0].volumeName"))
+			Expect(causes[0].Field).To(Equal("fake.domain.devices.disks[0].name"))
 			Expect(causes[1].Field).To(Equal("fake.domain.devices.disks[0]"))
 		})
 		It("should reject negative requests.memory size value", func() {
@@ -1105,8 +1255,7 @@ var _ = Describe("Validating Webhook", func() {
 			func(volume *v1.Volume, expectedErrors int) {
 				vmi := v1.NewMinimalVMI("testvmi")
 				vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-					Name:       "testdisk",
-					VolumeName: "testvolume",
+					Name: "testdisk",
 					DiskDevice: v1.DiskDevice{
 						LUN: &v1.LunTarget{},
 					},
@@ -1118,14 +1267,14 @@ var _ = Describe("Validating Webhook", func() {
 			},
 			table.Entry("and reject non PVC sources",
 				&v1.Volume{
-					Name: "testvolume",
+					Name: "testdisk",
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{},
+						ContainerDisk: &v1.ContainerDiskSource{},
 					},
 				}, 1),
 			table.Entry("and accept PVC sources",
 				&v1.Volume{
-					Name: "testvolume",
+					Name: "testdisk",
 					VolumeSource: v1.VolumeSource{
 						PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{},
 					},
@@ -1463,6 +1612,26 @@ var _ = Describe("Validating Webhook", func() {
 			Expect(len(causes)).To(Equal(1))
 			Expect(causes[0].Field).To(Equal("fake.domain.devices.interfaces[0].ports[0]"))
 		})
+		It("should reject a masquerade interface on a network different than pod", func() {
+			vm := v1.NewMinimalVMI("testvm")
+			vm.Spec.Domain.Devices.Interfaces = []v1.Interface{v1.Interface{
+				Name: "default",
+				InterfaceBindingMethod: v1.InterfaceBindingMethod{
+					Masquerade: &v1.InterfaceMasquerade{},
+				},
+				Ports: []v1.Port{{Name: "test"}}}}
+
+			vm.Spec.Networks = []v1.Network{
+				v1.Network{
+					Name:          "default",
+					NetworkSource: v1.NetworkSource{Multus: &v1.CniNetwork{NetworkName: "test"}},
+				},
+			}
+
+			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vm.Spec)
+			Expect(len(causes)).To(Equal(1))
+			Expect(causes[0].Field).To(Equal("fake.domain.devices.interfaces[0].name"))
+		})
 		It("should reject networks with a pod network source and slirp interface with bad protocol type", func() {
 			vm := v1.NewMinimalVMI("testvm")
 			vm.Spec.Domain.Devices.Interfaces = []v1.Interface{v1.Interface{
@@ -1655,6 +1824,28 @@ var _ = Describe("Validating Webhook", func() {
 			}
 		})
 
+		It("should accept valid NTP servers", func() {
+			vmi := v1.NewMinimalVMI("testvm")
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+			vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+			vmi.Spec.Domain.Devices.Interfaces[0].DHCPOptions = &v1.DHCPOptions{
+				NTPServers: []string{"127.0.0.1", "127.0.0.2"},
+			}
+			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
+			Expect(len(causes)).To(Equal(0))
+		})
+
+		It("should reject non-IPv4 NTP servers", func() {
+			vmi := v1.NewMinimalVMI("testvm")
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+			vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+			vmi.Spec.Domain.Devices.Interfaces[0].DHCPOptions = &v1.DHCPOptions{
+				NTPServers: []string{"::1", "hostname"},
+			}
+			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
+			Expect(len(causes)).To(Equal(2))
+		})
+
 		It("should reject vmi with a network multiqueue, without virtio nics", func() {
 			_true := true
 			vmi := v1.NewMinimalVMI("testvm")
@@ -1706,6 +1897,37 @@ var _ = Describe("Validating Webhook", func() {
 
 			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
 			Expect(len(causes)).To(Equal(0))
+		})
+
+		It("should reject SRIOV interface when feature gate is disabled", func() {
+			vmi := v1.NewMinimalVMI("testvmi")
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
+			vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
+
+			vmi.Spec.Domain.Devices.Interfaces = append(
+				vmi.Spec.Domain.Devices.Interfaces,
+				v1.Interface{
+					Name: "sriov",
+					InterfaceBindingMethod: v1.InterfaceBindingMethod{
+						SRIOV: &v1.InterfaceSRIOV{},
+					},
+				},
+			)
+			vmi.Spec.Networks = append(
+				vmi.Spec.Networks,
+				v1.Network{
+					Name: "sriov",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.CniNetwork{NetworkName: "sriov"},
+					},
+				},
+			)
+
+			os.Setenv("FEATURE_GATES", "")
+
+			causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("fake"), &vmi.Spec)
+			Expect(len(causes)).To(Equal(1))
+			Expect(causes[0].Field).To(Equal("fake.domain.devices.interfaces[1].name"))
 		})
 	})
 	Context("with cpu pinning", func() {
@@ -1798,7 +2020,7 @@ var _ = Describe("Validating Webhook", func() {
 			},
 			table.Entry("with pvc volume source", v1.VolumeSource{PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{}}),
 			table.Entry("with cloud-init volume source", v1.VolumeSource{CloudInitNoCloud: &v1.CloudInitNoCloudSource{UserData: "fake"}}),
-			table.Entry("with registryDisk volume source", v1.VolumeSource{RegistryDisk: &v1.RegistryDiskSource{}}),
+			table.Entry("with containerDisk volume source", v1.VolumeSource{ContainerDisk: &v1.ContainerDiskSource{}}),
 			table.Entry("with ephemeral volume source", v1.VolumeSource{Ephemeral: &v1.EphemeralVolumeSource{}}),
 			table.Entry("with emptyDisk volume source", v1.VolumeSource{EmptyDisk: &v1.EmptyDiskSource{}}),
 			table.Entry("with dataVolume volume source", v1.VolumeSource{DataVolume: &v1.DataVolumeSource{Name: "fake"}}),
@@ -1837,7 +2059,7 @@ var _ = Describe("Validating Webhook", func() {
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk:          &v1.RegistryDiskSource{},
+					ContainerDisk:         &v1.ContainerDiskSource{},
 					PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{},
 				},
 			})
@@ -1852,13 +2074,13 @@ var _ = Describe("Validating Webhook", func() {
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{},
+					ContainerDisk: &v1.ContainerDiskSource{},
 				},
 			})
 
@@ -2051,30 +2273,29 @@ var _ = Describe("Validating Webhook", func() {
 
 			},
 			table.Entry("with Disk target",
-				v1.Disk{Name: "testdisk", VolumeName: "testvolume", DiskDevice: v1.DiskDevice{Disk: &v1.DiskTarget{}}},
+				v1.Disk{Name: "testdisk", DiskDevice: v1.DiskDevice{Disk: &v1.DiskTarget{}}},
 			),
 			table.Entry("with LUN target",
-				v1.Disk{Name: "testdisk", VolumeName: "testvolume", DiskDevice: v1.DiskDevice{LUN: &v1.LunTarget{}}},
+				v1.Disk{Name: "testdisk", DiskDevice: v1.DiskDevice{LUN: &v1.LunTarget{}}},
 			),
 			table.Entry("with Floppy target",
-				v1.Disk{Name: "testdisk", VolumeName: "testvolume", DiskDevice: v1.DiskDevice{Floppy: &v1.FloppyTarget{}}},
+				v1.Disk{Name: "testdisk", DiskDevice: v1.DiskDevice{Floppy: &v1.FloppyTarget{}}},
 			),
 			table.Entry("with CDRom target",
-				v1.Disk{Name: "testdisk", VolumeName: "testvolume", DiskDevice: v1.DiskDevice{CDRom: &v1.CDRomTarget{}}},
+				v1.Disk{Name: "testdisk", DiskDevice: v1.DiskDevice{CDRom: &v1.CDRomTarget{}}},
 			),
 		)
 		It("should allow disk without a target", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 				// disk without a target defaults to DiskTarget
 			})
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{Image: "fake"},
+					ContainerDisk: &v1.ContainerDiskSource{Image: "fake"},
 				},
 			})
 
@@ -2085,15 +2306,13 @@ var _ = Describe("Validating Webhook", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume1",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
 			})
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume2",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2107,8 +2326,7 @@ var _ = Describe("Validating Webhook", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume1",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
 						PciAddress: "0000:04:10.0",
@@ -2124,8 +2342,7 @@ var _ = Describe("Validating Webhook", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume1",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
 						PciAddress: "0000:81:100.a",
@@ -2141,8 +2358,7 @@ var _ = Describe("Validating Webhook", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume",
+				Name: "testdisk",
 				DiskDevice: v1.DiskDevice{
 					Disk:   &v1.DiskTarget{},
 					Floppy: &v1.FloppyTarget{},
@@ -2151,7 +2367,7 @@ var _ = Describe("Validating Webhook", func() {
 			vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{
 				Name: "testvolume",
 				VolumeSource: v1.VolumeSource{
-					RegistryDisk: &v1.RegistryDiskSource{Image: "fake"},
+					ContainerDisk: &v1.ContainerDiskSource{Image: "fake"},
 				},
 			})
 
@@ -2165,9 +2381,8 @@ var _ = Describe("Validating Webhook", func() {
 			order := uint(1)
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume1",
-				BootOrder:  &order,
+				Name:      "testdisk",
+				BootOrder: &order,
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2182,9 +2397,8 @@ var _ = Describe("Validating Webhook", func() {
 			order := uint(0)
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk",
-				VolumeName: "testvolume1",
-				BootOrder:  &order,
+				Name:      "testdisk",
+				BootOrder: &order,
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2195,16 +2409,79 @@ var _ = Describe("Validating Webhook", func() {
 			Expect(causes[0].Field).To(Equal("fake[0].bootOrder"))
 		})
 
+		It("should accept disks with supported or unspecified buses", func() {
+			vmi := v1.NewMinimalVMI("testvmi")
+
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk1",
+				DiskDevice: v1.DiskDevice{
+					Disk: &v1.DiskTarget{
+						Bus: "virtio",
+					},
+				},
+			})
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk2",
+				DiskDevice: v1.DiskDevice{
+					LUN: &v1.LunTarget{
+						Bus: "sata",
+					},
+				},
+			})
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk3",
+				DiskDevice: v1.DiskDevice{
+					CDRom: &v1.CDRomTarget{
+						Bus: "scsi",
+					},
+				},
+			})
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk4",
+				DiskDevice: v1.DiskDevice{
+					Disk: &v1.DiskTarget{},
+				},
+			})
+
+			causes := validateDisks(k8sfield.NewPath("fake"), vmi.Spec.Domain.Devices.Disks)
+			Expect(len(causes)).To(Equal(0))
+		})
+
+		It("should reject disks with unsupported buses", func() {
+			vmi := v1.NewMinimalVMI("testvmi")
+
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk1",
+				DiskDevice: v1.DiskDevice{
+					Disk: &v1.DiskTarget{
+						Bus: "ide",
+					},
+				},
+			})
+			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
+				Name: "testdisk2",
+				DiskDevice: v1.DiskDevice{
+					LUN: &v1.LunTarget{
+						Bus: "unsupported",
+					},
+				},
+			})
+
+			causes := validateDisks(k8sfield.NewPath("fake"), vmi.Spec.Domain.Devices.Disks)
+			Expect(len(causes)).To(Equal(2))
+			Expect(causes[0].Field).To(Equal("fake[0].disk.bus"))
+			Expect(causes[1].Field).To(Equal("fake[1].lun.bus"))
+		})
+
 		It("should reject invalid SN characters", func() {
 			vmi := v1.NewMinimalVMI("testvmi")
 			order := uint(1)
 			sn := "$$$$"
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk2",
-				VolumeName: "testvolume2",
-				BootOrder:  &order,
-				Serial:     sn,
+				Name:      "testdisk2",
+				BootOrder: &order,
+				Serial:    sn,
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2221,10 +2498,9 @@ var _ = Describe("Validating Webhook", func() {
 			sn := strings.Repeat("1", maxStrLen+1)
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk2",
-				VolumeName: "testvolume2",
-				BootOrder:  &order,
-				Serial:     sn,
+				Name:      "testdisk2",
+				BootOrder: &order,
+				Serial:    sn,
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2240,10 +2516,9 @@ var _ = Describe("Validating Webhook", func() {
 			order := uint(1)
 
 			vmi.Spec.Domain.Devices.Disks = append(vmi.Spec.Domain.Devices.Disks, v1.Disk{
-				Name:       "testdisk2",
-				VolumeName: "testvolume2",
-				BootOrder:  &order,
-				Serial:     "SN-1_a",
+				Name:      "testdisk2",
+				BootOrder: &order,
+				Serial:    "SN-1_a",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{},
 				},
@@ -2386,19 +2661,18 @@ var _ = Describe("Function getNumberOfPodInterfaces()", func() {
 		spec.Domain.Devices.Interfaces = []v1.Interface{iface}
 		order2 := uint(77)
 		disk := v1.Disk{
-			Name:       "testdisk",
-			VolumeName: "testvolume",
-			BootOrder:  &order2,
-			Serial:     "SN-1_a",
+			Name:      "testdisk",
+			BootOrder: &order2,
+			Serial:    "SN-1_a",
 			DiskDevice: v1.DiskDevice{
 				Disk: &v1.DiskTarget{},
 			},
 		}
 		spec.Domain.Devices.Disks = []v1.Disk{disk}
 		volume := v1.Volume{
-			Name: "testvolume",
+			Name: "testdisk",
 			VolumeSource: v1.VolumeSource{
-				RegistryDisk: &v1.RegistryDiskSource{},
+				ContainerDisk: &v1.ContainerDiskSource{},
 			},
 		}
 
@@ -2420,19 +2694,18 @@ var _ = Describe("Function getNumberOfPodInterfaces()", func() {
 		spec.Networks = []v1.Network{net}
 		spec.Domain.Devices.Interfaces = []v1.Interface{iface}
 		disk := v1.Disk{
-			Name:       "testdisk",
-			VolumeName: "testvolume",
-			BootOrder:  &order,
-			Serial:     "SN-1_a",
+			Name:      "testdisk",
+			BootOrder: &order,
+			Serial:    "SN-1_a",
 			DiskDevice: v1.DiskDevice{
 				Disk: &v1.DiskTarget{},
 			},
 		}
 		spec.Domain.Devices.Disks = []v1.Disk{disk}
 		volume := v1.Volume{
-			Name: "testvolume",
+			Name: "testdisk",
 			VolumeSource: v1.VolumeSource{
-				RegistryDisk: &v1.RegistryDiskSource{},
+				ContainerDisk: &v1.ContainerDiskSource{},
 			},
 		}
 		spec.Volumes = []v1.Volume{volume}

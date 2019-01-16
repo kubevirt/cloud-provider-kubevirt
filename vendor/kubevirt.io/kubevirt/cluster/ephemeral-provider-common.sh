@@ -29,11 +29,11 @@ function _registry_volume() {
 }
 
 function _add_common_params() {
-    local params="--nodes ${KUBEVIRT_NUM_NODES} --memory 4096M --cpu 4 --random-ports --background --prefix $provider_prefix --registry-volume $(_registry_volume) kubevirtci/${image} ${KUBEVIRT_PROVIDER_EXTRA_ARGS}"
+    local params="--nodes ${KUBEVIRT_NUM_NODES} --memory ${KUBEVIRT_MEMORY_SIZE} --cpu 5 --random-ports --background --prefix $provider_prefix --registry-volume $(_registry_volume) kubevirtci/${image} ${KUBEVIRT_PROVIDER_EXTRA_ARGS}"
     if [[ $TARGET =~ windows.* ]]; then
-        params="--memory 8192M --nfs-data $WINDOWS_NFS_DIR $params"
+        params=" --nfs-data $WINDOWS_NFS_DIR $params"
     elif [[ $TARGET =~ openshift.* ]]; then
-        params="--memory 4096M --nfs-data $RHEL_NFS_DIR $params"
+        params=" --nfs-data $RHEL_NFS_DIR $params"
     fi
     echo $params
 }
@@ -49,7 +49,7 @@ function build() {
     done
 
     # Build everyting and publish it
-    ${KUBEVIRT_PATH}hack/dockerized "DOCKER_TAG=${DOCKER_TAG} KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER} ./hack/build-manifests.sh"
+    ${KUBEVIRT_PATH}hack/dockerized "DOCKER_PREFIX=${DOCKER_PREFIX} DOCKER_TAG=${DOCKER_TAG} KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER} IMAGE_PULL_POLICY=${IMAGE_PULL_POLICY} VERBOSITY=${VERBOSITY} ./hack/build-manifests.sh"
     make push
 
     # Make sure that all nodes use the newest images

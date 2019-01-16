@@ -19,12 +19,14 @@
 
 package rest
 
+//go:generate mockgen -source $GOFILE -package=$GOPACKAGE -destination=generated_mock_$GOFILE -imports restful=github.com/emicklei/go-restful
+
 import (
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/emicklei/go-restful"
+	restful "github.com/emicklei/go-restful"
 	authorization "k8s.io/api/authorization/v1beta1"
 	authorizationclient "k8s.io/client-go/kubernetes/typed/authorization/v1beta1"
 	restclient "k8s.io/client-go/rest"
@@ -136,7 +138,7 @@ func (a *authorizor) generateAccessReview(req *restful.Request) (*authorization.
 	}
 
 	// URL example
-	// /apis/subresources.kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi/console
+	// /apis/subresources.kubevirt.io/v1alpha3/namespaces/default/virtualmachineinstances/testvmi/console
 	pathSplit := strings.Split(url.Path, "/")
 	if len(pathSplit) != 9 {
 		return nil, fmt.Errorf("unknown api endpoint %s", url.Path)
@@ -150,7 +152,7 @@ func (a *authorizor) generateAccessReview(req *restful.Request) (*authorization.
 	subresource := pathSplit[8]
 	userExtras := a.getUserExtras(headers)
 
-	if resource != "virtualmachineinstances" {
+	if resource != "virtualmachineinstances" && resource != "virtualmachines" {
 		return nil, fmt.Errorf("unknown resource type %s", resource)
 	}
 
@@ -185,17 +187,17 @@ func (a *authorizor) generateAccessReview(req *restful.Request) (*authorization.
 	return r, nil
 }
 
-func isInfoEndpoint(req *restful.Request) bool {
+func isInfoOrHealthEndpoint(req *restful.Request) bool {
 
 	httpRequest := req.Request
 	if httpRequest == nil || httpRequest.URL == nil {
 		return false
 	}
 	// URL example
-	// /apis/subresources.kubevirt.io/v1alpha2/namespaces/default/virtualmachineinstances/testvmi/console
+	// /apis/subresources.kubevirt.io/v1alpha3/namespaces/default/virtualmachineinstances/testvmi/console
 	// The /apis/<group>/<version> part of the urls should be accessible without needing authorization
 	pathSplit := strings.Split(httpRequest.URL.Path, "/")
-	if len(pathSplit) <= 4 || (len(pathSplit) > 4 && pathSplit[4] == "version") {
+	if len(pathSplit) <= 4 || (len(pathSplit) > 4 && (pathSplit[4] == "version" || pathSplit[4] == "healthz")) {
 		return true
 	}
 
@@ -217,7 +219,7 @@ func (a *authorizor) Authorize(req *restful.Request) (bool, string, error) {
 	// Endpoints related to getting information about
 	// what apis our server provides are authorized to
 	// all users.
-	if isInfoEndpoint(req) {
+	if isInfoOrHealthEndpoint(req) {
 		return true, "", nil
 	}
 

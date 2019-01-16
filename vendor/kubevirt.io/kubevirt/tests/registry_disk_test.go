@@ -22,7 +22,9 @@ package tests_test
 import (
 	"flag"
 	"strings"
+	"time"
 
+	expect "github.com/google/goexpect"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	k8sv1 "k8s.io/api/core/v1"
@@ -30,12 +32,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
 )
 
-var _ = Describe("RegistryDisk", func() {
+var _ = Describe("ContainerDisk", func() {
 
 	flag.Parse()
 
@@ -53,7 +55,7 @@ var _ = Describe("RegistryDisk", func() {
 		return obj
 	}
 
-	VerifyRegistryDiskVMI := func(vmi *v1.VirtualMachineInstance, obj runtime.Object, ignoreWarnings bool) {
+	VerifyContainerDiskVMI := func(vmi *v1.VirtualMachineInstance, obj runtime.Object, ignoreWarnings bool) {
 		_, ok := obj.(*v1.VirtualMachineInstance)
 		Expect(ok).To(BeTrue(), "Object is not of type *v1.VirtualMachineInstance")
 		if ignoreWarnings == true {
@@ -87,13 +89,13 @@ var _ = Describe("RegistryDisk", func() {
 	Describe("Starting and stopping the same VirtualMachineInstance", func() {
 		Context("with ephemeral registry disk", func() {
 			It("should success multiple times", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskCirros))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskCirros))
 				num := 2
 				for i := 0; i < num; i++ {
 					By("Starting the VirtualMachineInstance")
 					obj, err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Get()
 					Expect(err).To(BeNil())
-					tests.WaitForSuccessfulVMIStartWithTimeout(obj, 180)
+					tests.WaitForSuccessfulVMIStart(obj)
 
 					By("Stopping the VirtualMachineInstance")
 					_, err = virtClient.RestClient().Delete().Resource("virtualmachineinstances").Namespace(vmi.GetObjectMeta().GetNamespace()).Name(vmi.GetObjectMeta().GetName()).Do().Get()
@@ -108,13 +110,13 @@ var _ = Describe("RegistryDisk", func() {
 	Describe("Starting a VirtualMachineInstance", func() {
 		Context("with ephemeral registry disk", func() {
 			It("should not modify the spec on status update", func() {
-				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskCirros))
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskCirros))
 				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 
 				By("Starting the VirtualMachineInstance")
 				vmi, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Create(vmi)
 				Expect(err).To(BeNil())
-				tests.WaitForSuccessfulVMIStartWithTimeout(vmi, 60)
+				tests.WaitForSuccessfulVMIStart(vmi)
 				startedVMI, err := virtClient.VirtualMachineInstance(tests.NamespaceTestDefault).Get(vmi.ObjectMeta.Name, &metav1.GetOptions{})
 				Expect(err).To(BeNil())
 				By("Checking that the VirtualMachineInstance spec did not change")
@@ -130,7 +132,7 @@ var _ = Describe("RegistryDisk", func() {
 				vmis := make([]*v1.VirtualMachineInstance, 0, num)
 				objs := make([]runtime.Object, 0, num)
 				for i := 0; i < num; i++ {
-					vmi := tests.NewRandomVMIWithEphemeralDisk(tests.RegistryDiskFor(tests.RegistryDiskCirros))
+					vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskCirros))
 					// FIXME if we give too much ram, the vmis really boot and eat all our memory (cache?)
 					vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceMemory] = resource.MustParse("1M")
 					obj := LaunchVMI(vmi)
@@ -146,9 +148,56 @@ var _ = Describe("RegistryDisk", func() {
 					// The new network implementation we're working on should resolve this.
 					// NOTE the VirtualMachineInstance still starts successfully regardless of this warning.
 					// It just requires virt-handler to retry the Start command at the moment.
-					VerifyRegistryDiskVMI(vmi, objs[idx], true)
+					VerifyContainerDiskVMI(vmi, objs[idx], true)
 				}
 			}) // Timeout is long because this test involves multiple parallel VirtualMachineInstance launches.
+		})
+	})
+
+	Describe("Starting from custom image location", func() {
+		Context("with disk at /custom-disk/boot.img", func() {
+			It("should boot normally", func() {
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskCirros))
+				for ind, volume := range vmi.Spec.Volumes {
+					if volume.ContainerDisk != nil {
+						vmi.Spec.Volumes[ind].ContainerDisk.Path = "/custom-disk/boot.img"
+					}
+				}
+				By("Starting the VirtualMachineInstance")
+				obj, err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Get()
+				Expect(err).To(BeNil())
+				tests.WaitForSuccessfulVMIStart(obj)
+			})
+		})
+	})
+
+	Describe("Starting with virtio-win", func() {
+		Context("with virtio-win as secondary disk", func() {
+			It("should boot and have the virtio as sata CDROM", func() {
+				vmi := tests.NewRandomVMIWithEphemeralDisk(tests.ContainerDiskFor(tests.ContainerDiskAlpine))
+				tests.AddEphemeralCdrom(vmi, "disk4", "sata", tests.ContainerDiskFor(tests.ContainerDiskVirtio))
+
+				By("Starting the VirtualMachineInstance")
+				obj, err := virtClient.RestClient().Post().Resource("virtualmachineinstances").Namespace(tests.NamespaceTestDefault).Body(vmi).Do().Get()
+				Expect(err).To(BeNil(), "expected vmi to start with no problem")
+				tests.WaitForSuccessfulVMIStart(obj)
+
+				By("Checking whether the second disk really contains virtio drivers")
+				expecter, err := tests.LoggedInAlpineExpecter(vmi)
+				Expect(err).ToNot(HaveOccurred(), "expected alpine to login properly")
+				defer expecter.Close()
+
+				_, err = expecter.ExpectBatch([]expect.Batcher{
+					// mount virtio cdrom and check files are there
+					&expect.BSnd{S: "mount -t iso9600 /dev/cdrom /mnt\n"},
+					&expect.BSnd{S: "echo $?\n"},
+					&expect.BExp{R: "0"},
+					&expect.BSnd{S: "ls virtio-win_license.txt guest-agent\n"},
+					&expect.BSnd{S: "echo $?\n"},
+					&expect.BExp{R: "0"},
+				}, 200*time.Second)
+				Expect(err).ToNot(HaveOccurred(), "expected virtio files to be mounted properly")
+			})
 		})
 	})
 })

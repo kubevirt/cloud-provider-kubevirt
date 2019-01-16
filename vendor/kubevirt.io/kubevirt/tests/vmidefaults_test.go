@@ -26,7 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"kubevirt.io/kubevirt/pkg/api/v1"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/tests"
 )
@@ -47,15 +47,15 @@ var _ = Describe("VMIDefaults", func() {
 			Domain: v1.DomainSpec{
 				Devices: v1.Devices{
 					Disks: []v1.Disk{
-						{Name: "testdisk", VolumeName: "testvolume"},
+						{Name: "testdisk"},
 					},
 				},
 			},
 			Volumes: []v1.Volume{
 				{
-					Name: "testvolume",
+					Name: "testdisk",
 					VolumeSource: v1.VolumeSource{
-						RegistryDisk: &v1.RegistryDiskSource{
+						ContainerDisk: &v1.ContainerDiskSource{
 							Image: "dummy",
 						},
 					},

@@ -20,7 +20,7 @@
       "application/json"
      ],
      "summary": "Get a KubeVirt API GroupList",
-     "operationId": "getAPIGroup",
+     "operationId": "getAPIGroupList",
      "responses": {
       "200": {
        "description": "OK",
@@ -66,7 +66,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2": {
+   "/apis/kubevirt.io/v1alpha3": {
     "get": {
      "produces": [
       "application/json"
@@ -92,30 +92,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/healthz": {
-    "get": {
-     "consumes": [
-      "application/json"
-     ],
-     "produces": [
-      "application/json"
-     ],
-     "summary": "Health endpoint",
-     "operationId": "checkHealth",
-     "responses": {
-      "200": {
-       "description": "OK"
-      },
-      "500": {
-       "description": "Unhealthy"
-      },
-      "default": {
-       "description": "OK"
-      }
-     }
-    }
-   },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancemigrations": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancemigrations": {
     "get": {
      "produces": [
       "application/json",
@@ -335,7 +312,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancemigrations/{name}": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancemigrations/{name}": {
     "get": {
      "produces": [
       "application/json",
@@ -581,7 +558,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancepresets": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancepresets": {
     "get": {
      "produces": [
       "application/json",
@@ -801,7 +778,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancepresets/{name}": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancepresets/{name}": {
     "get": {
      "produces": [
       "application/json",
@@ -1047,7 +1024,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancereplicasets": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancereplicasets": {
     "get": {
      "produces": [
       "application/json",
@@ -1267,7 +1244,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstancereplicasets/{name}": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstancereplicasets/{name}": {
     "get": {
      "produces": [
       "application/json",
@@ -1513,7 +1490,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstances": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances": {
     "get": {
      "produces": [
       "application/json",
@@ -1733,7 +1710,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstances/{name}": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}": {
     "get": {
      "produces": [
       "application/json",
@@ -1979,7 +1956,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachines": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines": {
     "get": {
      "produces": [
       "application/json",
@@ -2199,7 +2176,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachines/{name}": {
+   "/apis/kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}": {
     "get": {
      "produces": [
       "application/json",
@@ -2445,7 +2422,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/virtualmachineinstancemigrations": {
+   "/apis/kubevirt.io/v1alpha3/virtualmachineinstancemigrations": {
     "get": {
      "produces": [
       "application/json",
@@ -2523,7 +2500,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/virtualmachineinstancepresets": {
+   "/apis/kubevirt.io/v1alpha3/virtualmachineinstancepresets": {
     "get": {
      "produces": [
       "application/json",
@@ -2601,7 +2578,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/virtualmachineinstancereplicasets": {
+   "/apis/kubevirt.io/v1alpha3/virtualmachineinstancereplicasets": {
     "get": {
      "produces": [
       "application/json",
@@ -2679,7 +2656,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/virtualmachineinstances": {
+   "/apis/kubevirt.io/v1alpha3/virtualmachineinstances": {
     "get": {
      "produces": [
       "application/json",
@@ -2757,7 +2734,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/virtualmachines": {
+   "/apis/kubevirt.io/v1alpha3/virtualmachines": {
     "get": {
      "produces": [
       "application/json",
@@ -2835,7 +2812,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/namespaces/{namespace}/virtualmachineinstancemigrations": {
+   "/apis/kubevirt.io/v1alpha3/watch/namespaces/{namespace}/virtualmachineinstancemigrations": {
     "get": {
      "produces": [
       "application/json"
@@ -2919,7 +2896,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/namespaces/{namespace}/virtualmachineinstancepresets": {
+   "/apis/kubevirt.io/v1alpha3/watch/namespaces/{namespace}/virtualmachineinstancepresets": {
     "get": {
      "produces": [
       "application/json"
@@ -3003,7 +2980,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/namespaces/{namespace}/virtualmachineinstancereplicasets": {
+   "/apis/kubevirt.io/v1alpha3/watch/namespaces/{namespace}/virtualmachineinstancereplicasets": {
     "get": {
      "produces": [
       "application/json"
@@ -3087,7 +3064,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/namespaces/{namespace}/virtualmachineinstances": {
+   "/apis/kubevirt.io/v1alpha3/watch/namespaces/{namespace}/virtualmachineinstances": {
     "get": {
      "produces": [
       "application/json"
@@ -3171,7 +3148,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/namespaces/{namespace}/virtualmachines": {
+   "/apis/kubevirt.io/v1alpha3/watch/namespaces/{namespace}/virtualmachines": {
     "get": {
      "produces": [
       "application/json"
@@ -3255,7 +3232,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/virtualmachineinstancemigrations": {
+   "/apis/kubevirt.io/v1alpha3/watch/virtualmachineinstancemigrations": {
     "get": {
      "produces": [
       "application/json"
@@ -3331,7 +3308,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/virtualmachineinstancepresets": {
+   "/apis/kubevirt.io/v1alpha3/watch/virtualmachineinstancepresets": {
     "get": {
      "produces": [
       "application/json"
@@ -3407,7 +3384,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/virtualmachineinstancereplicasets": {
+   "/apis/kubevirt.io/v1alpha3/watch/virtualmachineinstancereplicasets": {
     "get": {
      "produces": [
       "application/json"
@@ -3483,7 +3460,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/virtualmachineinstances": {
+   "/apis/kubevirt.io/v1alpha3/watch/virtualmachineinstances": {
     "get": {
      "produces": [
       "application/json"
@@ -3559,7 +3536,7 @@
      }
     }
    },
-   "/apis/kubevirt.io/v1alpha2/watch/virtualmachines": {
+   "/apis/kubevirt.io/v1alpha3/watch/virtualmachines": {
     "get": {
      "produces": [
       "application/json"
@@ -3661,7 +3638,7 @@
      }
     }
    },
-   "/apis/subresources.kubevirt.io/v1alpha2": {
+   "/apis/subresources.kubevirt.io/v1alpha3": {
     "get": {
      "produces": [
       "application/json"
@@ -3687,7 +3664,30 @@
      }
     }
    },
-   "/apis/subresources.kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstances/{name}/console": {
+   "/apis/subresources.kubevirt.io/v1alpha3/healthz": {
+    "get": {
+     "consumes": [
+      "application/json"
+     ],
+     "produces": [
+      "application/json"
+     ],
+     "summary": "Health endpoint",
+     "operationId": "checkHealth",
+     "responses": {
+      "200": {
+       "description": "OK"
+      },
+      "500": {
+       "description": "Unhealthy"
+      },
+      "default": {
+       "description": "OK"
+      }
+     }
+    }
+   },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/console": {
     "get": {
      "summary": "Open a websocket connection to a serial console on the specified VirtualMachineInstance.",
      "operationId": "console",
@@ -3716,7 +3716,7 @@
      }
     }
    },
-   "/apis/subresources.kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstances/{name}/test": {
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/test": {
     "get": {
      "summary": "Test endpoint verifying apiserver connectivity.",
      "operationId": "test",
@@ -3745,7 +3745,7 @@
      }
     }
    },
-   "/apis/subresources.kubevirt.io/v1alpha2/namespaces/{namespace}/virtualmachineinstances/{name}/vnc": {
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/vnc": {
     "get": {
      "summary": "Open a websocket connection to connect to VNC on the specified VirtualMachineInstance.",
      "operationId": "vnc",
@@ -3774,12 +3774,63 @@
      }
     }
    },
-   "/apis/subresources.kubevirt.io/v1alpha2/version": {
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/restart": {
+    "put": {
+     "summary": "Restart a VirtualMachine object.",
+     "operationId": "restart",
+     "parameters": [
+      {
+       "pattern": "[a-z0-9][a-z0-9\\-]*",
+       "type": "string",
+       "description": "Object name and auth scope, such as for teams and projects",
+       "name": "namespace",
+       "in": "path",
+       "required": true
+      },
+      {
+       "pattern": "[a-z0-9][a-z0-9\\-]*",
+       "type": "string",
+       "description": "Name of the resource",
+       "name": "name",
+       "in": "path",
+       "required": true
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK"
+      },
+      "404": {
+       "description": "Not Found"
+      },
+      "default": {
+       "description": "OK"
+      }
+     }
+    }
+   },
+   "/apis/subresources.kubevirt.io/v1alpha3/version": {
     "get": {
      "produces": [
       "application/json"
      ],
      "operationId": "version",
+     "responses": {
+      "200": {
+       "description": "OK"
+      }
+     }
+    }
+   },
+   "/openapi/v2": {
+    "get": {
+     "consumes": [
+      "application/json"
+     ],
+     "produces": [
+      "application/json"
+     ],
+     "operationId": "func7",
      "responses": {
       "200": {
        "description": "OK"
@@ -3957,7 +4008,7 @@
    "v1.CDRomTarget": {
     "properties": {
      "bus": {
-      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi, ide.",
+      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi.",
       "type": "string"
      },
      "readonly": {
@@ -3984,6 +4035,14 @@
      "model": {
       "description": "Model specifies the CPU model inside the VMI.\nList of available models https://github.com/libvirt/libvirt/blob/master/src/cpu/cpu_map.xml.\nIt is possible to specify special cases like \"host-passthrough\" to get the same CPU as the node\nand \"host-model\" to get CPU closest to the node one.\nFor more information see https://libvirt.org/formatdomain.html#elementsCPU.\nDefaults to host-model.\n+optional",
       "type": "string"
+     },
+     "sockets": {
+      "description": "Sockets specifies the number of sockets inside the vmi.\nMust be a value greater or equal 1.",
+      "type": "integer"
+     },
+     "threads": {
+      "description": "Threads specifies the number of threads inside the vmi.\nMust be a value greater or equal 1.",
+      "type": "integer"
      }
     }
    },
@@ -4042,7 +4101,7 @@
     ],
     "properties": {
      "networkName": {
-      "description": "References to a NetworkAttachmentDefinition CRD object in the same namespace.\nIn case of genie, it references the CNI plugin name.",
+      "description": "References to a NetworkAttachmentDefinition CRD object. Format:\n\u003cnetworkName\u003e, \u003cnamespace\u003e/\u003cnetworkName\u003e. If namespace is not\nspecified, VMI namespace is assumed.\nIn case of genie, it references the CNI plugin name.",
       "type": "string"
      }
     }
@@ -4057,6 +4116,46 @@
      "optional": {
       "description": "Specify whether the ConfigMap or it's keys must be defined\n+optional",
       "type": "boolean"
+     }
+    }
+   },
+   "v1.ContainerDiskSource": {
+    "description": "Represents a docker image with an embedded disk.",
+    "required": [
+     "image"
+    ],
+    "properties": {
+     "image": {
+      "description": "Image is the name of the image with the embedded disk.",
+      "type": "string"
+     },
+     "imagePullSecret": {
+      "description": "ImagePullSecret is the name of the Docker registry secret required to pull the image. The secret must already exist.",
+      "type": "string"
+     },
+     "path": {
+      "description": "Path defines the path to disk file in the container",
+      "type": "string"
+     }
+    }
+   },
+   "v1.DHCPOptions": {
+    "description": "Extra DHCP options to use in the interface.",
+    "properties": {
+     "bootFileName": {
+      "description": "If specified will pass option 67 to interface's DHCP server\n+optional",
+      "type": "string"
+     },
+     "ntpServers": {
+      "description": "If specified will pass the configured NTP server to the VM via DHCP option 042.\n+optional",
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "tftpServerName": {
+      "description": "If specified will pass option 66 to interface's DHCP server\n+optional",
+      "type": "string"
      }
     }
    },
@@ -4146,8 +4245,7 @@
    },
    "v1.Disk": {
     "required": [
-     "name",
-     "volumeName"
+     "name"
     ],
     "properties": {
      "bootOrder": {
@@ -4186,17 +4284,13 @@
      "serial": {
       "description": "Serial provides the ability to specify a serial number for the disk device.\n+optional",
       "type": "string"
-     },
-     "volumeName": {
-      "description": "Name of the volume which is referenced.\nMust match the Name of a Volume.",
-      "type": "string"
      }
     }
    },
    "v1.DiskTarget": {
     "properties": {
      "bus": {
-      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi, ide.",
+      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi.",
       "type": "string"
      },
      "pciAddress": {
@@ -4423,6 +4517,57 @@
      }
     }
    },
+   "v1.HTTPGetAction": {
+    "description": "HTTPGetAction describes an action based on HTTP Get requests.",
+    "required": [
+     "port"
+    ],
+    "properties": {
+     "host": {
+      "description": "Host name to connect to, defaults to the pod IP. You probably want to set \"Host\" in httpHeaders instead.",
+      "type": "string"
+     },
+     "httpHeaders": {
+      "description": "Custom headers to set in the request. HTTP allows repeated headers.",
+      "type": "array",
+      "items": {
+       "$ref": "#/definitions/v1.HTTPHeader"
+      }
+     },
+     "path": {
+      "description": "Path to access on the HTTP server.",
+      "type": "string"
+     },
+     "port": {
+      "description": "Name or number of the port to access on the container. Number must be in the range 1 to 65535. Name must be an IANA_SVC_NAME.",
+      "type": [
+       "string",
+       "number"
+      ]
+     },
+     "scheme": {
+      "description": "Scheme to use for connecting to the host. Defaults to HTTP.",
+      "type": "string"
+     }
+    }
+   },
+   "v1.HTTPHeader": {
+    "description": "HTTPHeader describes a custom header to be used in HTTP probes",
+    "required": [
+     "name",
+     "value"
+    ],
+    "properties": {
+     "name": {
+      "description": "The header field name",
+      "type": "string"
+     },
+     "value": {
+      "description": "The header field value",
+      "type": "string"
+     }
+    }
+   },
    "v1.HostDisk": {
     "description": "Represents a disk created on the cluster level",
     "required": [
@@ -4437,6 +4582,10 @@
      "path": {
       "description": "The path to HostDisk image located on the cluster",
       "type": "string"
+     },
+     "shared": {
+      "description": "Shared indicate whether the path is shared between nodes",
+      "type": "boolean"
      },
      "type": {
       "description": "Contains information if disk.img exists or should be created\nallowed options are 'Disk' and 'DiskOrCreate'",
@@ -4515,9 +4664,16 @@
      "bridge": {
       "$ref": "#/definitions/v1.InterfaceBridge"
      },
+     "dhcpOptions": {
+      "description": "If specified the network interface will pass additional DHCP options to the VMI\n+optional",
+      "$ref": "#/definitions/v1.DHCPOptions"
+     },
      "macAddress": {
       "description": "Interface MAC address. For example: de:ad:00:00:be:af or DE-AD-00-00-BE-AF.",
       "type": "string"
+     },
+     "masquerade": {
+      "$ref": "#/definitions/v1.InterfaceMasquerade"
      },
      "model": {
       "description": "Interface model.\nOne of: e1000, e1000e, ne2k_pci, pcnet, rtl8139, virtio.\nDefaults to virtio.",
@@ -4540,10 +4696,15 @@
      },
      "slirp": {
       "$ref": "#/definitions/v1.InterfaceSlirp"
+     },
+     "sriov": {
+      "$ref": "#/definitions/v1.InterfaceSRIOV"
      }
     }
    },
    "v1.InterfaceBridge": {},
+   "v1.InterfaceMasquerade": {},
+   "v1.InterfaceSRIOV": {},
    "v1.InterfaceSlirp": {},
    "v1.KVMTimer": {
     "properties": {
@@ -4622,7 +4783,7 @@
    "v1.LunTarget": {
     "properties": {
      "bus": {
-      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi, ide.",
+      "description": "Bus indicates the type of disk device to emulate.\nsupported values: virtio, sata, scsi.",
       "type": "string"
      },
      "readonly": {
@@ -5048,6 +5209,44 @@
      }
     }
    },
+   "v1.Probe": {
+    "description": "Probe describes a health check to be performed against a VirtualMachineInstance to determine whether it is\nalive or ready to receive traffic.",
+    "properties": {
+     "failureThreshold": {
+      "description": "Minimum consecutive failures for the probe to be considered failed after having succeeded.\nDefaults to 3. Minimum value is 1.\n+optional",
+      "type": "integer",
+      "format": "int32"
+     },
+     "httpGet": {
+      "description": "HTTPGet specifies the http request to perform.\n+optional",
+      "$ref": "#/definitions/v1.HTTPGetAction"
+     },
+     "initialDelaySeconds": {
+      "description": "Number of seconds after the VirtualMachineInstance has started before liveness probes are initiated.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
+      "type": "integer",
+      "format": "int32"
+     },
+     "periodSeconds": {
+      "description": "How often (in seconds) to perform the probe.\nDefault to 10 seconds. Minimum value is 1.\n+optional",
+      "type": "integer",
+      "format": "int32"
+     },
+     "successThreshold": {
+      "description": "Minimum consecutive successes for the probe to be considered successful after having failed.\nDefaults to 1. Must be 1 for liveness. Minimum value is 1.\n+optional",
+      "type": "integer",
+      "format": "int32"
+     },
+     "tcpSocket": {
+      "description": "TCPSocket specifies an action involving a TCP port.\nTCP hooks not yet supported\n+optional",
+      "$ref": "#/definitions/v1.TCPSocketAction"
+     },
+     "timeoutSeconds": {
+      "description": "Number of seconds after which the probe times out.\nDefaults to 1 second. Minimum value is 1.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
    "v1.RTCTimer": {
     "properties": {
      "present": {
@@ -5060,22 +5259,6 @@
      },
      "track": {
       "description": "Track the guest or the wall clock.",
-      "type": "string"
-     }
-    }
-   },
-   "v1.RegistryDiskSource": {
-    "description": "Represents a docker image with an embedded disk.",
-    "required": [
-     "image"
-    ],
-    "properties": {
-     "image": {
-      "description": "Image is the name of the image with the embedded disk.",
-      "type": "string"
-     },
-     "imagePullSecret": {
-      "description": "ImagePullSecret is the name of the Docker registry secret required to pull the image. The secret must already exist.",
       "type": "string"
      }
     }
@@ -5098,6 +5281,21 @@
    },
    "v1.Rng": {
     "description": "Rng represents the random device passed from host"
+   },
+   "v1.RootPaths": {
+    "description": "RootPaths lists the paths available at root. For example: \"/healthz\", \"/apis\".",
+    "required": [
+     "paths"
+    ],
+    "properties": {
+     "paths": {
+      "description": "paths are the paths available at root.",
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
    },
    "v1.SecretVolumeSource": {
     "description": "SecretVolumeSource adapts a Secret into a volume.",
@@ -5223,6 +5421,25 @@
      "uid": {
       "description": "UID of the resource. (when there is a single resource which can be described). More info: http://kubernetes.io/docs/user-guide/identifiers#uids",
       "type": "string"
+     }
+    }
+   },
+   "v1.TCPSocketAction": {
+    "description": "TCPSocketAction describes an action based on opening a socket",
+    "required": [
+     "port"
+    ],
+    "properties": {
+     "host": {
+      "description": "Optional: Host name to connect to, defaults to the pod IP.",
+      "type": "string"
+     },
+     "port": {
+      "description": "Number or name of the port to access on the container. Number must be in the range 1 to 65535. Name must be an IANA_SVC_NAME.",
+      "type": [
+       "string",
+       "number"
+      ]
      }
     }
    },
@@ -5520,9 +5737,20 @@
    },
    "v1.VirtualMachineInstanceNetworkInterface": {
     "properties": {
+     "interfaceName": {
+      "description": "The interface name inside the Virtual Machine",
+      "type": "string"
+     },
      "ipAddress": {
       "description": "IP address of a Virtual Machine interface",
       "type": "string"
+     },
+     "ipAddresses": {
+      "description": "List of all IP addresses of a Virtual Machine interface",
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
      },
      "mac": {
       "description": "Hardware address of a Virtual Machine interface",
@@ -5707,6 +5935,10 @@
        "$ref": "#/definitions/v1.VirtualMachineInstanceReplicaSetCondition"
       }
      },
+     "labelSelector": {
+      "description": "Canonical form of the label selector for HPA which consumes it through the scale subresource.",
+      "type": "string"
+     },
      "readyReplicas": {
       "description": "The number of ready replicas for this replica set.\n+optional",
       "type": "integer",
@@ -5737,6 +5969,10 @@
       "description": "Specifies the hostname of the vmi\nIf not specified, the hostname will be set to the name of the vmi, if dhcp or cloud-init is configured properly.\n+optional",
       "type": "string"
      },
+     "livenessProbe": {
+      "description": "Periodic probe of VirtualMachineInstance liveness.\nVirtualmachineInstances will be stopped if the probe fails.\nCannot be updated.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
+      "$ref": "#/definitions/v1.Probe"
+     },
      "networks": {
       "description": "List of networks that can be attached to a vm's virtual interface.",
       "type": "array",
@@ -5747,6 +5983,10 @@
      "nodeSelector": {
       "description": "NodeSelector is a selector which must be true for the vmi to fit on a node.\nSelector which must match a node's labels for the vmi to be scheduled on that node.\nMore info: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/\n+optional",
       "type": "object"
+     },
+     "readinessProbe": {
+      "description": "Periodic probe of VirtualMachineInstance service readiness.\nVirtualmachineInstances will be removed from service endpoints if the probe fails.\nCannot be updated.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
+      "$ref": "#/definitions/v1.Probe"
      },
      "subdomain": {
       "description": "If specified, the fully qualified vmi hostname will be \"\u003chostname\u003e.\u003csubdomain\u003e.\u003cpod namespace\u003e.svc.\u003ccluster domain\u003e\".\nIf not specified, the vmi will not have a domainname at all. The DNS entry will resolve to the vmi,\nno matter if the vmi itself can pick up a hostname.\n+optional",
@@ -5789,6 +6029,10 @@
       "items": {
        "$ref": "#/definitions/v1.VirtualMachineInstanceNetworkInterface"
       }
+     },
+     "migrationMethod": {
+      "description": "Represents the method using which the vmi can be migrated: live migration or block migration",
+      "type": "string"
      },
      "migrationState": {
       "description": "Represents the status of a live migration",
@@ -5904,6 +6148,10 @@
       "description": "ConfigMapSource represents a reference to a ConfigMap in the same namespace.\nMore info: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/\n+optional",
       "$ref": "#/definitions/v1.ConfigMapVolumeSource"
      },
+     "containerDisk": {
+      "description": "ContainerDisk references a docker image, embedding a qcow or raw disk.\nMore info: https://kubevirt.gitbooks.io/user-guide/registry-disk.html\n+optional",
+      "$ref": "#/definitions/v1.ContainerDiskSource"
+     },
      "dataVolume": {
       "description": "DataVolume represents the dynamic creation a PVC for this volume as well as\nthe process of populating that PVC with a disk image.\n+optional",
       "$ref": "#/definitions/v1.DataVolumeSource"
@@ -5927,10 +6175,6 @@
      "persistentVolumeClaim": {
       "description": "PersistentVolumeClaimVolumeSource represents a reference to a PersistentVolumeClaim in the same namespace.\nDirectly attached to the vmi via qemu.\nMore info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#persistentvolumeclaims\n+optional",
       "$ref": "#/definitions/v1.PersistentVolumeClaimVolumeSource"
-     },
-     "registryDisk": {
-      "description": "RegistryDisk references a docker image, embedding a qcow or raw disk.\nMore info: https://kubevirt.gitbooks.io/user-guide/registry-disk.html\n+optional",
-      "$ref": "#/definitions/v1.RegistryDiskSource"
      },
      "secret": {
       "description": "SecretVolumeSource represents a reference to a secret data in the same namespace.\nMore info: https://kubernetes.io/docs/concepts/configuration/secret/\n+optional",
@@ -5991,6 +6235,7 @@
     }
    },
    "v1alpha1.DataVolume": {
+    "description": "DataVolume provides a representation of our data volume\n+genclient\n+k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object",
     "required": [
      "spec",
      "status"
@@ -6015,13 +6260,23 @@
      }
     }
    },
+   "v1alpha1.DataVolumeBlankImage": {
+    "description": "DataVolumeBlankImage provides the parameters to create a new raw blank image for the PVC"
+   },
    "v1alpha1.DataVolumeSource": {
+    "description": "DataVolumeSource represents the source for our Data Volume, this can be HTTP, S3, Registry or an existing PVC",
     "properties": {
+     "blank": {
+      "$ref": "#/definitions/v1alpha1.DataVolumeBlankImage"
+     },
      "http": {
       "$ref": "#/definitions/v1alpha1.DataVolumeSourceHTTP"
      },
      "pvc": {
       "$ref": "#/definitions/v1alpha1.DataVolumeSourcePVC"
+     },
+     "registry": {
+      "$ref": "#/definitions/v1alpha1.DataVolumeSourceRegistry"
      },
      "s3": {
       "$ref": "#/definitions/v1alpha1.DataVolumeSourceS3"
@@ -6032,16 +6287,20 @@
     }
    },
    "v1alpha1.DataVolumeSourceHTTP": {
+    "description": "DataVolumeSourceHTTP provides the parameters to create a Data Volume from an HTTP source",
     "properties": {
      "secretRef": {
+      "description": "SecretRef provides the secret reference needed to access the HTTP source",
       "type": "string"
      },
      "url": {
+      "description": "URL is the URL of the http source",
       "type": "string"
      }
     }
    },
    "v1alpha1.DataVolumeSourcePVC": {
+    "description": "DataVolumeSourcePVC provides the parameters to create a Data Volume from an existing PVC",
     "properties": {
      "name": {
       "type": "string"
@@ -6051,34 +6310,57 @@
      }
     }
    },
-   "v1alpha1.DataVolumeSourceS3": {
+   "v1alpha1.DataVolumeSourceRegistry": {
+    "description": "DataVolumeSourceRegistry provides the parameters to create a Data Volume from an registry source",
     "properties": {
      "secretRef": {
+      "description": "SecretRef provides the secret reference needed to access the Registry source",
       "type": "string"
      },
      "url": {
+      "description": "URL is the url of the Registry source",
       "type": "string"
      }
     }
    },
-   "v1alpha1.DataVolumeSourceUpload": {},
+   "v1alpha1.DataVolumeSourceS3": {
+    "description": "DataVolumeSourceS3 provides the parameters to create a Data Volume from an S3 source",
+    "properties": {
+     "secretRef": {
+      "description": "SecretRef provides the secret reference needed to access the S3 source",
+      "type": "string"
+     },
+     "url": {
+      "description": "URL is the url of the S3 source",
+      "type": "string"
+     }
+    }
+   },
+   "v1alpha1.DataVolumeSourceUpload": {
+    "description": "DataVolumeSourceUpload provides the parameters to create a Data Volume by uploading the source"
+   },
    "v1alpha1.DataVolumeSpec": {
+    "description": "DataVolumeSpec defines our specification for a DataVolume type",
     "required": [
      "source",
      "pvc"
     ],
     "properties": {
      "pvc": {
+      "description": "PVC is a pointer to the PVC Spec we want to use",
       "$ref": "#/definitions/v1.PersistentVolumeClaimSpec"
      },
      "source": {
+      "description": "Source is the src of the data for the requested DataVolume",
       "$ref": "#/definitions/v1alpha1.DataVolumeSource"
      }
     }
    },
    "v1alpha1.DataVolumeStatus": {
+    "description": "DataVolumeStatus provides the parameters to store the phase of the Data Volume",
     "properties": {
      "phase": {
+      "description": "Phase is the current phase of the data volume",
       "type": "string"
      }
     }
