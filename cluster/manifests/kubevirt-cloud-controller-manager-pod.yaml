@@ -13,7 +13,7 @@ spec:
     - --cloud-config=/etc/cloud/cloud-config
     - --use-service-account-credentials=true
     - --kubeconfig=/etc/kubernetes/controller-manager.conf
-    image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.4
+    image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.5
     resources:
       requests:
         cpu: 100m
