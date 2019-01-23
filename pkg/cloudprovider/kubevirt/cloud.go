@@ -31,12 +31,10 @@ func init() {
 
 		buf := new(bytes.Buffer)
 		buf.ReadFrom(config)
-		// TODO(dgonzalez): Replace by clientcmd.NewClientConfigFromBytes when updating client-go
-		apiConfig, err := clientcmd.Load(buf.Bytes())
+		clientConfig, err := clientcmd.NewClientConfigFromBytes(buf.Bytes())
 		if err != nil {
 			return nil, err
 		}
-		clientConfig := clientcmd.NewDefaultClientConfig(*apiConfig, &clientcmd.ConfigOverrides{})
 		kubernetesClient, kubevirtClient, err := createClients(clientConfig)
 		if err != nil {
 			return nil, err

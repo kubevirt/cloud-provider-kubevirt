@@ -27,7 +27,7 @@ const (
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (status *corev1.LoadBalancerStatus, exists bool, err error) {
-	lbName := cloudprovider.GetLoadBalancerName(service)
+	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
 	lbService, serviceExists, err := c.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
@@ -41,12 +41,18 @@ func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service
 	return status, true, nil
 }
 
+// GetLoadBalancerName is an implementation of LoadBalancer.GetLoadBalancerName.
+func (c *cloud) GetLoadBalancerName(ctx context.Context, clusterName string, service *corev1.Service) string {
+	// TODO: replace DefaultLoadBalancerName to generate more meaningful loadbalancer names.
+	return cloudprovider.DefaultLoadBalancerName(service)
+}
+
 // EnsureLoadBalancer creates a new load balancer 'name', or updates the existing one. Returns the status of the balancer
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
-	lbName := cloudprovider.GetLoadBalancerName(service)
+	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
 
 	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
@@ -97,7 +103,7 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
-	lbName := cloudprovider.GetLoadBalancerName(service)
+	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
 	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
@@ -120,7 +126,7 @@ func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, serv
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (c *cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
-	lbName := cloudprovider.GetLoadBalancerName(service)
+	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
 
 	lbService, lbExists, err := c.getLoadBalancerService(lbName)
 	if err != nil {
