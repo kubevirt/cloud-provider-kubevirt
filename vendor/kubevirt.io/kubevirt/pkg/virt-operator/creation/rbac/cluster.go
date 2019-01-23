@@ -191,8 +191,8 @@ func newAdminClusterRole() *rbacv1.ClusterRole {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kubevirt.io:admin",
 			Labels: map[string]string{
-				virtv1.AppLabel:                                "",
-				virtv1.ManagedByLabel:                          virtv1.ManagedByLabelOperatorValue,
+				virtv1.AppLabel:       "",
+				virtv1.ManagedByLabel: virtv1.ManagedByLabelOperatorValue,
 				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
 			},
 		},
@@ -204,10 +204,20 @@ func newAdminClusterRole() *rbacv1.ClusterRole {
 				Resources: []string{
 					"virtualmachineinstances/console",
 					"virtualmachineinstances/vnc",
-					"virtualmachines/restart",
 				},
 				Verbs: []string{
 					"get",
+				},
+			},
+			{
+				APIGroups: []string{
+					"subresources.kubevirt.io",
+				},
+				Resources: []string{
+					"virtualmachines/restart",
+				},
+				Verbs: []string{
+					"put", "update",
 				},
 			},
 			{
@@ -237,8 +247,8 @@ func newEditClusterRole() *rbacv1.ClusterRole {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kubevirt.io:edit",
 			Labels: map[string]string{
-				virtv1.AppLabel:                               "",
-				virtv1.ManagedByLabel:                         virtv1.ManagedByLabelOperatorValue,
+				virtv1.AppLabel:       "",
+				virtv1.ManagedByLabel: virtv1.ManagedByLabelOperatorValue,
 				"rbac.authorization.k8s.io/aggregate-to-edit": "true",
 			},
 		},
@@ -250,10 +260,20 @@ func newEditClusterRole() *rbacv1.ClusterRole {
 				Resources: []string{
 					"virtualmachineinstances/console",
 					"virtualmachineinstances/vnc",
-					"virtualmachines/restart",
 				},
 				Verbs: []string{
 					"get",
+				},
+			},
+			{
+				APIGroups: []string{
+					"subresources.kubevirt.io",
+				},
+				Resources: []string{
+					"virtualmachines/restart",
+				},
+				Verbs: []string{
+					"put", "update",
 				},
 			},
 			{
@@ -283,8 +303,8 @@ func newViewClusterRole() *rbacv1.ClusterRole {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kubevirt.io:view",
 			Labels: map[string]string{
-				virtv1.AppLabel:                               "",
-				virtv1.ManagedByLabel:                         virtv1.ManagedByLabelOperatorValue,
+				virtv1.AppLabel:       "",
+				virtv1.ManagedByLabel: virtv1.ManagedByLabelOperatorValue,
 				"rbac.authorization.k8s.io/aggregate-to-view": "true",
 			},
 		},

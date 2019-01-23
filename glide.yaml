@@ -2,27 +2,27 @@ package: github.com/gonzolino/cloud-provider-kubevirt
 import:
 - package: github.com/spf13/pflag
 - package: k8s.io/api
-  version: kubernetes-1.11.4
+  version: kubernetes-1.12.4
   subpackages:
   - core/v1
 - package: k8s.io/apimachinery
-  version: kubernetes-1.11.4
+  version: kubernetes-1.12.4
   subpackages:
   - pkg/types
 - package: k8s.io/apiserver
-  version: kubernetes-1.11.4
+  version: kubernetes-1.12.4
   subpackages:
   - pkg/util/flag
   - pkg/util/logs
 - package: k8s.io/apiextensions-apiserver
-  version: kubernetes-1.11.4
+  version: kubernetes-1.12.4
 - package: k8s.io/client-go
-  version: kubernetes-1.11.4
+  version: kubernetes-1.12.4
   subpackages:
   - rest
   - tools/clientcmd
 - package: k8s.io/kubernetes
-  version: v1.11.4
+  version: v1.12.4
   subpackages:
   - cmd/cloud-controller-manager/app
   - pkg/client/metrics/prometheus
@@ -30,7 +30,7 @@ import:
   - pkg/controller
   - pkg/version/prometheus
 - package: kubevirt.io/kubevirt
-  version: v0.13.0
+  version: 2f1714d09a97ec66f4a5e8674e1ba464398495c4
   subpackages:
   - pkg/kubecli
 - package: github.com/gorilla/websocket

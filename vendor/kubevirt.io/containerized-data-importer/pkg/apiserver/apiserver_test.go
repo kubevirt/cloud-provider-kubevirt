@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	restful "github.com/emicklei/go-restful"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/cert/triple"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +24,7 @@ import (
 	apiregistrationv1beta1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1"
 	aggregatorapifake "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/fake"
 
-	uploadv1alpha1 "kubevirt.io/containerized-data-importer/pkg/apis/uploadcontroller/v1alpha1"
+	cdiuploadv1alpha1 "kubevirt.io/containerized-data-importer/pkg/apis/upload/v1alpha1"
 	"kubevirt.io/containerized-data-importer/pkg/keys/keystest"
 )
 
@@ -79,7 +79,7 @@ func getAPIServerConfigMap(t *testing.T) *v1.ConfigMap {
 	return &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "extension-apiserver-authentication",
-			Namespace: "kube-system",
+			Namespace: "cdi",
 		},
 		Data: map[string]string{
 			"client-ca-file":                     "bunchofbytes",
@@ -122,7 +122,7 @@ func apiServerConfigMapGetAction() core.Action {
 			Resource: "configmaps",
 			Version:  "v1",
 		},
-		"kube-system",
+		"cdi",
 		"extension-apiserver-authentication")
 }
 
@@ -132,18 +132,18 @@ func signingKeySecretGetAction() core.Action {
 			Resource: "secrets",
 			Version:  "v1",
 		},
-		"kube-system",
+		"cdi",
 		apiSigningKeySecretName)
 }
 
 func signingKeySecretCreateAction(privateKey *rsa.PrivateKey) core.Action {
-	secret, _ := keystest.NewPrivateKeySecret("kube-system", apiSigningKeySecretName, privateKey)
+	secret, _ := keystest.NewPrivateKeySecret("cdi", apiSigningKeySecretName, privateKey)
 	return core.NewCreateAction(
 		schema.GroupVersionResource{
 			Resource: "secrets",
 			Version:  "v1",
 		},
-		"kube-system",
+		"cdi",
 		secret)
 }
 
@@ -153,7 +153,7 @@ func tlsSecretGetAction() core.Action {
 			Resource: "secrets",
 			Version:  "v1",
 		},
-		"kube-system",
+		"cdi",
 		apiCertSecretName)
 }
 
@@ -163,8 +163,8 @@ func tlsSecretCreateAction(privateKeyBytes, certBytes, caCertBytes []byte) core.
 			Resource: "secrets",
 			Version:  "v1",
 		},
-		"kube-system",
-		keystest.NewTLSSecretFromBytes("kube-system", apiCertSecretName, privateKeyBytes, certBytes, caCertBytes, nil))
+		"cdi",
+		keystest.NewTLSSecretFromBytes("cdi", apiCertSecretName, privateKeyBytes, certBytes, caCertBytes, nil))
 }
 
 func apiServiceGetAction() core.Action {
@@ -186,7 +186,7 @@ func getExpectedAPIService(certBytes []byte) *apiregistrationv1beta1.APIService 
 		},
 		Spec: apiregistrationv1beta1.APIServiceSpec{
 			Service: &apiregistrationv1beta1.ServiceReference{
-				Namespace: "kube-system",
+				Namespace: "cdi",
 				Name:      "cdi-api",
 			},
 			Group:                "upload.cdi.kubevirt.io",
@@ -339,7 +339,7 @@ func TestNewCdiAPIServer(t *testing.T) {
 
 	server, err := NewCdiAPIServer("0.0.0.0", 0, client, aggregatorClient, authorizer)
 	if err != nil {
-		t.Errorf("Createion upload api server creation failed: %+v", err)
+		t.Errorf("Upload api server creation failed: %+v", err)
 	}
 
 	app := server.(*cdiAPIApp)
@@ -365,17 +365,17 @@ func TestGetSelfSignedCert(t *testing.T) {
 		t.Errorf("Error creating CA key pair")
 	}
 
-	serverKeyPair, err := triple.NewServerKeyPair(caKeyPair, "commonname", "service", "kube-system", "cluster.local", []string{}, []string{})
+	serverKeyPair, err := triple.NewServerKeyPair(caKeyPair, "commonname", "service", "cdi", "cluster.local", []string{}, []string{})
 	if err != nil {
 		t.Errorf("Error creating server key pair")
 	}
 
-	signingKeySecret, err := keystest.NewPrivateKeySecret("kube-system", apiSigningKeySecretName, signingKey)
+	signingKeySecret, err := keystest.NewPrivateKeySecret("cdi", apiSigningKeySecretName, signingKey)
 	if err != nil {
 		t.Errorf("error creating secret: %v", err)
 	}
 
-	tlsSecret := keystest.NewTLSSecret("kube-system", apiCertSecretName, serverKeyPair, caKeyPair.Cert, nil)
+	tlsSecret := keystest.NewTLSSecret("cdi", apiCertSecretName, serverKeyPair, caKeyPair.Cert, nil)
 
 	kubeobjects := []runtime.Object{}
 	kubeobjects = append(kubeobjects, tlsSecret)
@@ -488,7 +488,7 @@ func TestGetAPIResouceList(t *testing.T) {
 		APIResources: []metav1.APIResource{
 			{
 				Name:         "uploadtokenrequests",
-				SingularName: "UploadtokenRequest",
+				SingularName: "uploadtokenrequest",
 				Namespaced:   true,
 				Group:        "upload.cdi.kubevirt.io",
 				Version:      "v1alpha1",
@@ -549,12 +549,12 @@ func TestGetToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	request := &uploadv1alpha1.UploadTokenRequest{
+	request := &cdiuploadv1alpha1.UploadTokenRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-token",
 			Namespace: "default",
 		},
-		Spec: uploadv1alpha1.UploadTokenRequestSpec{
+		Spec: cdiuploadv1alpha1.UploadTokenRequestSpec{
 			PvcName: "test-pvc",
 		},
 	}
@@ -651,7 +651,7 @@ func TestGetToken(t *testing.T) {
 			}
 
 			if test.checkToken {
-				uploadTokenRequest := &uploadv1alpha1.UploadTokenRequest{}
+				uploadTokenRequest := &cdiuploadv1alpha1.UploadTokenRequest{}
 				err := json.Unmarshal(rr.Body.Bytes(), &uploadTokenRequest)
 				if err != nil {
 					tt.Fatalf("Deserializing UploadTokenRequest failed: %+v", err)
