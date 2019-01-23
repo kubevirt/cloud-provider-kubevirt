@@ -12,7 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/cloudprovider"
+	"kubevirt.io/kubevirt/pkg/kubecli"
 )
 
 const (
@@ -22,13 +24,19 @@ const (
 	loadBalancerCreatePollIntervalSeconds = 5
 )
 
+type loadbalancer struct {
+	namespace  string
+	kubernetes kubernetes.Clientset
+	kubevirt   kubecli.KubevirtClient
+}
+
 // GetLoadBalancer returns whether the specified load balancer exists, and
 // if so, what its status is.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (status *corev1.LoadBalancerStatus, exists bool, err error) {
-	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
-	lbService, serviceExists, err := c.getLoadBalancerService(lbName)
+func (lb *loadbalancer) GetLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service) (status *corev1.LoadBalancerStatus, exists bool, err error) {
+	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
+	lbService, serviceExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, false, err
@@ -42,7 +50,7 @@ func (c *cloud) GetLoadBalancer(ctx context.Context, clusterName string, service
 }
 
 // GetLoadBalancerName is an implementation of LoadBalancer.GetLoadBalancerName.
-func (c *cloud) GetLoadBalancerName(ctx context.Context, clusterName string, service *corev1.Service) string {
+func (lb *loadbalancer) GetLoadBalancerName(ctx context.Context, clusterName string, service *corev1.Service) string {
 	// TODO: replace DefaultLoadBalancerName to generate more meaningful loadbalancer names.
 	return cloudprovider.DefaultLoadBalancerName(service)
 }
@@ -51,16 +59,16 @@ func (c *cloud) GetLoadBalancerName(ctx context.Context, clusterName string, ser
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
-	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
+func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
+	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 
-	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
+	err := lb.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return nil, err
 	}
 
-	lbService, lbExists, err := c.getLoadBalancerService(lbName)
+	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, err
@@ -69,7 +77,7 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 		return &lbService.Status.LoadBalancer, nil
 	}
 
-	lbService, err = c.createLoadBalancerService(lbName, service)
+	lbService, err = lb.createLoadBalancerService(lbName, service)
 	if err != nil {
 		glog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
@@ -79,7 +87,7 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 		if len(lbService.Status.LoadBalancer.Ingress) != 0 {
 			return true, nil
 		}
-		service, exists, err := c.getLoadBalancerService(lbName)
+		service, exists, err := lb.getLoadBalancerService(lbName)
 		if err != nil {
 			glog.Errorf("Failed to get LoadBalancer service: %v", err)
 			return false, err
@@ -102,14 +110,14 @@ func (c *cloud) EnsureLoadBalancer(ctx context.Context, clusterName string, serv
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
-	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
-	err := c.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
+func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
+	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
+	err := lb.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return err
 	}
-	err = c.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
+	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -125,23 +133,23 @@ func (c *cloud) UpdateLoadBalancer(ctx context.Context, clusterName string, serv
 // doesn't exist even if some part of it is still laying around.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (c *cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
-	lbName := c.GetLoadBalancerName(ctx, clusterName, service)
+func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
+	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 
-	lbService, lbExists, err := c.getLoadBalancerService(lbName)
+	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
 		glog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return err
 	}
 	if lbExists {
-		err = c.kubernetes.CoreV1().Services(c.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
+		err = lb.kubernetes.CoreV1().Services(lb.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
 		if err != nil {
 			glog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
 		}
 	}
 
-	err = c.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
+	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
 	if err != nil {
 		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
@@ -150,8 +158,8 @@ func (c *cloud) EnsureLoadBalancerDeleted(ctx context.Context, clusterName strin
 	return nil
 }
 
-func (c *cloud) getLoadBalancerService(lbName string) (*corev1.Service, bool, error) {
-	service, err := c.kubernetes.CoreV1().Services(c.namespace).Get(lbName, metav1.GetOptions{})
+func (lb *loadbalancer) getLoadBalancerService(lbName string) (*corev1.Service, bool, error) {
+	service, err := lb.kubernetes.CoreV1().Services(lb.namespace).Get(lbName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, false, nil
@@ -161,7 +169,7 @@ func (c *cloud) getLoadBalancerService(lbName string) (*corev1.Service, bool, er
 	return service, true, nil
 }
 
-func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service) (*corev1.Service, error) {
+func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1.Service) (*corev1.Service, error) {
 	ports := make([]corev1.ServicePort, len(service.Spec.Ports))
 	for i, port := range service.Spec.Ports {
 		ports[i].Name = port.Name
@@ -176,7 +184,7 @@ func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lbName,
-			Namespace: c.namespace,
+			Namespace: lb.namespace,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:    ports,
@@ -194,7 +202,7 @@ func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service
 		lbService.Spec.HealthCheckNodePort = service.Spec.HealthCheckNodePort
 	}
 
-	lbService, err := c.kubernetes.CoreV1().Services(c.namespace).Create(lbService)
+	lbService, err := lb.kubernetes.CoreV1().Services(lb.namespace).Create(lbService)
 	if err != nil {
 		glog.Errorf("Failed to create LB %s: %v", lbName, err)
 		return nil, err
@@ -202,9 +210,9 @@ func (c *cloud) createLoadBalancerService(lbName string, service *corev1.Service
 	return lbService, nil
 }
 
-func (c *cloud) applyServiceLabels(lbName, serviceName string, nodes []*corev1.Node) error {
+func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
-	allVmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&metav1.ListOptions{})
+	allVmis, err := lb.kubevirt.VirtualMachineInstance(lb.namespace).List(&metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
@@ -214,7 +222,7 @@ func (c *cloud) applyServiceLabels(lbName, serviceName string, nodes []*corev1.N
 	for _, vmi := range allVmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; ok {
 			vmi.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
+			_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
 			if err != nil {
 				glog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			} else {
@@ -228,12 +236,12 @@ func (c *cloud) applyServiceLabels(lbName, serviceName string, nodes []*corev1.N
 	listOptions := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("kubevirt.io/created-by in (%s)", strings.Join(vmiUIDs, ", ")),
 	}
-	vmiPods, err := c.kubernetes.CoreV1().Pods(c.namespace).List(listOptions)
+	vmiPods, err := lb.kubernetes.CoreV1().Pods(lb.namespace).List(listOptions)
 
 	// Apply labels to all found pods
 	for _, pod := range vmiPods.Items {
 		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-		_, err = c.kubernetes.CoreV1().Pods(c.namespace).Update(&pod)
+		_, err = lb.kubernetes.CoreV1().Pods(lb.namespace).Update(&pod)
 		if err != nil {
 			glog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
 		}
@@ -241,16 +249,16 @@ func (c *cloud) applyServiceLabels(lbName, serviceName string, nodes []*corev1.N
 	return nil
 }
 
-func (c *cloud) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
+func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
 	listOptions := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s", serviceLabelKey(lbName), svcName),
 	}
-	vmis, err := c.kubevirt.VirtualMachineInstance(c.namespace).List(&listOptions)
+	vmis, err := lb.kubevirt.VirtualMachineInstance(lb.namespace).List(&listOptions)
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
-	pods, err := c.kubernetes.CoreV1().Pods(c.namespace).List(listOptions)
+	pods, err := lb.kubernetes.CoreV1().Pods(lb.namespace).List(listOptions)
 	if err != nil {
 		return fmt.Errorf("Failed to list pods: %v", err)
 	}
@@ -260,7 +268,7 @@ func (c *cloud) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*core
 	for _, vmi := range vmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; !ok {
 			delete(vmi.ObjectMeta.Labels, serviceLabelKey(lbName))
-			_, err = c.kubevirt.VirtualMachineInstance(c.namespace).Update(&vmi)
+			_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
 			if err != nil {
 				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			}
@@ -271,7 +279,7 @@ func (c *cloud) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*core
 		if podCreatedBy, ok := pod.ObjectMeta.Labels["kubevirt.io/created-by"]; ok {
 			if _, ok := vmiUIDs[podCreatedBy]; ok {
 				delete(pod.ObjectMeta.Labels, serviceLabelKey(lbName))
-				_, err = c.kubernetes.CoreV1().Pods(c.namespace).Update(&pod)
+				_, err = lb.kubernetes.CoreV1().Pods(lb.namespace).Update(&pod)
 				if err != nil {
 					return fmt.Errorf("Failed to update pod: %s: %v", pod.ObjectMeta.Name, err)
 				}

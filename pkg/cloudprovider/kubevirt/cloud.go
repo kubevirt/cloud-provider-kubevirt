@@ -78,17 +78,28 @@ func (c *cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {}
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return c, true
+	return &loadbalancer{
+		namespace:  c.namespace,
+		kubernetes: c.kubernetes,
+		kubevirt:   c.kubevirt,
+	}, true
 }
 
 // Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
-	return c, true
+	return &instances{
+		namespace: c.namespace,
+		kubevirt:  c.kubevirt,
+	}, true
 }
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	return c, true
+	return &zones{
+		namespace:  c.namespace,
+		kubernetes: c.kubernetes,
+		kubevirt:   c.kubevirt,
+	}, true
 }
 
 // Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.
