@@ -48,5 +48,3 @@ spec:
       path: /etc/kubernetes/cloud-config
       type: FileOrCreate
     name: cloud-config
-  securityContext:
-    runAsUser: 1001

@@ -63,8 +63,6 @@ spec:
         name: cloud-config
       nodeSelector:
         node-role.kubernetes.io/master: ""
-      securityContext:
-        runAsUser: 1001
       tolerations:
       - key: node.cloudprovider.kubernetes.io/uninitialized
         value: "true"

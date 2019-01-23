@@ -18,7 +18,7 @@ bin:
 	mkdir bin
 
 .PHONY: build
-build: deps-install bin
+build: bin
 	GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
 .PHONY:image
