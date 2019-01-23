@@ -21,7 +21,7 @@ const (
 )
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
-var providerIDRegexp = regexp.MustCompile(`^` + providerName + `://(\w+)$`)
+var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://(\w+)$`)
 
 // NodeAddresses returns the addresses of the specified instance.
 // TODO(roberthbailey): This currently is only used in such a way that it
@@ -222,7 +222,7 @@ func instanceIDsFromNodes(nodes []*corev1.Node) []string {
 func instanceIDFromProviderID(providerID string) (instanceID string, err error) {
 	matches := providerIDRegexp.FindStringSubmatch(providerID)
 	if len(matches) != 2 {
-		return "", fmt.Errorf("ProviderID \"%s\" didn't match expected format \"%s://InstanceID\"", providerID, providerName)
+		return "", fmt.Errorf("ProviderID \"%s\" didn't match expected format \"%s://InstanceID\"", providerID, ProviderName)
 	}
 	return matches[1], nil
 }

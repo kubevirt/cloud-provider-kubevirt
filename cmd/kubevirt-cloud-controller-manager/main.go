@@ -26,34 +26,79 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/gonzolino/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt"
-	utilflag "k8s.io/apiserver/pkg/util/flag"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apiserver/pkg/server/healthz"
+	"k8s.io/apiserver/pkg/util/flag"
 	"k8s.io/apiserver/pkg/util/logs"
 	"k8s.io/kubernetes/cmd/cloud-controller-manager/app"
+	"k8s.io/kubernetes/cmd/cloud-controller-manager/app/options"
 	_ "k8s.io/kubernetes/pkg/client/metrics/prometheus" // for client metric registration
-
+	_ "k8s.io/kubernetes/pkg/features"                  // add the kubernetes feature gates
+	utilflag "k8s.io/kubernetes/pkg/util/flag"
 	_ "k8s.io/kubernetes/pkg/version/prometheus" // for version metric registration
+	"k8s.io/kubernetes/pkg/version/verflag"
 
+	"github.com/gonzolino/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt"
+
+	"github.com/golang/glog"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+var version string
+
+func init() {
+	healthz.DefaultHealthz()
+}
 
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	// Needed to remove ERROR prefixes in log messages
 	goflag.CommandLine.Parse([]string{})
+	s, err := options.NewCloudControllerManagerOptions()
+	if err != nil {
+		glog.Fatalf("unable to initialize command options: %v", err)
+	}
 
-	command := app.NewCloudControllerManagerCommand()
+	command := &cobra.Command{
+		Use: "kubevirt-cloud-controller-manager",
+		Long: `The Cloud controller manager is a daemon that embeds
+the cloud specific control loops shipped with Kubernetes.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			verflag.PrintAndExitIfRequested()
+			utilflag.PrintFlags(cmd.Flags())
+
+			c, err := s.Config()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(1)
+			}
+
+			if err := app.Run(c.Complete(), wait.NeverStop); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+
+	fs := command.Flags()
+	namedFlagSets := s.Flags()
+	for _, f := range namedFlagSets.FlagSets {
+		fs.AddFlagSet(f)
+	}
 
 	// TODO: once we switch everything over to Cobra commands, we can go back to calling
 	// utilflag.InitFlags() (by removing its pflag.Parse() call). For now, we have to set the
 	// normalize func and add the go flag set by hand.
-	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
+	pflag.CommandLine.SetNormalizeFunc(flag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 	// utilflag.InitFlags()
 	logs.InitLogs()
 	defer logs.FlushLogs()
 
+	glog.V(1).Infof("kubevirt-cloud-controller-manager version: %s", version)
+
+	s.KubeCloudShared.CloudProvider.Name = kubevirt.ProviderName
 	if err := command.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

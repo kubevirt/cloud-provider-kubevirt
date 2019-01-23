@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	providerName = "kubevirt"
+	// ProviderName is the name of the kubevirt provider
+	ProviderName = "kubevirt"
 )
 
 type cloud struct {
@@ -24,9 +25,9 @@ type cloud struct {
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(providerName, func(config io.Reader) (cloudprovider.Interface, error) {
+	cloudprovider.RegisterCloudProvider(ProviderName, func(config io.Reader) (cloudprovider.Interface, error) {
 		if config == nil {
-			return nil, fmt.Errorf("No %s cloud provider config file given", providerName)
+			return nil, fmt.Errorf("No %s cloud provider config file given", ProviderName)
 		}
 
 		buf := new(bytes.Buffer)
@@ -102,7 +103,7 @@ func (c *cloud) Routes() (cloudprovider.Routes, bool) {
 
 // ProviderName returns the cloud provider ID.
 func (c *cloud) ProviderName() string {
-	return providerName
+	return ProviderName
 }
 
 // HasClusterID returns true if a ClusterID is required and set
