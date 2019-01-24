@@ -12,7 +12,7 @@ metadata:
   labels:
     k8s-app: kubevirt-cloud-controller-manager
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       k8s-app: kubevirt-cloud-controller-manager
