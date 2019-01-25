@@ -28,7 +28,7 @@ type instances struct {
 }
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
-var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://(\w+)$`)
+var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_-]+)$`)
 
 // NodeAddresses returns the addresses of the specified instance.
 // TODO(roberthbailey): This currently is only used in such a way that it
