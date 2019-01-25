@@ -34,7 +34,7 @@ func (z *zones) GetZoneByProviderID(ctx context.Context, providerID string) (clo
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
 		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, z.namespace, err)
-		return cloudprovider.Zone{}, cloudprovider.InstanceNotFound
+		return cloudprovider.Zone{}, err
 	}
 	return z.getZoneByInstanceID(ctx, instanceID)
 }
@@ -51,7 +51,7 @@ func (z *zones) getZoneByInstanceID(ctx context.Context, instanceID string) (clo
 	vmi, err := z.kubevirt.VirtualMachineInstance(z.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
 		glog.Errorf("Failed to get instance with name %s in namespace %s: %v", instanceID, z.namespace, err)
-		return cloudprovider.Zone{}, cloudprovider.InstanceNotFound
+		return cloudprovider.Zone{}, err
 	}
 
 	nodeName := vmi.Status.NodeName
