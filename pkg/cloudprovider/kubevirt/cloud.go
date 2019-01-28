@@ -23,32 +23,34 @@ type cloud struct {
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(ProviderName, func(config io.Reader) (cloudprovider.Interface, error) {
-		if config == nil {
-			return nil, fmt.Errorf("No %s cloud provider config file given", ProviderName)
-		}
+	cloudprovider.RegisterCloudProvider(ProviderName, kubevirtCloudProviderFactory)
+}
 
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(config)
-		clientConfig, err := clientcmd.NewClientConfigFromBytes(buf.Bytes())
-		if err != nil {
-			return nil, err
-		}
-		kubevirt, err := kubecli.GetKubevirtClientFromClientConfig(clientConfig)
-		if err != nil {
-			glog.Errorf("Failed to create KubeVirt client: %v", err)
-			return nil, err
-		}
-		namespace, _, err := clientConfig.Namespace()
-		if err != nil {
-			glog.Errorf("Could not find namespace in client config: %v", err)
-			return nil, err
-		}
-		return &cloud{
-			namespace: namespace,
-			kubevirt:  kubevirt,
-		}, nil
-	})
+func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, error) {
+	if config == nil {
+		return nil, fmt.Errorf("No %s cloud provider config file given", ProviderName)
+	}
+
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(config)
+	clientConfig, err := clientcmd.NewClientConfigFromBytes(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	kubevirtClient, err := kubecli.GetKubevirtClientFromClientConfig(clientConfig)
+	if err != nil {
+		glog.Errorf("Failed to create KubeVirt client: %v", err)
+		return nil, err
+	}
+	namespace, _, err := clientConfig.Namespace()
+	if err != nil {
+		glog.Errorf("Could not find namespace in client config: %v", err)
+		return nil, err
+	}
+	return &cloud{
+		namespace: namespace,
+		kubevirt:  kubevirtClient,
+	}, nil
 }
 
 // Initialize provides the cloud with a kubernetes client builder and may spawn goroutines

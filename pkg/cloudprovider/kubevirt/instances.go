@@ -60,26 +60,33 @@ func (i *instances) nodeAddressesByInstanceID(ctx context.Context, instanceID st
 	}
 	addresses := []corev1.NodeAddress{}
 
+	var hostname string
 	if vmi.Spec.Hostname != "" {
-		v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
-			Type:    corev1.NodeHostName,
-			Address: vmi.Spec.Hostname,
-		})
+		hostname = vmi.Spec.Hostname
 	} else {
-		v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
-			Type:    corev1.NodeHostName,
-			Address: vmi.ObjectMeta.Name,
-		})
+		hostname = vmi.ObjectMeta.Name
 	}
+	v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
+		Type:    corev1.NodeHostName,
+		Address: hostname,
+	})
 
 	for _, netIface := range vmi.Status.Interfaces {
 		// TODO(dgonzalez): We currently assume that all IPs assigned to interfaces
 		// are internal IP addresses. In the future this function must be extended
 		// to detect the type of the address properly.
-		v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
-			Type:    corev1.NodeInternalIP,
-			Address: netIface.IP,
-		})
+		if netIface.IP != "" {
+			v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
+				Type:    corev1.NodeInternalIP,
+				Address: netIface.IP,
+			})
+		}
+		for _, ip := range netIface.IPs {
+			v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
+				Type:    corev1.NodeInternalIP,
+				Address: ip,
+			})
+		}
 	}
 	return addresses, nil
 }
@@ -161,10 +168,17 @@ func (i *instances) CurrentNodeName(ctx context.Context, hostname string) (types
 		return "", err
 	}
 
+	hostnameFromVMIName := types.NodeName("") // try to find a VMI name matching the hostname in case a VMI has set no Hostname
 	for _, vmi := range vmis.Items {
 		if vmi.Spec.Hostname == hostname {
 			return types.NodeName(vmi.ObjectMeta.Name), nil
 		}
+		if vmi.ObjectMeta.Name == hostname {
+			hostnameFromVMIName = types.NodeName(vmi.ObjectMeta.Name)
+		}
+	}
+	if hostnameFromVMIName != "" {
+		return hostnameFromVMIName, nil
 	}
 	glog.Errorf("Failed to find node name for host %s", hostname)
 	return "", cloudprovider.InstanceNotFound
@@ -194,13 +208,13 @@ func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID s
 func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
-		// Retry getting instanceID with the node name if we do not have a valid providerID
-		instanceID = instanceIDFromNodeName(providerID)
+		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
+		return false, err
 	}
 	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return false, nil
+			return false, cloudprovider.InstanceNotFound
 		}
 		glog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
 		return false, err
