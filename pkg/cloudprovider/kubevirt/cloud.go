@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/golang/glog"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/controller"
@@ -19,9 +18,8 @@ const (
 )
 
 type cloud struct {
-	namespace  string
-	kubernetes kubernetes.Clientset
-	kubevirt   kubecli.KubevirtClient
+	namespace string
+	kubevirt  kubecli.KubevirtClient
 }
 
 func init() {
@@ -36,8 +34,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		kubernetesClient, kubevirtClient, err := createClients(clientConfig)
+		kubevirt, err := kubecli.GetKubevirtClientFromClientConfig(clientConfig)
 		if err != nil {
+			glog.Errorf("Failed to create KubeVirt client: %v", err)
 			return nil, err
 		}
 		namespace, _, err := clientConfig.Namespace()
@@ -46,30 +45,10 @@ func init() {
 			return nil, err
 		}
 		return &cloud{
-			namespace:  namespace,
-			kubernetes: *kubernetesClient,
-			kubevirt:   *kubevirtClient,
+			namespace: namespace,
+			kubevirt:  kubevirt,
 		}, nil
 	})
-}
-
-func createClients(clientConfig clientcmd.ClientConfig) (*kubernetes.Clientset, *kubecli.KubevirtClient, error) {
-	restConfig, err := clientConfig.ClientConfig()
-	if err != nil {
-		glog.Errorf("Failed to build REST config: %v", err)
-		return nil, nil, err
-	}
-	kubernetesClient, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		glog.Errorf("Failed to create Kubernetes client: %v", err)
-		return nil, nil, err
-	}
-	kubevirtClient, err := kubecli.GetKubevirtClientFromRESTConfig(restConfig)
-	if err != nil {
-		glog.Errorf("Failed to create KubeVirt client: %v", err)
-		return nil, nil, err
-	}
-	return kubernetesClient, &kubevirtClient, nil
 }
 
 // Initialize provides the cloud with a kubernetes client builder and may spawn goroutines
@@ -79,9 +58,8 @@ func (c *cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {}
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	return &loadbalancer{
-		namespace:  c.namespace,
-		kubernetes: c.kubernetes,
-		kubevirt:   c.kubevirt,
+		namespace: c.namespace,
+		kubevirt:  c.kubevirt,
 	}, true
 }
 
@@ -96,9 +74,8 @@ func (c *cloud) Instances() (cloudprovider.Instances, bool) {
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
 	return &zones{
-		namespace:  c.namespace,
-		kubernetes: c.kubernetes,
-		kubevirt:   c.kubevirt,
+		namespace: c.namespace,
+		kubevirt:  c.kubevirt,
 	}, true
 }
 

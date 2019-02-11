@@ -7,16 +7,14 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 )
 
 type zones struct {
-	namespace  string
-	kubernetes kubernetes.Clientset
-	kubevirt   kubecli.KubevirtClient
+	namespace string
+	kubevirt  kubecli.KubevirtClient
 }
 
 // GetZone returns the Zone containing the current failure zone and locality region that the program is running in
@@ -55,7 +53,7 @@ func (z *zones) getZoneByInstanceID(ctx context.Context, instanceID string) (clo
 	}
 
 	nodeName := vmi.Status.NodeName
-	node, err := z.kubernetes.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	node, err := z.kubevirt.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 	if err != nil {
 		glog.Errorf("Failed to get node %s: %v", nodeName, err)
 		return cloudprovider.Zone{}, err

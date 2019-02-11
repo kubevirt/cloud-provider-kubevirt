@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 )
@@ -25,9 +24,8 @@ const (
 )
 
 type loadbalancer struct {
-	namespace  string
-	kubernetes kubernetes.Clientset
-	kubevirt   kubecli.KubevirtClient
+	namespace string
+	kubevirt  kubecli.KubevirtClient
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -142,7 +140,7 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		return err
 	}
 	if lbExists {
-		err = lb.kubernetes.CoreV1().Services(lb.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
+		err = lb.kubevirt.CoreV1().Services(lb.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
 		if err != nil {
 			glog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
@@ -159,7 +157,7 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 }
 
 func (lb *loadbalancer) getLoadBalancerService(lbName string) (*corev1.Service, bool, error) {
-	service, err := lb.kubernetes.CoreV1().Services(lb.namespace).Get(lbName, metav1.GetOptions{})
+	service, err := lb.kubevirt.CoreV1().Services(lb.namespace).Get(lbName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, false, nil
@@ -202,7 +200,7 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 		lbService.Spec.HealthCheckNodePort = service.Spec.HealthCheckNodePort
 	}
 
-	lbService, err := lb.kubernetes.CoreV1().Services(lb.namespace).Create(lbService)
+	lbService, err := lb.kubevirt.CoreV1().Services(lb.namespace).Create(lbService)
 	if err != nil {
 		glog.Errorf("Failed to create LB %s: %v", lbName, err)
 		return nil, err
@@ -236,12 +234,12 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 	listOptions := metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("kubevirt.io/created-by in (%s)", strings.Join(vmiUIDs, ", ")),
 	}
-	vmiPods, err := lb.kubernetes.CoreV1().Pods(lb.namespace).List(listOptions)
+	vmiPods, err := lb.kubevirt.CoreV1().Pods(lb.namespace).List(listOptions)
 
 	// Apply labels to all found pods
 	for _, pod := range vmiPods.Items {
 		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-		_, err = lb.kubernetes.CoreV1().Pods(lb.namespace).Update(&pod)
+		_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Update(&pod)
 		if err != nil {
 			glog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
 		}
@@ -258,7 +256,7 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
-	pods, err := lb.kubernetes.CoreV1().Pods(lb.namespace).List(listOptions)
+	pods, err := lb.kubevirt.CoreV1().Pods(lb.namespace).List(listOptions)
 	if err != nil {
 		return fmt.Errorf("Failed to list pods: %v", err)
 	}
@@ -279,7 +277,7 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes
 		if podCreatedBy, ok := pod.ObjectMeta.Labels["kubevirt.io/created-by"]; ok {
 			if _, ok := vmiUIDs[podCreatedBy]; ok {
 				delete(pod.ObjectMeta.Labels, serviceLabelKey(lbName))
-				_, err = lb.kubernetes.CoreV1().Pods(lb.namespace).Update(&pod)
+				_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Update(&pod)
 				if err != nil {
 					return fmt.Errorf("Failed to update pod: %s: %v", pod.ObjectMeta.Name, err)
 				}
