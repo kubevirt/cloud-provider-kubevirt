@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -65,6 +66,11 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return nil, err
 	}
+	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
+	if err != nil {
+		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
+		return nil, err
+	}
 
 	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
@@ -72,6 +78,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, err
 	}
 	if lbExists {
+		if !equality.Semantic.DeepEqual(service.Spec.Ports, lbService.Spec.Ports) {
+			lbService.Spec.Ports = lb.createLoadBalancerServicePorts(service)
+			lb.kubevirt.CoreV1().Services(lb.namespace).Update(lbService)
+		}
 		return &lbService.Status.LoadBalancer, nil
 	}
 
@@ -168,17 +178,7 @@ func (lb *loadbalancer) getLoadBalancerService(lbName string) (*corev1.Service, 
 }
 
 func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1.Service) (*corev1.Service, error) {
-	ports := make([]corev1.ServicePort, len(service.Spec.Ports))
-	for i, port := range service.Spec.Ports {
-		ports[i].Name = port.Name
-		ports[i].Protocol = port.Protocol
-		ports[i].Port = port.Port
-		ports[i].TargetPort = intstr.IntOrString{
-			Type:   intstr.Int,
-			IntVal: port.NodePort,
-		}
-	}
-
+	ports := lb.createLoadBalancerServicePorts(service)
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lbName,
@@ -206,6 +206,20 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 		return nil, err
 	}
 	return lbService, nil
+}
+
+func (lb *loadbalancer) createLoadBalancerServicePorts(service *corev1.Service) []corev1.ServicePort {
+	ports := make([]corev1.ServicePort, len(service.Spec.Ports))
+	for i, port := range service.Spec.Ports {
+		ports[i].Name = port.Name
+		ports[i].Protocol = port.Protocol
+		ports[i].Port = port.Port
+		ports[i].TargetPort = intstr.IntOrString{
+			Type:   intstr.Int,
+			IntVal: port.NodePort,
+		}
+	}
+	return ports
 }
 
 func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*corev1.Node) error {
