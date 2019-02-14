@@ -1,5 +1,5 @@
-hash: 1874d4d7353c6303c392ddecf62aecf5263265362216291a292c4b56bbe180bc
-updated: 2019-02-11T16:22:37.512251+01:00
+hash: fa1fb1c0eb2b261f2615fc48650e6d76a438d6d4d666d13abf4aa7f84eddf8a1
+updated: 2019-02-12T17:59:20.84667+01:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -142,7 +142,7 @@ imports:
   subpackages:
   - lru
 - name: github.com/golang/mock
-  version: bd3c8e81be01eef76d4b503f5e687d2d1354d2d9
+  version: 51421b967af1f557f93a59e0057aaf15ca02e29c
   subpackages:
   - gomock
 - name: github.com/golang/protobuf

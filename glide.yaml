@@ -1,5 +1,7 @@
 package: github.com/gonzolino/cloud-provider-kubevirt
 import:
+- package: github.com/golang/mock/gomock
+  version: v1.2.0
 - package: github.com/spf13/pflag
 - package: k8s.io/api
   version: kubernetes-1.12.4
