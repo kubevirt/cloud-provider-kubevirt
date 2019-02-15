@@ -1,6 +1,9 @@
 VERSION ?= v0.0.7
 REGISTRY ?= dgonzalez
 
+.PHONY: all
+all: clean deps-install test build
+
 .PHONY: clean
 clean:
 	if [ -d bin ]; then rm -r bin; fi
