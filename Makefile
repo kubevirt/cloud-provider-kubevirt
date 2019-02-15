@@ -2,7 +2,7 @@ VERSION ?= v0.0.7
 REGISTRY ?= dgonzalez
 
 .PHONY: all
-all: clean deps-install test build
+all: clean test build
 
 .PHONY: clean
 clean:
