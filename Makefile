@@ -17,6 +17,10 @@ deps-update:
 bin:
 	mkdir bin
 
+.PHONY: test
+test:
+	go test ./pkg/...
+
 .PHONY: build
 build: bin
 	GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
