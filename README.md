@@ -25,7 +25,7 @@ secret. You can create the secret with the following command: `kubectl -n kube-s
 cloud-config --from-file=cloud-config=kubeconfig.yaml`, where `kubeconfig.yaml` contains a valid configuration to access
 the UnderKube. After the secret is in place, you can deploy `kubevirt-cloud-controller-manager` using:
 ```
-kubectl apply -f https://raw.githubusercontent.com/gonzolino/cloud-provider-kubevirt/master/cluster/manifests/kubevirt-cloud-controller-manager-ds.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubevirt/cloud-provider-kubevirt/master/cluster/manifests/kubevirt-cloud-controller-manager-ds.yaml
 ```
 
 ## Development

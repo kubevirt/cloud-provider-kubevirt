@@ -1,4 +1,4 @@
-package: github.com/gonzolino/cloud-provider-kubevirt
+package: github.com/kubevirt/cloud-provider-kubevirt
 import:
 - package: github.com/golang/mock/gomock
   version: v1.2.0
