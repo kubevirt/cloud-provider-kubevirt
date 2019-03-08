@@ -1,3 +1,4 @@
 language: go
+go_import_path: kubevirt.io/cloud-provider-kubevirt
 go:
 - 1.11.x

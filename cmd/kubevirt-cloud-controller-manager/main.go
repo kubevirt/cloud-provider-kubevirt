@@ -38,7 +38,7 @@ import (
 	_ "k8s.io/kubernetes/pkg/version/prometheus" // for version metric registration
 	"k8s.io/kubernetes/pkg/version/verflag"
 
-	"github.com/gonzolino/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt"
+	"kubevirt.io/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt"
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
