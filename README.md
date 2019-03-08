@@ -1,4 +1,7 @@
 # cloud-provider-kubevirt
+[![Build Status](https://travis-ci.org/kubevirt/cloud-provider-kubevirt.svg?branch=master)](https://travis-ci.org/kubevirt/cloud-provider-kubevirt)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kubevirt/cloud-provider-kubevirt)](https://goreportcard.com/report/github.com/kubevirt/cloud-provider-kubevirt)
+
 The KubeVirt cloud-provider allows you to use KubeVirt and Kubernetes as a "cloud" to run Kubernetes clusters on top.
 This project contains the `kubevirt-cloud-controller-manager`, an implementation of the cloud controller manager (see
 [Concepts Underlying the Cloud Controller Manager](https://kubernetes.io/docs/concepts/architecture/cloud-controller/)
