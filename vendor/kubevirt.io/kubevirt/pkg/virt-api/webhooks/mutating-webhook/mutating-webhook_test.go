@@ -123,11 +123,12 @@ var _ = Describe("Mutating Webhook", func() {
 			}
 			namespaceLimitInformer, _ = testutils.NewFakeInformerFor(&k8sv1.LimitRange{})
 			namespaceLimitInformer.GetIndexer().Add(namespaceLimit)
-
+			configMapInformer, _ := testutils.NewFakeInformerFor(&k8sv1.ConfigMap{})
 			webhooks.SetInformers(
 				&webhooks.Informers{
 					VMIPresetInformer:       presetInformer,
 					NamespaceLimitsInformer: namespaceLimitInformer,
+					ConfigMapInformer:       configMapInformer,
 				},
 			)
 		})
@@ -151,6 +152,61 @@ var _ = Describe("Mutating Webhook", func() {
 		It("should apply foreground finalizer on VMI create", func() {
 			_, vmiMeta := getVMISpecMetaFromResponse()
 			Expect(vmiMeta.Finalizers).To(ContainElement(v1.VirtualMachineInstanceFinalizer))
+		})
+	})
+	Context("with VirtualMachineInstanceMigration admission review", func() {
+		var migration *v1.VirtualMachineInstanceMigration
+
+		getMigrationSpecMetaFromResponse := func() (*v1.VirtualMachineInstanceMigrationSpec, *k8smetav1.ObjectMeta) {
+			migrationBytes, err := json.Marshal(migration)
+			Expect(err).ToNot(HaveOccurred())
+			By("Creating the test admissions review from the Migration object")
+			ar := &v1beta1.AdmissionReview{
+				Request: &v1beta1.AdmissionRequest{
+					Resource: k8smetav1.GroupVersionResource{Group: v1.VirtualMachineInstanceMigrationGroupVersionKind.Group, Version: v1.VirtualMachineInstanceMigrationGroupVersionKind.Version, Resource: "virtualmachineinstancemigrations"},
+					Object: runtime.RawExtension{
+						Raw: migrationBytes,
+					},
+				},
+			}
+
+			By("Mutating the Migration")
+			resp := mutateMigrationCreate(ar)
+			Expect(resp.Allowed).To(Equal(true))
+
+			By("Getting the VMI spec from the response")
+			migrationSpec := &v1.VirtualMachineInstanceMigrationSpec{}
+			migrationMeta := &k8smetav1.ObjectMeta{}
+			patch := []patchOperation{
+				{Value: migrationSpec},
+				{Value: migrationMeta},
+			}
+			err = json.Unmarshal(resp.Patch, &patch)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(patch).NotTo(BeEmpty())
+
+			return migrationSpec, migrationMeta
+		}
+
+		BeforeEach(func() {
+			migration = &v1.VirtualMachineInstanceMigration{
+				ObjectMeta: k8smetav1.ObjectMeta{
+					Labels: map[string]string{"test": "test"},
+				},
+				Spec: v1.VirtualMachineInstanceMigrationSpec{
+					VMIName: "testVmi",
+				},
+			}
+		})
+
+		It("should verify migration spec", func() {
+			migrationSpec, _ := getMigrationSpecMetaFromResponse()
+			Expect(migrationSpec.VMIName).To(Equal("testVmi"))
+		})
+
+		It("should apply finalizer on migration create", func() {
+			_, migrationMeta := getMigrationSpecMetaFromResponse()
+			Expect(migrationMeta.Finalizers).To(ContainElement(v1.VirtualMachineInstanceMigrationFinalizer))
 		})
 	})
 })

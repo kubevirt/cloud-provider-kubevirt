@@ -396,7 +396,10 @@ func (c *VMController) handleDataVolumes(vm *virtv1.VirtualMachine, dataVolumes 
 
 				if deleteAfterTimestamp == 0 {
 					dataVolumeCopy := curDataVolume.DeepCopy()
-					deleteAfterTimestamp := now + int64(rand.Intn(dataVolumeDeleteJitterSeconds)+10)
+					deleteAfterTimestamp = now + int64(rand.Intn(dataVolumeDeleteJitterSeconds)+10)
+					if dataVolumeCopy.Annotations == nil {
+						dataVolumeCopy.Annotations = map[string]string{}
+					}
 					dataVolumeCopy.Annotations[dataVolumeDeleteAfterTimestampAnno] = strconv.FormatInt(deleteAfterTimestamp, 10)
 					_, err := c.clientset.CdiClient().CdiV1alpha1().DataVolumes(dataVolumeCopy.Namespace).Update(dataVolumeCopy)
 					if err != nil {
@@ -405,7 +408,7 @@ func (c *VMController) handleDataVolumes(vm *virtv1.VirtualMachine, dataVolumes 
 				}
 
 				if curDataVolume.DeletionTimestamp == nil {
-					if deleteAfterTimestamp >= now {
+					if now >= deleteAfterTimestamp {
 						// By deleting the failed DataVolume,
 						// a new DataVolume will be created to take it's place.
 						c.dataVolumeExpectations.ExpectDeletions(vmKey, []string{controller.DataVolumeKey(curDataVolume)})
@@ -415,7 +418,7 @@ func (c *VMController) handleDataVolumes(vm *virtv1.VirtualMachine, dataVolumes 
 							return ready, err
 						}
 					} else {
-						timeLeft := now - deleteAfterTimestamp
+						timeLeft := deleteAfterTimestamp - now
 						c.Queue.AddAfter(vmKey, time.Duration(timeLeft)*time.Second)
 					}
 				}
@@ -478,10 +481,10 @@ func (c *VMController) startVMI(vm *virtv1.VirtualMachine) error {
 	if err != nil {
 		log.Log.Object(vm).Infof("Failed to create VirtualMachineInstance: %s/%s", vmi.Namespace, vmi.Name)
 		c.expectations.CreationObserved(vmKey)
-		c.recorder.Eventf(vm, k8score.EventTypeWarning, FailedCreateVirtualMachineReason, "Error creating virtual machine: %v", err)
+		c.recorder.Eventf(vm, k8score.EventTypeWarning, FailedCreateVirtualMachineReason, "Error creating virtual machine instance: %v", err)
 		return err
 	}
-	c.recorder.Eventf(vm, k8score.EventTypeNormal, SuccessfulCreateVirtualMachineReason, "Created virtual machine: %v", vmi.ObjectMeta.Name)
+	c.recorder.Eventf(vm, k8score.EventTypeNormal, SuccessfulCreateVirtualMachineReason, "Started the virtual machine by creating the new virtual machine instance %v", vmi.ObjectMeta.Name)
 
 	return nil
 }
@@ -506,11 +509,11 @@ func (c *VMController) stopVMI(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMac
 	if err != nil {
 		// We can't observe a delete if it was not accepted by the server
 		c.expectations.DeletionObserved(vmKey, controller.VirtualMachineKey(vmi))
-		c.recorder.Eventf(vm, k8score.EventTypeWarning, FailedDeleteVirtualMachineReason, "Error deleting virtual machine %s: %v", vmi.ObjectMeta.Name, err)
+		c.recorder.Eventf(vm, k8score.EventTypeWarning, FailedDeleteVirtualMachineReason, "Error deleting virtual machine instance %s: %v", vmi.ObjectMeta.Name, err)
 		return err
 	}
 
-	c.recorder.Eventf(vm, k8score.EventTypeNormal, SuccessfulDeleteVirtualMachineReason, "Deleted virtual machine: %v", vmi.ObjectMeta.UID)
+	c.recorder.Eventf(vm, k8score.EventTypeNormal, SuccessfulDeleteVirtualMachineReason, "Stopped the virtual machine by deleting the virtual machine instance %v", vmi.ObjectMeta.UID)
 	log.Log.Object(vm).Info("Dispatching delete event")
 
 	return nil

@@ -1,5 +1,5 @@
-hash: fa1fb1c0eb2b261f2615fc48650e6d76a438d6d4d666d13abf4aa7f84eddf8a1
-updated: 2019-02-12T17:59:20.84667+01:00
+hash: 05c93f89b568203982e808c71ec49926c6007be3a5453c2d4774c08d62fcafd4
+updated: 2019-04-08T11:25:48.705572+02:00
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -831,7 +831,7 @@ imports:
   - pkg/client/clientset/versioned/typed/core/v1alpha1
   - pkg/client/clientset/versioned/typed/upload/v1alpha1
 - name: kubevirt.io/kubevirt
-  version: 2f1714d09a97ec66f4a5e8674e1ba464398495c4
+  version: 06d91198bededc7a9353ac774221c83580ee3373
   subpackages:
   - pkg/api/v1
   - pkg/kubecli

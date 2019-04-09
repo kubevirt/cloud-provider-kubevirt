@@ -54,6 +54,13 @@ func getVmfromClientArgs(args *cmdclient.Args) (*v1.VirtualMachineInstance, erro
 	return args.VMI, nil
 }
 
+func getMigrationOptionsfromClientArgs(args *cmdclient.Args) (*cmdclient.MigrationOptions, error) {
+	if args.MigrationOptions == nil {
+		return nil, goerror.New(fmt.Sprintf("migration options object not present in command server args"))
+	}
+	return args.MigrationOptions, nil
+}
+
 func getErrorMessage(err error) string {
 	if virErr := launcherErrors.FormatLibvirtError(err); virErr != "" {
 		return virErr
@@ -72,7 +79,14 @@ func (s *Launcher) Migrate(args *cmdclient.Args, reply *cmdclient.Reply) error {
 		return nil
 	}
 
-	err = s.domainManager.MigrateVMI(vmi)
+	options, err := getMigrationOptionsfromClientArgs(args)
+	if err != nil {
+		reply.Success = false
+		reply.Message = err.Error()
+		return nil
+	}
+
+	err = s.domainManager.MigrateVMI(vmi, options)
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Errorf("Failed to migrate vmi")
 		reply.Success = false
@@ -82,6 +96,30 @@ func (s *Launcher) Migrate(args *cmdclient.Args, reply *cmdclient.Reply) error {
 
 	log.Log.Object(vmi).Info("Signaled vmi migration")
 	return nil
+}
+
+func (s *Launcher) CancelMigration(args *cmdclient.Args, reply *cmdclient.Reply) error {
+
+	reply.Success = true
+
+	vmi, err := getVmfromClientArgs(args)
+	if err != nil {
+		reply.Success = false
+		reply.Message = err.Error()
+		return nil
+	}
+
+	err = s.domainManager.CancelVMIMigration(vmi)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Errorf("failed to abort live migration")
+		reply.Success = false
+		reply.Message = getErrorMessage(err)
+		return nil
+	}
+
+	log.Log.Object(vmi).Info("Live migration as been aborted")
+	return nil
+
 }
 
 func (s *Launcher) SyncMigrationTarget(args *cmdclient.Args, reply *cmdclient.Reply) error {
@@ -211,6 +249,26 @@ func (s *Launcher) GetDomain(args *cmdclient.Args, reply *cmdclient.Reply) error
 		reply.Domain = nil
 	} else {
 		reply.Domain = list[0]
+	}
+
+	return nil
+}
+
+func (s *Launcher) GetDomainStats(args *cmdclient.Args, reply *cmdclient.Reply) error {
+
+	reply.Success = true
+
+	list, err := s.domainManager.GetDomainStats()
+	if err != nil {
+		reply.Success = false
+		reply.Message = getErrorMessage(err)
+		return nil
+	}
+
+	if len(list) == 0 {
+		reply.DomainStats = nil
+	} else {
+		reply.DomainStats = list[0]
 	}
 
 	return nil
