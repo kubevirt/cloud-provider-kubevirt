@@ -20,13 +20,11 @@
 package util
 
 import (
-	"fmt"
 	"time"
 
-	"kubevirt.io/kubevirt/pkg/log"
+	secv1 "github.com/openshift/api/security/v1"
 
 	k8sv1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	virtv1 "kubevirt.io/kubevirt/pkg/api/v1"
@@ -49,9 +47,12 @@ func UpdateCondition(kv *virtv1.KubeVirt, conditionType virtv1.KubeVirtCondition
 	condition.Status = status
 	condition.Reason = reason
 	condition.Message = message
+
 	now := time.Now()
-	condition.LastProbeTime = metav1.Time{
-		Time: now,
+	if isNew || transition {
+		condition.LastProbeTime = metav1.Time{
+			Time: now,
+		}
 	}
 	if transition {
 		condition.LastTransitionTime = metav1.Time{
@@ -87,6 +88,17 @@ func getCondition(kv *virtv1.KubeVirt, conditionType virtv1.KubeVirtConditionTyp
 	return condition, true
 }
 
+func RemoveCondition(kv *virtv1.KubeVirt, conditionType virtv1.KubeVirtConditionType) {
+	conditions := kv.Status.Conditions
+	for i, condition := range conditions {
+		if condition.Type == conditionType {
+			conditions = append(conditions[:i], conditions[i+1:]...)
+			kv.Status.Conditions = conditions
+			return
+		}
+	}
+}
+
 func AddFinalizer(kv *virtv1.KubeVirt) {
 	if !hasFinalizer(kv) {
 		kv.Finalizers = append(kv.Finalizers, KubeVirtFinalizer)
@@ -102,81 +114,26 @@ func hasFinalizer(kv *virtv1.KubeVirt) bool {
 	return false
 }
 
-func SetVersions(kv *virtv1.KubeVirt, config KubeVirtDeploymentConfig) {
-
+func SetOperatorVersion(kv *virtv1.KubeVirt) {
 	kv.Status.OperatorVersion = version.Get().String()
-
-	// Note: for now we just set targetKubeVirtVersion and observedKubeVirtVersion to the tag of the operator image
-	// In future this needs some more work...
-	kv.Status.TargetKubeVirtVersion = config.ImageTag
-	kv.Status.ObservedKubeVirtVersion = config.ImageTag
-
 }
 
-func UpdateScc(clientset kubecli.KubevirtClient, kv *virtv1.KubeVirt, add bool) error {
+func IsOnOpenshift(clientset kubecli.KubevirtClient) (bool, error) {
 
-	secClient := clientset.SecClient()
-
-	privScc, err := secClient.SecurityContextConstraints().Get("privileged", metav1.GetOptions{})
+	apis, err := clientset.DiscoveryClient().ServerResources()
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// we are mot on openshift?
-			log.Log.V(4).Infof("unable to get scc, we are probably not on openshift: %v", err)
-			return nil
-		} else {
-			return fmt.Errorf("unable to get scc: %v", err)
-		}
+		return false, err
 	}
 
-	var kubeVirtAccounts []string
-	prefix := "system:serviceaccount"
-	kubeVirtAccounts = append(kubeVirtAccounts, fmt.Sprintf("%s:%s:%s", prefix, kv.Namespace, "kubevirt-privileged"))
-	kubeVirtAccounts = append(kubeVirtAccounts, fmt.Sprintf("%s:%s:%s", prefix, kv.Namespace, "kubevirt-apiserver"))
-	kubeVirtAccounts = append(kubeVirtAccounts, fmt.Sprintf("%s:%s:%s", prefix, kv.Namespace, "kubevirt-controller"))
-
-	modified := false
-	users := privScc.Users
-	for _, acc := range kubeVirtAccounts {
-		if add {
-			if !contains(users, acc) {
-				users = append(users, acc)
-				modified = true
+	for _, api := range apis {
+		if api.GroupVersion == secv1.GroupVersion.String() {
+			for _, resource := range api.APIResources {
+				if resource.Name == "securitycontextconstraints" {
+					return true, nil
+				}
 			}
-		} else {
-			removed := false
-			users, removed = remove(users, acc)
-			modified = modified || removed
-		}
-	}
-	if modified {
-		privScc.Users = users
-		_, err = secClient.SecurityContextConstraints().Update(privScc)
-		if err != nil {
-			return fmt.Errorf("unable to update scc: %v", err)
 		}
 	}
 
-	return nil
-}
-
-func contains(users []string, user string) bool {
-	for _, u := range users {
-		if u == user {
-			return true
-		}
-	}
-	return false
-}
-
-func remove(users []string, user string) ([]string, bool) {
-	var newUsers []string
-	modified := false
-	for _, u := range users {
-		if u != user {
-			newUsers = append(newUsers, u)
-		} else {
-			modified = true
-		}
-	}
-	return newUsers, modified
+	return false, nil
 }

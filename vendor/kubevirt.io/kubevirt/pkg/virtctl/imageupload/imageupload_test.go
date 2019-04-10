@@ -1,9 +1,12 @@
 package imageupload_test
 
 import (
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/golang/mock/gomock"
@@ -29,14 +32,22 @@ const (
 	podPhaseAnnotation      = "cdi.kubevirt.io/storage.pod.phase"
 )
 
-var _ = Describe("ImageUpload", func() {
+const (
+	pvcNamespace = "default"
+	pvcName      = "test-pvc"
+	pvcSize      = "500Mi"
+)
 
-	const (
-		pvcNamespace = "default"
-		pvcName      = "test-pvc"
-		pvcSize      = "500Mi"
-		imagePath    = "../../../vendor/kubevirt.io/containerized-data-importer/tests/images/cirros-qcow2.img"
-	)
+var imagePath string
+
+func init() {
+	// how could this ever happen that we have a 13MB blob in our repo?
+	flag.StringVar(&imagePath, "cirros-image-path", "vendor/kubevirt.io/containerized-data-importer/tests/images/cirros-qcow2.img", "path to cirros test image")
+	flag.Parse()
+	imagePath = filepath.Join("../../../", imagePath)
+}
+
+var _ = Describe("ImageUpload", func() {
 
 	var (
 		ctrl       *gomock.Controller
@@ -59,6 +70,7 @@ var _ = Describe("ImageUpload", func() {
 	})
 
 	addPodPhaseAnnotation := func() {
+		defer GinkgoRecover()
 		time.Sleep(10 * time.Millisecond)
 		pvc, err := kubeClient.CoreV1().PersistentVolumeClaims(pvcNamespace).Get(pvcName, metav1.GetOptions{})
 		Expect(err).To(BeNil())
@@ -152,6 +164,7 @@ var _ = Describe("ImageUpload", func() {
 		server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(statusCode)
 		}))
+
 		imageupload.SetHTTPClientCreator(func(bool) *http.Client {
 			return server.Client()
 		})
@@ -260,5 +273,18 @@ var _ = Describe("ImageUpload", func() {
 		AfterEach(func() {
 			testDone()
 		})
+	})
+
+	Context("URL validation", func() {
+		serverURL := "http://localhost:12345"
+		DescribeTable("Server URL validations", func(serverUrl string, expected string) {
+			path, err := imageupload.ConstructUploadProxyPath(serverUrl)
+			Expect(err).To(BeNil())
+			Expect(strings.Compare(path, expected)).To(BeZero())
+		},
+			Entry("Server URL with trailing slash should pass", serverURL+"/", serverURL+imageupload.UploadProxyURI),
+			Entry("Server URL with URI should pass", serverURL+imageupload.UploadProxyURI, serverURL+imageupload.UploadProxyURI),
+			Entry("Server URL only should pass", serverURL, serverURL+imageupload.UploadProxyURI),
+		)
 	})
 })

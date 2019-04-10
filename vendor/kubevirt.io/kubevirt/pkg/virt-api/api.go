@@ -84,7 +84,8 @@ const (
 	migrationCreateValidatePath = "/migration-validate-create"
 	migrationUpdateValidatePath = "/migration-validate-update"
 
-	vmiMutatePath = "/virtualmachineinstances-mutate"
+	vmiMutatePath       = "/virtualmachineinstances-mutate"
+	migrationMutatePath = "/migration-mutate-create"
 
 	certBytesValue        = "cert-bytes"
 	keyBytesValue         = "key-bytes"
@@ -264,7 +265,7 @@ func (app *virtAPIApp) composeSubresources() {
 					Namespaced: true,
 				},
 				{
-					Name:       "virtualmachineinstances/restart",
+					Name:       "virtualmachines/restart",
 					Namespaced: true,
 				},
 				{
@@ -329,11 +330,11 @@ func (app *virtAPIApp) composeSubresources() {
 		Returns(http.StatusNotFound, "Not Found", nil))
 
 	once := sync.Once{}
+	var openapispec *spec.Swagger
 	ws.Route(ws.GET("openapi/v2").
 		Consumes(restful.MIME_JSON).
 		Produces(restful.MIME_JSON).
 		To(func(request *restful.Request, response *restful.Response) {
-			var openapispec *spec.Swagger
 			once.Do(func() {
 				openapispec = openapi.LoadOpenAPISpec([]*restful.WebService{ws, subws})
 				openapispec.Info.Version = version.Get().String()
@@ -755,6 +756,7 @@ func (app *virtAPIApp) createValidatingWebhook() error {
 
 func (app *virtAPIApp) mutatingWebhooks() []admissionregistrationv1beta1.Webhook {
 	vmiPath := vmiMutatePath
+	migrationPath := migrationMutatePath
 	webHooks := []admissionregistrationv1beta1.Webhook{
 		{
 			Name: "virtualmachineinstances-mutator.kubevirt.io",
@@ -773,6 +775,27 @@ func (app *virtAPIApp) mutatingWebhooks() []admissionregistrationv1beta1.Webhook
 					Namespace: app.namespace,
 					Name:      virtApiServiceName,
 					Path:      &vmiPath,
+				},
+				CABundle: app.signingCertBytes,
+			},
+		},
+		{
+			Name: "migrations-mutator.kubevirt.io",
+			Rules: []admissionregistrationv1beta1.RuleWithOperations{{
+				Operations: []admissionregistrationv1beta1.OperationType{
+					admissionregistrationv1beta1.Create,
+				},
+				Rule: admissionregistrationv1beta1.Rule{
+					APIGroups:   []string{v1.GroupName},
+					APIVersions: []string{v1.VirtualMachineInstanceMigrationGroupVersionKind.Version},
+					Resources:   []string{"virtualmachineinstancemigrations"},
+				},
+			}},
+			ClientConfig: admissionregistrationv1beta1.WebhookClientConfig{
+				Service: &admissionregistrationv1beta1.ServiceReference{
+					Namespace: app.namespace,
+					Name:      virtApiServiceName,
+					Path:      &migrationPath,
 				},
 				CABundle: app.signingCertBytes,
 			},
@@ -826,6 +849,9 @@ func (app *virtAPIApp) createMutatingWebhook() error {
 
 	http.HandleFunc(vmiMutatePath, func(w http.ResponseWriter, r *http.Request) {
 		mutating_webhook.ServeVMIs(w, r)
+	})
+	http.HandleFunc(migrationMutatePath, func(w http.ResponseWriter, r *http.Request) {
+		mutating_webhook.ServeMigrationCreate(w, r)
 	})
 	return nil
 }
@@ -1013,11 +1039,13 @@ func (app *virtAPIApp) Run() {
 	go webhookInformers.VMIInformer.Run(stopChan)
 	go webhookInformers.VMIPresetInformer.Run(stopChan)
 	go webhookInformers.NamespaceLimitsInformer.Run(stopChan)
+	go webhookInformers.ConfigMapInformer.Run(stopChan)
 
 	cache.WaitForCacheSync(stopChan,
 		webhookInformers.VMIInformer.HasSynced,
 		webhookInformers.VMIPresetInformer.HasSynced,
-		webhookInformers.NamespaceLimitsInformer.HasSynced)
+		webhookInformers.NamespaceLimitsInformer.HasSynced,
+		webhookInformers.ConfigMapInformer.HasSynced)
 
 	// Verify/create webhook endpoint.
 	err = app.createWebhook()

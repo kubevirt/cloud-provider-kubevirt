@@ -41,7 +41,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/hooks"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 	"kubevirt.io/kubevirt/pkg/log"
-	"kubevirt.io/kubevirt/pkg/virt-config"
+	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 )
 
 const namespaceKubevirt = "kubevirt"
@@ -90,6 +90,19 @@ var _ = Describe("Template", func() {
 			err := networkClient.Tracker().Create(gvr, network, "default")
 			Expect(err).To(Not(HaveOccurred()))
 		}
+		// create a network in a different namespace
+		network := &networkv1.NetworkAttachmentDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test1",
+				Namespace: "other-namespace",
+			},
+		}
+		err := networkClient.Tracker().Create(gvr, network, "other-namespace")
+		Expect(err).To(Not(HaveOccurred()))
+	})
+
+	AfterEach(func() {
+		virtconfig.Clear()
 	})
 
 	Describe("Rendering", func() {
@@ -156,11 +169,15 @@ var _ = Describe("Template", func() {
 						Networks: []v1.Network{
 							{Name: "default",
 								NetworkSource: v1.NetworkSource{
-									Multus: &v1.CniNetwork{NetworkName: "default"},
+									Multus: &v1.MultusNetwork{NetworkName: "default"},
 								}},
 							{Name: "test1",
 								NetworkSource: v1.NetworkSource{
-									Multus: &v1.CniNetwork{NetworkName: "test1"},
+									Multus: &v1.MultusNetwork{NetworkName: "test1"},
+								}},
+							{Name: "other-test1",
+								NetworkSource: v1.NetworkSource{
+									Multus: &v1.MultusNetwork{NetworkName: "other-namespace/test1"},
 								}},
 						},
 					},
@@ -170,7 +187,87 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 				value, ok := pod.Annotations["k8s.v1.cni.cncf.io/networks"]
 				Expect(ok).To(Equal(true))
-				Expect(value).To(Equal("default,test1"))
+				expectedIfaces := ("[" +
+					"{\"interface\":\"net1\",\"name\":\"default\",\"namespace\":\"default\"}," +
+					"{\"interface\":\"net2\",\"name\":\"test1\",\"namespace\":\"default\"}," +
+					"{\"interface\":\"net3\",\"name\":\"test1\",\"namespace\":\"other-namespace\"}" +
+					"]")
+				Expect(value).To(Equal(expectedIfaces))
+			})
+			It("should add default multus networks in the multus default-network annotation", func() {
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{},
+						Networks: []v1.Network{
+							{Name: "default",
+								NetworkSource: v1.NetworkSource{
+									Multus: &v1.MultusNetwork{NetworkName: "default", Default: true},
+								}},
+							{Name: "test1",
+								NetworkSource: v1.NetworkSource{
+									Multus: &v1.MultusNetwork{NetworkName: "test1"},
+								}},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+				value, ok := pod.Annotations["v1.multus-cni.io/default-network"]
+				Expect(ok).To(Equal(true))
+				Expect(value).To(Equal("default"))
+				value, ok = pod.Annotations["k8s.v1.cni.cncf.io/networks"]
+				Expect(ok).To(Equal(true))
+				Expect(value).To(Equal("[{\"interface\":\"net1\",\"name\":\"test1\",\"namespace\":\"default\"}]"))
+			})
+			It("should add MAC address in the pod annotation", func() {
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Devices: v1.Devices{
+								Interfaces: []v1.Interface{
+									v1.Interface{
+										Name: "test1",
+										InterfaceBindingMethod: v1.InterfaceBindingMethod{
+											SRIOV: &v1.InterfaceSRIOV{},
+										},
+										MacAddress: "de:ad:00:00:be:af",
+									},
+								},
+							},
+						},
+						Networks: []v1.Network{
+							{Name: "default",
+								NetworkSource: v1.NetworkSource{
+									Multus: &v1.MultusNetwork{NetworkName: "default"},
+								}},
+							{Name: "test1",
+								NetworkSource: v1.NetworkSource{
+									Multus: &v1.MultusNetwork{NetworkName: "test1"},
+								}},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+				value, ok := pod.Annotations["k8s.v1.cni.cncf.io/networks"]
+				Expect(ok).To(Equal(true))
+				expectedIfaces := ("[" +
+					"{\"interface\":\"net1\",\"name\":\"default\",\"namespace\":\"default\"}," +
+					"{\"interface\":\"net2\",\"mac\":\"de:ad:00:00:be:af\",\"name\":\"test1\",\"namespace\":\"default\"}" +
+					"]")
+				Expect(value).To(Equal(expectedIfaces))
 			})
 		})
 		Context("with genie annotation", func() {
@@ -186,11 +283,11 @@ var _ = Describe("Template", func() {
 						Networks: []v1.Network{
 							{Name: "default",
 								NetworkSource: v1.NetworkSource{
-									Genie: &v1.CniNetwork{NetworkName: "default"},
+									Genie: &v1.GenieNetwork{NetworkName: "default"},
 								}},
 							{Name: "test1",
 								NetworkSource: v1.NetworkSource{
-									Genie: &v1.CniNetwork{NetworkName: "test1"},
+									Genie: &v1.GenieNetwork{NetworkName: "test1"},
 								}},
 						},
 					},
@@ -201,6 +298,33 @@ var _ = Describe("Template", func() {
 				value, ok := pod.Annotations["cni"]
 				Expect(ok).To(Equal(true))
 				Expect(value).To(Equal("default,test1"))
+			})
+		})
+		Context("with masquerade interface", func() {
+			It("should add the istio annotation", func() {
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Devices: v1.Devices{
+								Interfaces: []v1.Interface{
+									{Name: "default",
+										InterfaceBindingMethod: v1.InterfaceBindingMethod{Masquerade: &v1.InterfaceMasquerade{}}},
+								},
+							},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+				value, ok := pod.Annotations[ISTIO_KUBEVIRT_ANNOTATION]
+				Expect(ok).To(Equal(true))
+				Expect(value).To(Equal("k6t-eth0"))
 			})
 		})
 		Context("with node selectors", func() {
@@ -271,17 +395,199 @@ var _ = Describe("Template", func() {
 						Domain: v1.DomainSpec{
 							CPU: &v1.CPU{
 								Model: "Conroe",
+								Features: []v1.CPUFeature{
+									{
+										Name:   "lahf_lm",
+										Policy: "require",
+									},
+									{
+										Name:   "mmx",
+										Policy: "disable",
+									},
+									{
+										Name:   "ssse3",
+										Policy: "forbid",
+									},
+								},
 							},
 						},
 					},
 				}
 
-				cpuModelLabel, err := CPUModelLabelFromCPUModel(&vmi)
-				Expect(err).ToNot(HaveOccurred())
 				pod, err := svc.RenderLaunchManifest(&vmi)
 				Expect(err).ToNot(HaveOccurred())
 
+				cpuModelLabel, err := CPUModelLabelFromCPUModel(&vmi)
+				Expect(err).ToNot(HaveOccurred())
 				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(cpuModelLabel, "true"))
+
+				cpuFeatureLabels := CPUFeatureLabelsFromCPUFeatures(&vmi)
+				for _, featureLabel := range cpuFeatureLabels {
+					Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(featureLabel, "true"))
+				}
+			})
+
+			It("should add node selectors from kubevirt-config configMap", func() {
+				cfgMap := kubev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespaceKubevirt,
+						Name:      "kubevirt-config",
+					},
+					Data: map[string]string{NodeSelectorsKey: "kubernetes.io/hostname=node02\nnode-role.kubernetes.io/compute=true\n"},
+				}
+				cmCache.Add(&cfgMap)
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "testvmi", Namespace: "default", UID: "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{Volumes: []v1.Volume{}, Domain: v1.DomainSpec{}},
+				}
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(pod.Spec.NodeSelector).To(HaveKeyWithValue("kubernetes.io/hostname", "node02"))
+				Expect(pod.Spec.NodeSelector).To(HaveKeyWithValue("node-role.kubernetes.io/compute", "true"))
+			})
+
+			It("should not add node selector for hyperv nodes if VMI does not request hyperv features", func() {
+				cfgMap := kubev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespaceKubevirt,
+						Name:      "kubevirt-config",
+					},
+					Data: map[string]string{virtconfig.FeatureGatesKey: virtconfig.HypervStrictCheckGate},
+				}
+				virtconfig.InitFromConfigMap(&cfgMap)
+
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Features: &v1.Features{
+								Hyperv: &v1.FeatureHyperv{},
+							},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(pod.Spec.NodeSelector).To(Not(HaveKey(ContainSubstring(NFD_KVM_INFO_PREFIX))))
+			})
+
+			It("should not add node selector for hyperv nodes if VMI requests hyperv features, but feature gate is disabled", func() {
+				enabled := true
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Features: &v1.Features{
+								Hyperv: &v1.FeatureHyperv{
+									SyNIC: &v1.FeatureState{
+										Enabled: &enabled,
+									},
+								},
+							},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(pod.Spec.NodeSelector).To(Not(HaveKey(ContainSubstring(NFD_KVM_INFO_PREFIX))))
+			})
+
+			It("should add node selector for hyperv nodes if VMI requests hyperv features which depend on host kernel", func() {
+				cfgMap := kubev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespaceKubevirt,
+						Name:      "kubevirt-config",
+					},
+					Data: map[string]string{virtconfig.FeatureGatesKey: virtconfig.HypervStrictCheckGate},
+				}
+				virtconfig.InitFromConfigMap(&cfgMap)
+
+				enabled := true
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Features: &v1.Features{
+								Hyperv: &v1.FeatureHyperv{
+									SyNIC: &v1.FeatureState{
+										Enabled: &enabled,
+									},
+									SyNICTimer: &v1.FeatureState{
+										Enabled: &enabled,
+									},
+								},
+							},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(NFD_KVM_INFO_PREFIX+"synic", "true"))
+				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(NFD_KVM_INFO_PREFIX+"synictimer", "true"))
+			})
+
+			It("should not add node selector for hyperv nodes if VMI requests hyperv features which do not depend on host kernel", func() {
+				cfgMap := kubev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespaceKubevirt,
+						Name:      "kubevirt-config",
+					},
+					Data: map[string]string{virtconfig.FeatureGatesKey: virtconfig.HypervStrictCheckGate},
+				}
+				virtconfig.InitFromConfigMap(&cfgMap)
+
+				var retries uint32 = 4095
+				enabled := true
+				vmi := v1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testvmi",
+						Namespace: "default",
+						UID:       "1234",
+					},
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Features: &v1.Features{
+								Hyperv: &v1.FeatureHyperv{
+									Relaxed: &v1.FeatureState{
+										Enabled: &enabled,
+									},
+									VAPIC: &v1.FeatureState{
+										Enabled: &enabled,
+									},
+									Spinlocks: &v1.FeatureSpinlocks{
+										Enabled: &enabled,
+										Retries: &retries,
+									},
+								},
+							},
+						},
+					},
+				}
+
+				pod, err := svc.RenderLaunchManifest(&vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(pod.Spec.NodeSelector).To(Not(HaveKey(ContainSubstring(NFD_KVM_INFO_PREFIX))))
 			})
 
 			It("should add default cpu/memory resources to the sidecar container if cpu pinning was requested", func() {
@@ -374,12 +680,14 @@ var _ = Describe("Template", func() {
 
 			It("should add tolerations to pod", func() {
 				podToleration := kubev1.Toleration{Key: "test"}
+				var tolerationSeconds int64 = 14
 				vm := v1.VirtualMachineInstance{
 					ObjectMeta: metav1.ObjectMeta{Name: "testvm", Namespace: "default", UID: "1234"},
 					Spec: v1.VirtualMachineInstanceSpec{
 						Tolerations: []kubev1.Toleration{
 							{
-								Key: podToleration.Key,
+								Key:               podToleration.Key,
+								TolerationSeconds: &tolerationSeconds,
 							},
 						},
 						Domain: v1.DomainSpec{},
@@ -387,7 +695,7 @@ var _ = Describe("Template", func() {
 				}
 				pod, err := svc.RenderLaunchManifest(&vm)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(pod.Spec.Tolerations).To(BeEquivalentTo([]kubev1.Toleration{{Key: podToleration.Key}}))
+				Expect(pod.Spec.Tolerations).To(BeEquivalentTo([]kubev1.Toleration{{Key: podToleration.Key, TolerationSeconds: &tolerationSeconds}}))
 			})
 
 			It("should use the hostname and subdomain if specified on the vm", func() {
@@ -478,8 +786,8 @@ var _ = Describe("Template", func() {
 
 				Expect(pod.Spec.Containers[0].Resources.Requests.Cpu().String()).To(Equal("1m"))
 				Expect(pod.Spec.Containers[0].Resources.Limits.Cpu().String()).To(Equal("2m"))
-				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal("1099507557"))
-				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal("2099507557"))
+				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal("1163507557"))
+				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal("2163507557"))
 			})
 			It("should overcommit guest overhead if selected, by only adding the overhead to memory limits", func() {
 
@@ -508,7 +816,7 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal("1G"))
-				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal("2099507557"))
+				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal("2163507557"))
 			})
 			It("should not add unset resources", func() {
 
@@ -536,7 +844,7 @@ var _ = Describe("Template", func() {
 
 				Expect(vmi.Spec.Domain.Resources.Requests.Memory().String()).To(Equal("64M"))
 				Expect(pod.Spec.Containers[0].Resources.Requests.Cpu().String()).To(Equal("1m"))
-				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(179)))
+				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(243)))
 
 				// Limits for KVM and TUN devices should be requested.
 				Expect(pod.Spec.Containers[0].Resources.Limits).ToNot(BeNil())
@@ -571,9 +879,9 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(memory)))
 			},
-				table.Entry("and consider graphics overhead if it is not set", nil, 179),
-				table.Entry("and consider graphics overhead if it is set to true", True(), 179),
-				table.Entry("and not consider graphics overhead if it is set to false", False(), 162),
+				table.Entry("and consider graphics overhead if it is not set", nil, 243),
+				table.Entry("and consider graphics overhead if it is set to true", True(), 243),
+				table.Entry("and not consider graphics overhead if it is set to false", False(), 226),
 			)
 		})
 
@@ -607,8 +915,8 @@ var _ = Describe("Template", func() {
 				pod, err := svc.RenderLaunchManifest(&vmi)
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(98)))
-				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(98)))
+				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(162)))
+				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().ToDec().ScaledValue(resource.Mega)).To(Equal(int64(162)))
 
 				hugepageType := kubev1.ResourceName(kubev1.ResourceHugePagesPrefix + value)
 				hugepagesRequest := pod.Spec.Containers[0].Resources.Requests[hugepageType]

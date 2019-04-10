@@ -29,13 +29,15 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
+		"kubevirt.io/kubevirt/pkg/api/v1.BIOS":                                      schema_kubevirt_pkg_api_v1_BIOS(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.Bootloader":                                schema_kubevirt_pkg_api_v1_Bootloader(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.CDRomTarget":                               schema_kubevirt_pkg_api_v1_CDRomTarget(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.CPU":                                       schema_kubevirt_pkg_api_v1_CPU(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.CPUFeature":                                schema_kubevirt_pkg_api_v1_CPUFeature(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Clock":                                     schema_kubevirt_pkg_api_v1_Clock(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.ClockOffset":                               schema_kubevirt_pkg_api_v1_ClockOffset(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.ClockOffsetUTC":                            schema_kubevirt_pkg_api_v1_ClockOffsetUTC(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.CloudInitNoCloudSource":                    schema_kubevirt_pkg_api_v1_CloudInitNoCloudSource(ref),
-		"kubevirt.io/kubevirt/pkg/api/v1.CniNetwork":                                schema_kubevirt_pkg_api_v1_CniNetwork(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.ConfigMapVolumeSource":                     schema_kubevirt_pkg_api_v1_ConfigMapVolumeSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.ContainerDiskSource":                       schema_kubevirt_pkg_api_v1_ContainerDiskSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.DHCPOptions":                               schema_kubevirt_pkg_api_v1_DHCPOptions(ref),
@@ -45,6 +47,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/kubevirt/pkg/api/v1.DiskDevice":                                schema_kubevirt_pkg_api_v1_DiskDevice(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.DiskTarget":                                schema_kubevirt_pkg_api_v1_DiskTarget(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.DomainSpec":                                schema_kubevirt_pkg_api_v1_DomainSpec(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.EFI":                                       schema_kubevirt_pkg_api_v1_EFI(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.EmptyDiskSource":                           schema_kubevirt_pkg_api_v1_EmptyDiskSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.EphemeralVolumeSource":                     schema_kubevirt_pkg_api_v1_EphemeralVolumeSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.FeatureAPIC":                               schema_kubevirt_pkg_api_v1_FeatureAPIC(ref),
@@ -55,11 +58,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/kubevirt/pkg/api/v1.Features":                                  schema_kubevirt_pkg_api_v1_Features(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Firmware":                                  schema_kubevirt_pkg_api_v1_Firmware(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.FloppyTarget":                              schema_kubevirt_pkg_api_v1_FloppyTarget(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.GenieNetwork":                              schema_kubevirt_pkg_api_v1_GenieNetwork(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.HPETTimer":                                 schema_kubevirt_pkg_api_v1_HPETTimer(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.HostDisk":                                  schema_kubevirt_pkg_api_v1_HostDisk(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Hugepages":                                 schema_kubevirt_pkg_api_v1_Hugepages(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.HypervTimer":                               schema_kubevirt_pkg_api_v1_HypervTimer(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.I6300ESBWatchdog":                          schema_kubevirt_pkg_api_v1_I6300ESBWatchdog(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.Input":                                     schema_kubevirt_pkg_api_v1_Input(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Interface":                                 schema_kubevirt_pkg_api_v1_Interface(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.InterfaceBindingMethod":                    schema_kubevirt_pkg_api_v1_InterfaceBindingMethod(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.InterfaceBridge":                           schema_kubevirt_pkg_api_v1_InterfaceBridge(ref),
@@ -75,6 +80,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/kubevirt/pkg/api/v1.LunTarget":                                 schema_kubevirt_pkg_api_v1_LunTarget(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Machine":                                   schema_kubevirt_pkg_api_v1_Machine(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Memory":                                    schema_kubevirt_pkg_api_v1_Memory(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.MultusNetwork":                             schema_kubevirt_pkg_api_v1_MultusNetwork(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Network":                                   schema_kubevirt_pkg_api_v1_Network(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.NetworkSource":                             schema_kubevirt_pkg_api_v1_NetworkSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.PITTimer":                                  schema_kubevirt_pkg_api_v1_PITTimer(ref),
@@ -92,6 +98,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceCondition":           schema_kubevirt_pkg_api_v1_VirtualMachineInstanceCondition(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceList":                schema_kubevirt_pkg_api_v1_VirtualMachineInstanceList(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigration":           schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigration(ref),
+		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationCondition":  schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationCondition(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationList":       schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationList(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationSpec":       schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationSpec(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationStatus":     schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationStatus(ref),
@@ -114,6 +121,44 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/kubevirt/pkg/api/v1.VolumeSource":                              schema_kubevirt_pkg_api_v1_VolumeSource(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.Watchdog":                                  schema_kubevirt_pkg_api_v1_Watchdog(ref),
 		"kubevirt.io/kubevirt/pkg/api/v1.WatchdogDevice":                            schema_kubevirt_pkg_api_v1_WatchdogDevice(ref),
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_BIOS(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "If set (default), BIOS will be used.",
+				Properties:  map[string]spec.Schema{},
+			},
+		},
+		Dependencies: []string{},
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_Bootloader(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Represents the firmware blob used to assist in the domain creation process. Used for setting the QEMU BIOS file path for the libvirt domain.",
+				Properties: map[string]spec.Schema{
+					"bios": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If set (default), BIOS will be used.",
+							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.BIOS"),
+						},
+					},
+					"efi": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If set, EFI will be used instead of BIOS.",
+							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.EFI"),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			"kubevirt.io/kubevirt/pkg/api/v1.BIOS", "kubevirt.io/kubevirt/pkg/api/v1.EFI"},
 	}
 }
 
@@ -179,9 +224,22 @@ func schema_kubevirt_pkg_api_v1_CPU(ref common.ReferenceCallback) common.OpenAPI
 					},
 					"model": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Model specifies the CPU model inside the VMI. List of available models https://github.com/libvirt/libvirt/blob/master/src/cpu/cpu_map.xml. It is possible to specify special cases like \"host-passthrough\" to get the same CPU as the node and \"host-model\" to get CPU closest to the node one. For more information see https://libvirt.org/formatdomain.html#elementsCPU. Defaults to host-model.",
+							Description: "Model specifies the CPU model inside the VMI. List of available models https://github.com/libvirt/libvirt/blob/master/src/cpu/cpu_map.xml. It is possible to specify special cases like \"host-passthrough\" to get the same CPU as the node and \"host-model\" to get CPU closest to the node one. Defaults to host-model.",
 							Type:        []string{"string"},
 							Format:      "",
+						},
+					},
+					"features": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Features specifies the CPU features list inside the VMI.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.CPUFeature"),
+									},
+								},
+							},
 						},
 					},
 					"dedicatedCpuPlacement": {
@@ -192,6 +250,35 @@ func schema_kubevirt_pkg_api_v1_CPU(ref common.ReferenceCallback) common.OpenAPI
 						},
 					},
 				},
+			},
+		},
+		Dependencies: []string{
+			"kubevirt.io/kubevirt/pkg/api/v1.CPUFeature"},
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_CPUFeature(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "CPUFeature allows specifying a CPU feature.",
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name of the CPU feature",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"policy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Policy is the CPU feature attribute which can have the following attributes: force    - The virtual CPU will claim the feature is supported regardless of it being supported by host CPU. require  - Guest creation will fail unless the feature is supported by the host CPU or the hypervisor is able to emulate it. optional - The feature will be supported by virtual CPU if and only if it is supported by host CPU. disable  - The feature will not be supported by virtual CPU. forbid   - Guest creation will fail if the feature is supported by host CPU. Defaults to require",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name"},
 			},
 		},
 		Dependencies: []string{},
@@ -298,32 +385,31 @@ func schema_kubevirt_pkg_api_v1_CloudInitNoCloudSource(ref common.ReferenceCallb
 							Format:      "",
 						},
 					},
-				},
-			},
-		},
-		Dependencies: []string{
-			"k8s.io/api/core/v1.LocalObjectReference"},
-	}
-}
-
-func schema_kubevirt_pkg_api_v1_CniNetwork(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "Represents the cni network.",
-				Properties: map[string]spec.Schema{
-					"networkName": {
+					"networkDataSecretRef": {
 						SchemaProps: spec.SchemaProps{
-							Description: "References to a NetworkAttachmentDefinition CRD object. Format: <networkName>, <namespace>/<networkName>. If namespace is not specified, VMI namespace is assumed. In case of genie, it references the CNI plugin name.",
+							Description: "NetworkDataSecretRef references a k8s secret that contains NoCloud networkdata.",
+							Ref:         ref("k8s.io/api/core/v1.LocalObjectReference"),
+						},
+					},
+					"networkDataBase64": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NetworkDataBase64 contains NoCloud cloud-init networkdata as a base64 encoded string.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"networkData": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NetworkData contains NoCloud inline cloud-init networkdata.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 				},
-				Required: []string{"networkName"},
 			},
 		},
-		Dependencies: []string{},
+		Dependencies: []string{
+			"k8s.io/api/core/v1.LocalObjectReference"},
 	}
 }
 
@@ -423,10 +509,24 @@ func schema_kubevirt_pkg_api_v1_DHCPOptions(ref common.ReferenceCallback) common
 							},
 						},
 					},
+					"privateOptions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If specified will pass extra DHCP options for private use, range: 224-254",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.DHCPPrivateOptions"),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
-		Dependencies: []string{},
+		Dependencies: []string{
+			"kubevirt.io/kubevirt/pkg/api/v1.DHCPPrivateOptions"},
 	}
 }
 
@@ -487,6 +587,19 @@ func schema_kubevirt_pkg_api_v1_Devices(ref common.ReferenceCallback) common.Ope
 							},
 						},
 					},
+					"inputs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Inputs describe input devices",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.Input"),
+									},
+								},
+							},
+						},
+					},
 					"autoattachPodInterface": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Whether to attach a pod network interface. Defaults to true.",
@@ -525,7 +638,7 @@ func schema_kubevirt_pkg_api_v1_Devices(ref common.ReferenceCallback) common.Ope
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/kubevirt/pkg/api/v1.Disk", "kubevirt.io/kubevirt/pkg/api/v1.Interface", "kubevirt.io/kubevirt/pkg/api/v1.Rng", "kubevirt.io/kubevirt/pkg/api/v1.Watchdog"},
+			"kubevirt.io/kubevirt/pkg/api/v1.Disk", "kubevirt.io/kubevirt/pkg/api/v1.Input", "kubevirt.io/kubevirt/pkg/api/v1.Interface", "kubevirt.io/kubevirt/pkg/api/v1.Rng", "kubevirt.io/kubevirt/pkg/api/v1.Watchdog"},
 	}
 }
 
@@ -716,7 +829,7 @@ func schema_kubevirt_pkg_api_v1_DomainSpec(ref common.ReferenceCallback) common.
 					},
 					"features": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Features like acpi, apic, hyperv.",
+							Description: "Features like acpi, apic, hyperv, smm.",
 							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.Features"),
 						},
 					},
@@ -739,6 +852,18 @@ func schema_kubevirt_pkg_api_v1_DomainSpec(ref common.ReferenceCallback) common.
 		},
 		Dependencies: []string{
 			"kubevirt.io/kubevirt/pkg/api/v1.CPU", "kubevirt.io/kubevirt/pkg/api/v1.Clock", "kubevirt.io/kubevirt/pkg/api/v1.Devices", "kubevirt.io/kubevirt/pkg/api/v1.Features", "kubevirt.io/kubevirt/pkg/api/v1.Firmware", "kubevirt.io/kubevirt/pkg/api/v1.Machine", "kubevirt.io/kubevirt/pkg/api/v1.Memory", "kubevirt.io/kubevirt/pkg/api/v1.ResourceRequirements"},
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_EFI(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "If set, EFI will be used instead of BIOS.",
+				Properties:  map[string]spec.Schema{},
+			},
+		},
+		Dependencies: []string{},
 	}
 }
 
@@ -971,6 +1096,12 @@ func schema_kubevirt_pkg_api_v1_Features(ref common.ReferenceCallback) common.Op
 							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.FeatureHyperv"),
 						},
 					},
+					"smm": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SMM enables/disables System Management Mode. TSEG not yet implemented.",
+							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.FeatureState"),
+						},
+					},
 				},
 			},
 		},
@@ -991,10 +1122,24 @@ func schema_kubevirt_pkg_api_v1_Firmware(ref common.ReferenceCallback) common.Op
 							Format:      "",
 						},
 					},
+					"bootloader": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Settings to control the bootloader that is used.",
+							Ref:         ref("kubevirt.io/kubevirt/pkg/api/v1.Bootloader"),
+						},
+					},
+					"serial": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The system-serial-number in SMBIOS",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
-		Dependencies: []string{},
+		Dependencies: []string{
+			"kubevirt.io/kubevirt/pkg/api/v1.Bootloader"},
 	}
 }
 
@@ -1018,6 +1163,27 @@ func schema_kubevirt_pkg_api_v1_FloppyTarget(ref common.ReferenceCallback) commo
 						},
 					},
 				},
+			},
+		},
+		Dependencies: []string{},
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_GenieNetwork(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Represents the genie cni network.",
+				Properties: map[string]spec.Schema{
+					"networkName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "References the CNI plugin name.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"networkName"},
 			},
 		},
 		Dependencies: []string{},
@@ -1145,6 +1311,40 @@ func schema_kubevirt_pkg_api_v1_I6300ESBWatchdog(ref common.ReferenceCallback) c
 						},
 					},
 				},
+			},
+		},
+		Dependencies: []string{},
+	}
+}
+
+func schema_kubevirt_pkg_api_v1_Input(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Properties: map[string]spec.Schema{
+					"bus": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Bus indicates the bus of input device to emulate. Supported values: virtio, usb.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type indicated the type of input device. Supported values: tablet.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the device name",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"type", "name"},
 			},
 		},
 		Dependencies: []string{},
@@ -1479,6 +1679,20 @@ func schema_kubevirt_pkg_api_v1_KubeVirtSpec(ref common.ReferenceCallback) commo
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Properties: map[string]spec.Schema{
+					"imageTag": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The image tag to use for the continer images installed. Defaults to the same tag as the operator's container image.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imageRegistry": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The image registry to pull the container images from Defaults to the same registry the operator's container image is pulled from.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"imagePullPolicy": {
 						SchemaProps: spec.SchemaProps{
 							Description: "The ImagePullPolicy to use.",
@@ -1529,7 +1743,19 @@ func schema_kubevirt_pkg_api_v1_KubeVirtStatus(ref common.ReferenceCallback) com
 							Format: "",
 						},
 					},
+					"targetKubeVirtRegistry": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
 					"observedKubeVirtVersion": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"observedKubeVirtRegistry": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
@@ -1615,6 +1841,34 @@ func schema_kubevirt_pkg_api_v1_Memory(ref common.ReferenceCallback) common.Open
 	}
 }
 
+func schema_kubevirt_pkg_api_v1_MultusNetwork(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Represents the multus cni network.",
+				Properties: map[string]spec.Schema{
+					"networkName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "References to a NetworkAttachmentDefinition CRD object. Format: <networkName>, <namespace>/<networkName>. If namespace is not specified, VMI namespace is assumed.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"default": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Select the default network and add it to the multus-cni.io/default-network annotation.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"networkName"},
+			},
+		},
+		Dependencies: []string{},
+	}
+}
+
 func schema_kubevirt_pkg_api_v1_Network(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1635,12 +1889,12 @@ func schema_kubevirt_pkg_api_v1_Network(ref common.ReferenceCallback) common.Ope
 					},
 					"multus": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.CniNetwork"),
+							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.MultusNetwork"),
 						},
 					},
 					"genie": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.CniNetwork"),
+							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.GenieNetwork"),
 						},
 					},
 				},
@@ -1648,7 +1902,7 @@ func schema_kubevirt_pkg_api_v1_Network(ref common.ReferenceCallback) common.Ope
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/kubevirt/pkg/api/v1.CniNetwork", "kubevirt.io/kubevirt/pkg/api/v1.PodNetwork"},
+			"kubevirt.io/kubevirt/pkg/api/v1.GenieNetwork", "kubevirt.io/kubevirt/pkg/api/v1.MultusNetwork", "kubevirt.io/kubevirt/pkg/api/v1.PodNetwork"},
 	}
 }
 
@@ -1665,19 +1919,19 @@ func schema_kubevirt_pkg_api_v1_NetworkSource(ref common.ReferenceCallback) comm
 					},
 					"multus": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.CniNetwork"),
+							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.MultusNetwork"),
 						},
 					},
 					"genie": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.CniNetwork"),
+							Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.GenieNetwork"),
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/kubevirt/pkg/api/v1.CniNetwork", "kubevirt.io/kubevirt/pkg/api/v1.PodNetwork"},
+			"kubevirt.io/kubevirt/pkg/api/v1.GenieNetwork", "kubevirt.io/kubevirt/pkg/api/v1.MultusNetwork", "kubevirt.io/kubevirt/pkg/api/v1.PodNetwork"},
 	}
 }
 
@@ -2220,6 +2474,54 @@ func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigration(ref common.Refer
 	}
 }
 
+func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Properties: map[string]spec.Schema{
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"lastProbeTime": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"type", "status"},
+			},
+		},
+		Dependencies: []string{
+			"k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
+	}
+}
+
 func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -2297,10 +2599,23 @@ func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceMigrationStatus(ref common
 							Format: "",
 						},
 					},
+					"conditions": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationCondition"),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
-		Dependencies: []string{},
+		Dependencies: []string{
+			"kubevirt.io/kubevirt/pkg/api/v1.VirtualMachineInstanceMigrationCondition"},
 	}
 }
 
@@ -2738,6 +3053,13 @@ func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceSpec(ref common.ReferenceC
 							},
 						},
 					},
+					"evictionStrategy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EvictionStrategy can be set to \"LiveMigrate\" if the VirtualMachineInstance should be migrated instead of shut-off in case of a node drain.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"terminationGracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
@@ -2797,12 +3119,25 @@ func schema_kubevirt_pkg_api_v1_VirtualMachineInstanceSpec(ref common.ReferenceC
 							},
 						},
 					},
+					"dnsPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Set DNS policy for the pod. Defaults to \"ClusterFirst\". Valid values are 'ClusterFirstWithHostNet', 'ClusterFirst', 'Default' or 'None'. DNS parameters given in DNSConfig will be merged with the policy selected with DNSPolicy. To have DNS options set along with hostNetwork, you have to specify DNS policy explicitly to 'ClusterFirstWithHostNet'.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"dnsConfig": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Specifies the DNS parameters of a pod. Parameters specified here will be merged to the generated DNS configuration based on DNSPolicy.",
+							Ref:         ref("k8s.io/api/core/v1.PodDNSConfig"),
+						},
+					},
 				},
 				Required: []string{"domain"},
 			},
 		},
 		Dependencies: []string{
-			"k8s.io/api/core/v1.Affinity", "k8s.io/api/core/v1.Toleration", "kubevirt.io/kubevirt/pkg/api/v1.DomainSpec", "kubevirt.io/kubevirt/pkg/api/v1.Network", "kubevirt.io/kubevirt/pkg/api/v1.Probe", "kubevirt.io/kubevirt/pkg/api/v1.Volume"},
+			"k8s.io/api/core/v1.Affinity", "k8s.io/api/core/v1.PodDNSConfig", "k8s.io/api/core/v1.Toleration", "kubevirt.io/kubevirt/pkg/api/v1.DomainSpec", "kubevirt.io/kubevirt/pkg/api/v1.Network", "kubevirt.io/kubevirt/pkg/api/v1.Probe", "kubevirt.io/kubevirt/pkg/api/v1.Volume"},
 	}
 }
 

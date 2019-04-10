@@ -54,6 +54,16 @@ var exampleJSON = `{
         "sockets": 1,
         "threads": 1,
         "model": "Conroe",
+        "features": [
+          {
+            "name": "pcid",
+            "policy": "require"
+          },
+          {
+            "name": "monitor",
+            "policy": "disable"
+          }
+        ],
         "dedicatedCpuPlacement": true
       },
       "machine": {
@@ -119,6 +129,9 @@ var exampleJSON = `{
             "enabled": true,
             "vendorid": "vendor"
           }
+        },
+        "smm": {
+          "enabled": true
         }
       },
       "devices": {
@@ -166,6 +179,13 @@ var exampleJSON = `{
             {{.InterfaceConfig}}
           }
         ],
+        "inputs": [
+          {
+            "bus": "virtio",
+            "type": "tablet",
+            "name": "tablet0"
+          }
+        ],
         "rng": {},
         "blockMultiQueue": true
       },
@@ -184,6 +204,9 @@ var exampleJSON = `{
         "cloudInitNoCloud": {
           "secretRef": {
             "name": "testsecret"
+          },
+          "networkDataSecretRef": {
+            "name": "testnetworksecret"
           }
         }
       },
@@ -263,6 +286,13 @@ var _ = Describe("Schema", func() {
 		}
 
 		exampleVMI.Spec.Domain.Devices.Rng = &Rng{}
+		exampleVMI.Spec.Domain.Devices.Inputs = []Input{
+			{
+				Bus:  "virtio",
+				Type: "tablet",
+				Name: "tablet0",
+			},
+		}
 		exampleVMI.Spec.Domain.Devices.BlockMultiQueue = _true
 
 		exampleVMI.Spec.Volumes = []Volume{
@@ -282,6 +312,9 @@ var _ = Describe("Schema", func() {
 						UserDataSecretRef: &v1.LocalObjectReference{
 							Name: "testsecret",
 						},
+						NetworkDataSecretRef: &v1.LocalObjectReference{
+							Name: "testnetworksecret",
+						},
 					},
 				},
 			},
@@ -296,6 +329,7 @@ var _ = Describe("Schema", func() {
 		}
 		exampleVMI.Spec.Domain.Features = &Features{
 			ACPI: FeatureState{Enabled: _false},
+			SMM:  &FeatureState{Enabled: _true},
 			APIC: &FeatureAPIC{Enabled: _true},
 			Hyperv: &FeatureHyperv{
 				Relaxed:    &FeatureState{Enabled: _true},
@@ -325,10 +359,20 @@ var _ = Describe("Schema", func() {
 			UUID: "28a42a60-44ef-4428-9c10-1a6aee94627f",
 		}
 		exampleVMI.Spec.Domain.CPU = &CPU{
-			Cores:                 3,
-			Sockets:               1,
-			Threads:               1,
-			Model:                 "Conroe",
+			Cores:   3,
+			Sockets: 1,
+			Threads: 1,
+			Model:   "Conroe",
+			Features: []CPUFeature{
+				{
+					Name:   "pcid",
+					Policy: "require",
+				},
+				{
+					Name:   "monitor",
+					Policy: "disable",
+				},
+			},
 			DedicatedCPUPlacement: true,
 		}
 		exampleVMI.Spec.Networks = []Network{

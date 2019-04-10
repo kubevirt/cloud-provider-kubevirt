@@ -136,6 +136,7 @@ var _ = Describe("Converter", func() {
 			}
 			vmi.Spec.Domain.Features = &v1.Features{
 				APIC: &v1.FeatureAPIC{},
+				SMM:  &v1.FeatureState{},
 				Hyperv: &v1.FeatureHyperv{
 					Relaxed:    &v1.FeatureState{Enabled: &_false},
 					VAPIC:      &v1.FeatureState{Enabled: &_true},
@@ -150,6 +151,13 @@ var _ = Describe("Converter", func() {
 			}
 			vmi.Spec.Domain.Resources.Limits = make(k8sv1.ResourceList)
 			vmi.Spec.Domain.Resources.Requests = make(k8sv1.ResourceList)
+			vmi.Spec.Domain.Devices.Inputs = []v1.Input{
+				{
+					Bus:  "virtio",
+					Type: "tablet",
+					Name: "tablet0",
+				},
+			}
 			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
 				{
 					Name: "myvolume",
@@ -239,7 +247,8 @@ var _ = Describe("Converter", func() {
 					Name: "nocloud",
 					VolumeSource: v1.VolumeSource{
 						CloudInitNoCloud: &v1.CloudInitNoCloudSource{
-							UserDataBase64: "1234",
+							UserDataBase64:    "1234",
+							NetworkDataBase64: "1234",
 						},
 					},
 				},
@@ -247,7 +256,8 @@ var _ = Describe("Converter", func() {
 					Name: "cdrom_tray_unspecified",
 					VolumeSource: v1.VolumeSource{
 						CloudInitNoCloud: &v1.CloudInitNoCloudSource{
-							UserDataBase64: "1234",
+							UserDataBase64:    "1234",
+							NetworkDataBase64: "1234",
 						},
 					},
 				},
@@ -341,7 +351,8 @@ var _ = Describe("Converter", func() {
 			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultNetworkInterface()}
 
 			vmi.Spec.Domain.Firmware = &v1.Firmware{
-				UUID: "e4686d2c-6e8d-4335-b8fd-81bee22f4814",
+				UUID:   "e4686d2c-6e8d-4335-b8fd-81bee22f4814",
+				Serial: "e4686d2c-6e8d-4335-b8fd-81bee22f4815",
 			}
 
 			gracePerod := int64(5)
@@ -359,6 +370,7 @@ var _ = Describe("Converter", func() {
   <sysinfo type="smbios">
     <system>
       <entry name="uuid">e4686d2c-6e8d-4335-b8fd-81bee22f4814</entry>
+      <entry name="serial">e4686d2c-6e8d-4335-b8fd-81bee22f4815</entry>
     </system>
     <bios></bios>
     <baseBoard></baseBoard>
@@ -460,6 +472,9 @@ var _ = Describe("Converter", func() {
       <driver name="qemu" type="raw" iothread="1"></driver>
       <alias name="ua-serviceaccount_test"></alias>
     </disk>
+    <input type="tablet" bus="virtio">
+      <alias name="ua-tablet0"></alias>
+    </input>
     <serial type="unix">
       <target port="0"></target>
       <source mode="bind" path="/var/run/kubevirt-private/f4686d2c-6e8d-4335-b8fd-81bee22f4814/virt-serial0"></source>
@@ -503,6 +518,7 @@ var _ = Describe("Converter", func() {
       <reset state="on"></reset>
       <vendor_id state="off" value="myvendor"></vendor_id>
     </hyperv>
+    <smm></smm>
   </features>
   <cpu mode="host-model">
     <topology sockets="1" cores="1" threads="1"></topology>
@@ -543,13 +559,23 @@ var _ = Describe("Converter", func() {
 		})
 
 		Context("when CPU spec defined", func() {
-			It("should convert CPU cores and model", func() {
+			It("should convert CPU cores, model and features", func() {
 				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 				vmi.Spec.Domain.CPU = &v1.CPU{
 					Cores:   3,
 					Sockets: 2,
 					Threads: 2,
 					Model:   "Conroe",
+					Features: []v1.CPUFeature{
+						{
+							Name:   "lahf_lm",
+							Policy: "require",
+						},
+						{
+							Name:   "mmx",
+							Policy: "disable",
+						},
+					},
 				}
 				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
 
@@ -558,6 +584,10 @@ var _ = Describe("Converter", func() {
 				Expect(domainSpec.CPU.Topology.Threads).To(Equal(uint32(2)), "Expect threads")
 				Expect(domainSpec.CPU.Mode).To(Equal("custom"), "Expect cpu mode")
 				Expect(domainSpec.CPU.Model).To(Equal("Conroe"), "Expect cpu model")
+				Expect(domainSpec.CPU.Features[0].Name).To(Equal("lahf_lm"), "Expect cpu feature name")
+				Expect(domainSpec.CPU.Features[0].Policy).To(Equal("require"), "Expect cpu feature policy")
+				Expect(domainSpec.CPU.Features[1].Name).To(Equal("mmx"), "Expect cpu feature name")
+				Expect(domainSpec.CPU.Features[1].Policy).To(Equal("disable"), "Expect cpu feature policy")
 				Expect(domainSpec.VCPU.Placement).To(Equal("static"), "Expect vcpu placement")
 				Expect(domainSpec.VCPU.CPUs).To(Equal(uint32(12)), "Expect vcpus")
 			})
@@ -710,6 +740,45 @@ var _ = Describe("Converter", func() {
 			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &Domain{}, c)).ToNot(Succeed())
 		})
 
+		It("should not disable usb controller when usb device is present", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Inputs[0].Bus = "usb"
+			domain := vmiToDomain(vmi, c)
+			disabled := false
+			for _, controller := range domain.Spec.Devices.Controllers {
+				if controller.Type == "usb" && controller.Model == "none" {
+					disabled = !disabled
+				}
+			}
+
+			Expect(disabled).To(Equal(false), "Expect controller not to be disabled")
+		})
+
+		It("should fail when input device is set to ps2 bus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Inputs[0].Bus = "ps2"
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &Domain{}, c)).ToNot(Succeed(), "Expect error")
+		})
+
+		It("should fail when input device is set to keyboard type", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Inputs[0].Type = "keyboard"
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &Domain{}, c)).ToNot(Succeed(), "Expect error")
+		})
+
+		It("should succeed when input device is set to usb bus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Inputs[0].Bus = "usb"
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &Domain{}, c)).To(Succeed(), "Expect success")
+		})
+
+		It("should succeed when input device bus is empty", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Inputs[0].Bus = ""
+			domain := vmiToDomain(vmi, c)
+			Expect(domain.Spec.Devices.Inputs[0].Bus).To(Equal("usb"), "Expect usb bus")
+		})
+
 		It("should select explicitly chosen network model", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Interfaces[0].Model = "e1000"
@@ -729,6 +798,19 @@ var _ = Describe("Converter", func() {
 			}
 			domain := vmiToDomain(vmi, c)
 			Expect(*domain.Spec.Devices.Interfaces[0].Address).To(Equal(test_address))
+		})
+
+		It("should calculate mebibyte from a quantity", func() {
+			mi64, _ := resource.ParseQuantity("2G")
+			q, err := QuantityToMebiByte(mi64)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(q).To(BeNumerically("==", 1907))
+		})
+
+		It("should fail calculating mebibyte if the quantity is less than 0", func() {
+			mi64, _ := resource.ParseQuantity("-2G")
+			_, err := QuantityToMebiByte(mi64)
+			Expect(err).To(HaveOccurred())
 		})
 
 		It("should calculate memory in bytes", func() {
@@ -945,13 +1027,13 @@ var _ = Describe("Converter", func() {
 				v1.Network{
 					Name: "red1",
 					NetworkSource: v1.NetworkSource{
-						Multus: &v1.CniNetwork{NetworkName: "red"},
+						Multus: &v1.MultusNetwork{NetworkName: "red"},
 					},
 				},
 				v1.Network{
 					Name: "red2",
 					NetworkSource: v1.NetworkSource{
-						Multus: &v1.CniNetwork{NetworkName: "red"},
+						Multus: &v1.MultusNetwork{NetworkName: "red"},
 					},
 				},
 				v1.Network{
@@ -969,6 +1051,35 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.Interfaces[1].Source.Bridge).To(Equal("k6t-net2"))
 			Expect(domain.Spec.Devices.Interfaces[2].Source.Bridge).To(Equal("k6t-eth0"))
 		})
+		It("Should set domain interface source correctly for default multus", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
+				*v1.DefaultNetworkInterface(),
+				*v1.DefaultNetworkInterface(),
+			}
+			vmi.Spec.Domain.Devices.Interfaces[0].Name = "red1"
+			vmi.Spec.Domain.Devices.Interfaces[1].Name = "red2"
+			vmi.Spec.Networks = []v1.Network{
+				v1.Network{
+					Name: "red1",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.MultusNetwork{NetworkName: "red", Default: true},
+					},
+				},
+				v1.Network{
+					Name: "red2",
+					NetworkSource: v1.NetworkSource{
+						Multus: &v1.MultusNetwork{NetworkName: "red"},
+					},
+				},
+			}
+
+			domain := vmiToDomain(vmi, c)
+			Expect(domain).ToNot(Equal(nil))
+			Expect(domain.Spec.Devices.Interfaces).To(HaveLen(2))
+			Expect(domain.Spec.Devices.Interfaces[0].Source.Bridge).To(Equal("k6t-eth0"))
+			Expect(domain.Spec.Devices.Interfaces[1].Source.Bridge).To(Equal("k6t-net1"))
+		})
 		It("Should set domain interface source correctly for genie", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
@@ -981,13 +1092,13 @@ var _ = Describe("Converter", func() {
 				v1.Network{
 					Name: "red1",
 					NetworkSource: v1.NetworkSource{
-						Genie: &v1.CniNetwork{NetworkName: "red"},
+						Genie: &v1.GenieNetwork{NetworkName: "red"},
 					},
 				},
 				v1.Network{
 					Name: "red2",
 					NetworkSource: v1.NetworkSource{
-						Genie: &v1.CniNetwork{NetworkName: "red"},
+						Genie: &v1.GenieNetwork{NetworkName: "red"},
 					},
 				},
 			}
@@ -1054,7 +1165,7 @@ var _ = Describe("Converter", func() {
 				{
 					Name: "red1",
 					NetworkSource: v1.NetworkSource{
-						Multus: &v1.CniNetwork{NetworkName: "red"},
+						Multus: &v1.MultusNetwork{NetworkName: "red"},
 					},
 				}}
 
@@ -1473,7 +1584,7 @@ var _ = Describe("Converter", func() {
 		sriovNetwork := v1.Network{
 			Name: "sriov",
 			NetworkSource: v1.NetworkSource{
-				Multus: &v1.CniNetwork{NetworkName: "sriov"},
+				Multus: &v1.MultusNetwork{NetworkName: "sriov"},
 			},
 		}
 		vmi.Spec.Networks = append(vmi.Spec.Networks, sriovNetwork)
@@ -1488,7 +1599,7 @@ var _ = Describe("Converter", func() {
 		sriovNetwork2 := v1.Network{
 			Name: "sriov2",
 			NetworkSource: v1.NetworkSource{
-				Multus: &v1.CniNetwork{NetworkName: "sriov2"},
+				Multus: &v1.MultusNetwork{NetworkName: "sriov2"},
 			},
 		}
 		vmi.Spec.Networks = append(vmi.Spec.Networks, sriovNetwork2)
@@ -1518,6 +1629,73 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Bus).To(Equal("0x81"))
 			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Slot).To(Equal("0x11"))
 			Expect(domain.Spec.Devices.HostDevices[1].Source.Address.Function).To(Equal("0x2"))
+		})
+	})
+
+	Context("Bootloader", func() {
+		var vmi *v1.VirtualMachineInstance
+		var c *ConverterContext
+
+		BeforeEach(func() {
+			vmi = &v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:      "testvmi",
+					Namespace: "mynamespace",
+				},
+			}
+
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+
+			c = &ConverterContext{
+				VirtualMachine: vmi,
+				UseEmulation:   true,
+			}
+		})
+
+		Context("when bootloader is not set", func() {
+			It("should configure the BIOS bootloader", func() {
+				vmi.Spec.Domain.Firmware = &v1.Firmware{}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+				Expect(domainSpec.OS.BootLoader).To(BeNil())
+				Expect(domainSpec.OS.NVRam).To(BeNil())
+			})
+		})
+
+		Context("when bootloader is set", func() {
+			It("should configure the BIOS bootloader if no BIOS or EFI option", func() {
+				vmi.Spec.Domain.Firmware = &v1.Firmware{
+					Bootloader: &v1.Bootloader{},
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+				Expect(domainSpec.OS.BootLoader).To(BeNil())
+				Expect(domainSpec.OS.NVRam).To(BeNil())
+			})
+
+			It("should configure the BIOS bootloader if BIOS", func() {
+				vmi.Spec.Domain.Firmware = &v1.Firmware{
+					Bootloader: &v1.Bootloader{
+						BIOS: &v1.BIOS{},
+					},
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+				Expect(domainSpec.OS.BootLoader).To(BeNil())
+				Expect(domainSpec.OS.NVRam).To(BeNil())
+			})
+
+			It("should configure the EFI bootloader if EFI insecure option", func() {
+
+				vmi.Spec.Domain.Firmware = &v1.Firmware{
+					Bootloader: &v1.Bootloader{
+						EFI: &v1.EFI{},
+					},
+				}
+				domainSpec := vmiToDomainXMLToDomainSpec(vmi, c)
+				Expect(domainSpec.OS.BootLoader.ReadOnly).To(Equal("yes"))
+				Expect(domainSpec.OS.BootLoader.Type).To(Equal("pflash"))
+				Expect(domainSpec.OS.BootLoader.Path).To(Equal(EFIPath))
+				Expect(domainSpec.OS.NVRam.Template).To(Equal(EFIVarsPath))
+				Expect(domainSpec.OS.NVRam.NVRam).To(Equal("/tmp/mynamespace_testvmi"))
+			})
 		})
 	})
 })
