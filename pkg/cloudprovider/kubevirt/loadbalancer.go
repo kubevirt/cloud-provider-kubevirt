@@ -2,18 +2,23 @@ package kubevirt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/pkg/cloudprovider"
+	v1 "kubevirt.io/kubevirt/pkg/api/v1"
 	"kubevirt.io/kubevirt/pkg/kubecli"
 )
 
@@ -224,6 +229,7 @@ func (lb *loadbalancer) createLoadBalancerServicePorts(service *corev1.Service) 
 
 func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
+	serviceLabelKey := serviceLabelKey(lbName)
 	allVmis, err := lb.kubevirt.VirtualMachineInstance(lb.namespace).List(&metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
@@ -231,15 +237,17 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 	vmiUIDs := make([]string, len(instanceIDs))
 
 	// Apply labels to all VMIs for the service to match
-	for _, vmi := range allVmis.Items {
-		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; ok {
-			vmi.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-			_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
+	for _, oldVMI := range allVmis.Items {
+		if _, ok := instanceIDs[oldVMI.Name]; ok {
+			newVMI := oldVMI.DeepCopy()
+			addLabel(newVMI.Labels, serviceLabelKey, serviceName)
+
+			err := lb.patchVMI(&oldVMI, newVMI)
 			if err != nil {
-				glog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+				glog.Errorf("Failed to update VMI %s: %v", oldVMI.Name, err)
 			} else {
 				// Remember updated VMI UIDs to find the correspomding pods
-				vmiUIDs = append(vmiUIDs, string(vmi.ObjectMeta.UID))
+				vmiUIDs = append(vmiUIDs, string(oldVMI.UID))
 			}
 		}
 	}
@@ -251,11 +259,13 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 	vmiPods, err := lb.kubevirt.CoreV1().Pods(lb.namespace).List(listOptions)
 
 	// Apply labels to all found pods
-	for _, pod := range vmiPods.Items {
-		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-		_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Update(&pod)
+	for _, oldPod := range vmiPods.Items {
+		newPod := oldPod.DeepCopy()
+		addLabel(newPod.Labels, serviceLabelKey, serviceName)
+
+		err := lb.patchPod(&oldPod, newPod)
 		if err != nil {
-			glog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
+			glog.Errorf("Failed to update pod %s: %v", oldPod.Name, err)
 		}
 	}
 	return nil
@@ -263,8 +273,9 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 
 func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
+	serviceLabelKey := serviceLabelKey(lbName)
 	listOptions := metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", serviceLabelKey(lbName), svcName),
+		LabelSelector: fmt.Sprintf("%s=%s", serviceLabelKey, svcName),
 	}
 	vmis, err := lb.kubevirt.VirtualMachineInstance(lb.namespace).List(&listOptions)
 	if err != nil {
@@ -277,26 +288,52 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes
 	vmiUIDs := make(map[string]struct{}, len(instanceIDs))
 
 	// Delete labels on those VMIs & pods which do not have a corresponding node object
-	for _, vmi := range vmis.Items {
-		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; !ok {
-			delete(vmi.ObjectMeta.Labels, serviceLabelKey(lbName))
-			_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
+	for _, oldVMI := range vmis.Items {
+		if _, ok := instanceIDs[oldVMI.Name]; !ok {
+			newVMI := oldVMI.DeepCopy()
+			delete(newVMI.Labels, serviceLabelKey)
+			err = lb.patchVMI(&oldVMI, newVMI)
 			if err != nil {
-				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+				return fmt.Errorf("Failed to update VMI %s: %v", oldVMI.Name, err)
 			}
-			vmiUIDs[string(vmi.ObjectMeta.UID)] = struct{}{}
+			vmiUIDs[string(oldVMI.UID)] = struct{}{}
 		}
 	}
-	for _, pod := range pods.Items {
-		if podCreatedBy, ok := pod.ObjectMeta.Labels["kubevirt.io/created-by"]; ok {
+	for _, oldPod := range pods.Items {
+		if podCreatedBy, ok := oldPod.Labels["kubevirt.io/created-by"]; ok {
 			if _, ok := vmiUIDs[podCreatedBy]; ok {
-				delete(pod.ObjectMeta.Labels, serviceLabelKey(lbName))
-				_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Update(&pod)
+				newPod := oldPod.DeepCopy()
+				delete(newPod.Labels, serviceLabelKey)
+				err = lb.patchPod(&oldPod, newPod)
 				if err != nil {
-					return fmt.Errorf("Failed to update pod: %s: %v", pod.ObjectMeta.Name, err)
+					return fmt.Errorf("Failed to update pod: %s: %v", oldPod.Name, err)
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func (lb *loadbalancer) patchVMI(old *v1.VirtualMachineInstance, new *v1.VirtualMachineInstance) error {
+	patch, err := createMergePatch(old, new)
+	if err != nil {
+		return err
+	}
+	_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Patch(new.Name, types.MergePatchType, patch)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lb *loadbalancer) patchPod(old *corev1.Pod, new *corev1.Pod) error {
+	patch, err := createMergePatch(old, new)
+	if err != nil {
+		return err
+	}
+	_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Patch(new.Name, types.MergePatchType, patch)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -311,4 +348,39 @@ func buildInstanceIDMap(nodes []*corev1.Node) map[string]struct{} {
 
 func serviceLabelKey(lbName string) string {
 	return strings.Join([]string{serviceLabelKeyPrefix, lbName}, "/")
+}
+
+func addLabel(labels map[string]string, key, value string) {
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[key] = value
+}
+
+func createMergePatch(obj1 metav1.Object, obj2 metav1.Object) ([]byte, error) {
+	t1, t2 := reflect.TypeOf(obj1), reflect.TypeOf(obj2)
+	if t1 != t2 {
+		return nil, fmt.Errorf("cannot patch two objects of different type: %q - %q", t1, t2)
+	}
+	if t1.Kind() != reflect.Ptr {
+		return nil, fmt.Errorf("type has to be of kind pointer but got %q", t1)
+	}
+
+	obj1Data, err := json.Marshal(obj1)
+	if err != nil {
+		return nil, err
+	}
+
+	obj2Data, err := json.Marshal(obj2)
+	if err != nil {
+		return nil, err
+	}
+
+	patch, err := jsonpatch.CreateMergePatch(obj1Data, obj2Data)
+	if err != nil {
+		glog.Errorf("*** %v", err)
+		return nil, err
+	}
+	glog.Infof("*********************** %s\n%s\n%s", patch, obj1Data, obj2Data)
+	return patch, err
 }
