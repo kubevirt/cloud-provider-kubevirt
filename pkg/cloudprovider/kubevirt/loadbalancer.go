@@ -20,13 +20,14 @@ import (
 const (
 	// Prefix of the service label to put on VMIs and pods
 	serviceLabelKeyPrefix = "cloud.kubevirt.io"
-	// Interval in seconds between polling the service after creation
-	loadBalancerCreatePollIntervalSeconds = 5
+	// Default interval in seconds between polling the service after creation
+	defaultLoadBalancerCreatePollInterval = 5
 )
 
 type loadbalancer struct {
 	namespace string
 	kubevirt  kubecli.KubevirtClient
+	config    LoadBalancerConfig
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -91,7 +92,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, err
 	}
 
-	err = wait.PollUntil(loadBalancerCreatePollIntervalSeconds*time.Second, func() (bool, error) {
+	err = wait.PollUntil(lb.getLoadBalancerCreatePollInterval()*time.Second, func() (bool, error) {
 		if len(lbService.Status.LoadBalancer.Ingress) != 0 {
 			return true, nil
 		}
@@ -299,6 +300,14 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(lbName, svcName string, nodes
 		}
 	}
 	return nil
+}
+
+func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
+	if lb.config.CreationPollInterval > 0 {
+		return time.Duration(lb.config.CreationPollInterval)
+	}
+	glog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
+	return defaultLoadBalancerCreatePollInterval
 }
 
 func buildInstanceIDMap(nodes []*corev1.Node) map[string]struct{} {
