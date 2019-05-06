@@ -1,8 +1,24 @@
 VERSION ?= v0.0.7
 REGISTRY ?= dgonzalez
 
+CLUSTER_NAME ?= kubevirt
+KUBECONFIG := dev/kubeconfig
+CLOUD_CONFIG := dev/cloud-config
+CERT_DIR := dev/
+
 .PHONY: all
 all: clean test build
+
+.PHONY: start
+start:
+	go run ./cmd/kubevirt-cloud-controller-manager \
+		--kubeconfig=$(KUBECONFIG) \
+		--cloud-provider=kubevirt \
+		--use-service-account-credentials \
+		--cloud-config=$(CLOUD_CONFIG) \
+		--cluster-name=$(CLUSTER_NAME) \
+		--cert-dir=$(CERT_DIR) \
+		--v=2
 
 .PHONY: clean
 clean:
