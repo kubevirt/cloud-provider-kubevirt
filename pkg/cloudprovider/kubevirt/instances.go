@@ -25,6 +25,7 @@ const (
 type instances struct {
 	namespace string
 	kubevirt  kubecli.KubevirtClient
+	config    InstancesConfig
 }
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
@@ -140,6 +141,10 @@ func (i *instances) InstanceTypeByProviderID(ctx context.Context, providerID str
 }
 
 func (i *instances) instanceTypeByInstanceID(ctx context.Context, instanceID string) (string, error) {
+	if !i.config.EnableInstanceTypes {
+		// Only try to detect instance type if enabled
+		return "", nil
+	}
 	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
 	if err != nil {
 		glog.Errorf("Failed to get instance with instance ID %s in namespace %s: %v", instanceID, i.namespace, err)

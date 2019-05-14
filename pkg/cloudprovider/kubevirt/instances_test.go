@@ -94,6 +94,9 @@ func mockInstances(t *testing.T, namespace string) cloudprovider.Instances {
 	return &instances{
 		namespace: namespace,
 		kubevirt:  kubevirt,
+		config: InstancesConfig{
+			EnableInstanceTypes: true,
+		},
 	}
 }
 
