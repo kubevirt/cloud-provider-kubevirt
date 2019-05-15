@@ -102,10 +102,12 @@ func mockInstances(t *testing.T, namespace string) cloudprovider.Instances {
 
 func makeNodeAddressList(hostname string, internalIPs []string) []corev1.NodeAddress {
 	addresses := make([]corev1.NodeAddress, 0)
-	addresses = append(addresses, corev1.NodeAddress{
-		Type:    corev1.NodeHostName,
-		Address: hostname,
-	})
+	if hostname != "" {
+		addresses = append(addresses, corev1.NodeAddress{
+			Type:    corev1.NodeHostName,
+			Address: hostname,
+		})
+	}
 	for _, ip := range internalIPs {
 		addresses = append(addresses, corev1.NodeAddress{
 			Type:    corev1.NodeInternalIP,
@@ -138,9 +140,9 @@ func TestNodeAddresses(t *testing.T) {
 	}{
 		{types.NodeName("missingVMI"), nil, fmt.Errorf("virtualmachineinstances.kubevirt.io \"missingVMI\" not found")},
 		{types.NodeName("nodeHostname"), makeNodeAddressList("hostname", nil), nil},
-		{types.NodeName("nodeNoHostname"), makeNodeAddressList("nodenohostname", []string{"10.0.0.10"}), nil},
+		{types.NodeName("nodeNoHostname"), makeNodeAddressList("", []string{"10.0.0.10"}), nil},
 		{types.NodeName("nodeDomainHostname"), makeNodeAddressList("node.domainname", []string{"10.0.0.11"}), nil},
-		{types.NodeName("nodeDomainNoHostname"), makeNodeAddressList("node.domainnohostname", []string{"10.0.0.12", "10.0.0.13", "10.0.0.14", "10.0.0.15", "10.0.0.16", "10.0.0.17"}), nil},
+		{types.NodeName("nodeDomainNoHostname"), makeNodeAddressList("", []string{"10.0.0.12", "10.0.0.13", "10.0.0.14", "10.0.0.15", "10.0.0.16", "10.0.0.17"}), nil},
 	}
 
 	for _, test := range tests {
@@ -164,9 +166,9 @@ func TestNodeAddressesByProviderID(t *testing.T) {
 		{"notkubevirt://instance", nil, fmt.Errorf("ProviderID \"notkubevirt://instance\" didn't match expected format \"kubevirt://InstanceID\"")},
 		{"kubevirt://missingVMI", nil, fmt.Errorf("virtualmachineinstances.kubevirt.io \"missingVMI\" not found")},
 		{"kubevirt://nodeHostname", makeNodeAddressList("hostname", nil), nil},
-		{"kubevirt://nodeNoHostname", makeNodeAddressList("nodenohostname", []string{"10.0.0.10"}), nil},
+		{"kubevirt://nodeNoHostname", makeNodeAddressList("", []string{"10.0.0.10"}), nil},
 		{"kubevirt://nodeDomainHostname", makeNodeAddressList("node.domainname", []string{"10.0.0.11"}), nil},
-		{"kubevirt://nodeDomainNoHostname", makeNodeAddressList("node.domainnohostname", []string{"10.0.0.12", "10.0.0.13", "10.0.0.14", "10.0.0.15", "10.0.0.16", "10.0.0.17"}), nil},
+		{"kubevirt://nodeDomainNoHostname", makeNodeAddressList("", []string{"10.0.0.12", "10.0.0.13", "10.0.0.14", "10.0.0.15", "10.0.0.16", "10.0.0.17"}), nil},
 	}
 
 	for _, test := range tests {

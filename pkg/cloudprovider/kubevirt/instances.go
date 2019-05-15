@@ -61,16 +61,12 @@ func (i *instances) nodeAddressesByInstanceID(ctx context.Context, instanceID st
 	}
 	addresses := []corev1.NodeAddress{}
 
-	var hostname string
 	if vmi.Spec.Hostname != "" {
-		hostname = vmi.Spec.Hostname
-	} else {
-		hostname = vmi.ObjectMeta.Name
+		v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
+			Type:    corev1.NodeHostName,
+			Address: vmi.Spec.Hostname,
+		})
 	}
-	v1helper.AddToNodeAddresses(&addresses, corev1.NodeAddress{
-		Type:    corev1.NodeHostName,
-		Address: hostname,
-	})
 
 	for _, netIface := range vmi.Status.Interfaces {
 		// TODO(dgonzalez): We currently assume that all IPs assigned to interfaces
