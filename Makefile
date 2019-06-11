@@ -23,26 +23,22 @@ start:
 .PHONY: clean
 clean:
 	if [ -d bin ]; then rm -r bin; fi
-	go clean -i -x ./...
-
-.PHONY:deps-install
-deps-install:
-	glide install -v
+	GO111MODULE=on go clean -modcache -i -x ./...
 
 .PHONY:deps-update
 deps-update:
-	glide update -v
+	GO111MODULE=on go mod tidy && GO111MODULE=on go mod vendor 
 
 bin:
 	mkdir bin
 
 .PHONY: test
 test:
-	go test ./pkg/...
+	GO111MODULE=on go test ./pkg/...
 
 .PHONY: build
 build: bin
-	GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
+	GO111MODULE=on GOFLAGS=-mod=vendor GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
 .PHONY:image
 image: build
