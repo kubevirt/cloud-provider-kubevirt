@@ -3,14 +3,13 @@ package kubevirt
 import (
 	"bytes"
 	"fmt"
-	"gopkg.in/yaml.v2"
 	"io"
 
-	"github.com/golang/glog"
+	"gopkg.in/yaml.v2"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/kubernetes/pkg/cloudprovider"
-	"k8s.io/kubernetes/pkg/controller"
-	"kubevirt.io/kubevirt/pkg/kubecli"
+	cloudprovider "k8s.io/cloud-provider"
+	"k8s.io/klog"
+	"kubevirt.io/client-go/kubecli"
 )
 
 const (
@@ -95,12 +94,12 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	}
 	kubevirtClient, err := kubecli.GetKubevirtClientFromClientConfig(clientConfig)
 	if err != nil {
-		glog.Errorf("Failed to create KubeVirt client: %v", err)
+		klog.Errorf("Failed to create KubeVirt client: %v", err)
 		return nil, err
 	}
 	namespace, _, err := clientConfig.Namespace()
 	if err != nil {
-		glog.Errorf("Could not find namespace in client config: %v", err)
+		klog.Errorf("Could not find namespace in client config: %v", err)
 		return nil, err
 	}
 	return &cloud{
@@ -112,7 +111,8 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 
 // Initialize provides the cloud with a kubernetes client builder and may spawn goroutines
 // to perform housekeeping activities within the cloud provider.
-func (c *cloud) Initialize(clientBuilder controller.ControllerClientBuilder) {}
+func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
+}
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
