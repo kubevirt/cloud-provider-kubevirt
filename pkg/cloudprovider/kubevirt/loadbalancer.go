@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/kubernetes/pkg/cloudprovider"
-	"kubevirt.io/kubevirt/pkg/kubecli"
+	cloudprovider "k8s.io/cloud-provider"
+	"k8s.io/klog"
+	"kubevirt.io/client-go/kubecli"
 )
 
 const (
@@ -38,7 +38,7 @@ func (lb *loadbalancer) GetLoadBalancer(ctx context.Context, clusterName string,
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 	lbService, serviceExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
-		glog.Errorf("Failed to get LoadBalancer service: %v", err)
+		klog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, false, err
 	}
 	if !serviceExists {
@@ -64,18 +64,18 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	err := lb.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
-		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
+		klog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return nil, err
 	}
 	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
-		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
+		klog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return nil, err
 	}
 
 	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
-		glog.Errorf("Failed to get LoadBalancer service: %v", err)
+		klog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return nil, err
 	}
 	if lbExists {
@@ -88,7 +88,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	lbService, err = lb.createLoadBalancerService(lbName, service)
 	if err != nil {
-		glog.Errorf("Failed to create LoadBalancer service: %v", err)
+		klog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
 	}
 
@@ -98,7 +98,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		}
 		service, exists, err := lb.getLoadBalancerService(lbName)
 		if err != nil {
-			glog.Errorf("Failed to get LoadBalancer service: %v", err)
+			klog.Errorf("Failed to get LoadBalancer service: %v", err)
 			return false, err
 		}
 		if exists && len(service.Status.LoadBalancer.Ingress) > 0 {
@@ -108,7 +108,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return false, nil
 	}, ctx.Done())
 	if err != nil {
-		glog.Errorf("Failed to poll LoadBalancer service: %v", err)
+		klog.Errorf("Failed to poll LoadBalancer service: %v", err)
 		return nil, err
 	}
 
@@ -123,12 +123,12 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 	err := lb.applyServiceLabels(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
-		glog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
+		klog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
 		return err
 	}
 	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
-		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
+		klog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
 	}
 	return nil
@@ -147,20 +147,20 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 
 	lbService, lbExists, err := lb.getLoadBalancerService(lbName)
 	if err != nil {
-		glog.Errorf("Failed to get LoadBalancer service: %v", err)
+		klog.Errorf("Failed to get LoadBalancer service: %v", err)
 		return err
 	}
 	if lbExists {
 		err = lb.kubevirt.CoreV1().Services(lb.namespace).Delete(lbService.ObjectMeta.Name, &metav1.DeleteOptions{})
 		if err != nil {
-			glog.Errorf("Failed to delete LoadBalancer service: %v", err)
+			klog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
 		}
 	}
 
 	err = lb.ensureServiceLabelsDeleted(lbName, service.ObjectMeta.Name, []*corev1.Node{})
 	if err != nil {
-		glog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
+		klog.Errorf("Failed to delete nodes from LoadBalancer service: %v", err)
 		return err
 	}
 
@@ -203,7 +203,7 @@ func (lb *loadbalancer) createLoadBalancerService(lbName string, service *corev1
 
 	lbService, err := lb.kubevirt.CoreV1().Services(lb.namespace).Create(lbService)
 	if err != nil {
-		glog.Errorf("Failed to create LB %s: %v", lbName, err)
+		klog.Errorf("Failed to create LB %s: %v", lbName, err)
 		return nil, err
 	}
 	return lbService, nil
@@ -237,7 +237,7 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 			vmi.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
 			_, err = lb.kubevirt.VirtualMachineInstance(lb.namespace).Update(&vmi)
 			if err != nil {
-				glog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
+				klog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			} else {
 				// Remember updated VMI UIDs to find the correspomding pods
 				vmiUIDs = append(vmiUIDs, string(vmi.ObjectMeta.UID))
@@ -256,7 +256,7 @@ func (lb *loadbalancer) applyServiceLabels(lbName, serviceName string, nodes []*
 		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
 		_, err = lb.kubevirt.CoreV1().Pods(lb.namespace).Update(&pod)
 		if err != nil {
-			glog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
+			klog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
 		}
 	}
 	return nil
@@ -306,7 +306,7 @@ func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
 	if lb.config.CreationPollInterval > 0 {
 		return time.Duration(lb.config.CreationPollInterval)
 	}
-	glog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
+	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
 	return defaultLoadBalancerCreatePollInterval
 }
 
