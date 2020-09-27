@@ -60,10 +60,16 @@ func (z *zones) getZoneByInstanceID(ctx context.Context, instanceID string) (clo
 
 	// Take over failure domain and region from node where the instance is running on.
 	zone := cloudprovider.Zone{}
-	if failureDomain, ok := node.ObjectMeta.Labels[corev1.LabelZoneFailureDomain]; ok {
+	// TODO Use corev1.LabelZoneFailureDomainStable when the k8s.io/api/core/v1 dependency is updated to 1.17 or greater
+	if failureDomain, ok := node.ObjectMeta.Labels["topology.kubernetes.io/zone"]; ok {
+		zone.FailureDomain = failureDomain
+	} else if failureDomain, ok := node.ObjectMeta.Labels[corev1.LabelZoneFailureDomain]; ok {
 		zone.FailureDomain = failureDomain
 	}
-	if region, ok := node.ObjectMeta.Labels[corev1.LabelZoneRegion]; ok {
+	// TODO Use corev1.LabelZoneRegionStable when the k8s.io/api/core/v1 dependency is updated to 1.17 or greater
+	if region, ok := node.ObjectMeta.Labels["topology.kubernetes.io/region"]; ok {
+		zone.Region = region
+	} else if region, ok := node.ObjectMeta.Labels[corev1.LabelZoneRegion]; ok {
 		zone.Region = region
 	}
 
