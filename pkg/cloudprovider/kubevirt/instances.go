@@ -8,13 +8,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
 	v1helper "k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog"
 	kubevirtv1 "kubevirt.io/client-go/api/v1"
-	"kubevirt.io/client-go/kubecli"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -23,7 +22,7 @@ const (
 
 type instances struct {
 	namespace string
-	kubevirt  kubecli.KubevirtClient
+	client    client.Client
 	config    InstancesConfig
 }
 
@@ -54,8 +53,8 @@ func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID st
 }
 
 func (i *instances) nodeAddressesByInstanceID(ctx context.Context, instanceID string) ([]corev1.NodeAddress, error) {
-	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err := i.client.Get(ctx, client.ObjectKey{Name: instanceID, Namespace: i.namespace}, &vmi); err != nil {
 		return nil, err
 	}
 	addresses := []corev1.NodeAddress{}
@@ -98,8 +97,8 @@ func (i *instances) ExternalID(ctx context.Context, nodeName types.NodeName) (st
 // Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
 func (i *instances) InstanceID(ctx context.Context, nodeName types.NodeName) (string, error) {
 	name := instanceIDFromNodeName(string(nodeName))
-	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(name, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err := i.client.Get(ctx, client.ObjectKey{Name: name, Namespace: i.namespace}, &vmi); err != nil {
 		if errors.IsNotFound(err) {
 			return "", cloudprovider.InstanceNotFound
 		}
@@ -140,8 +139,8 @@ func (i *instances) instanceTypeByInstanceID(ctx context.Context, instanceID str
 		// Only try to detect instance type if enabled
 		return "", nil
 	}
-	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err := i.client.Get(ctx, client.ObjectKey{Name: instanceID, Namespace: i.namespace}, &vmi); err != nil {
 		klog.Errorf("Failed to get instance with instance ID %s in namespace %s: %v", instanceID, i.namespace, err)
 		return "", err
 	}
@@ -162,8 +161,9 @@ func (i *instances) AddSSHKeyToAllInstances(ctx context.Context, user string, ke
 // CurrentNodeName returns the name of the node we are currently running on
 // On most clouds (e.g. GCE) this is the hostname, so we provide the hostname
 func (i *instances) CurrentNodeName(ctx context.Context, hostname string) (types.NodeName, error) {
-	vmis, err := i.kubevirt.VirtualMachineInstance(i.namespace).List(&metav1.ListOptions{})
-	if err != nil {
+	var vmis kubevirtv1.VirtualMachineInstanceList
+
+	if err := i.client.List(ctx, &vmis, client.InNamespace(i.namespace)); err != nil {
 		klog.Errorf("Failed to list instances in namespace %s: %v", i.namespace, err)
 		return "", err
 	}
@@ -193,8 +193,8 @@ func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID s
 		instanceID = instanceIDFromNodeName(providerID)
 	}
 	// If we can not get the VMI by its providerID, assume it no longer exists
-	_, err = i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err = i.client.Get(ctx, client.ObjectKey{Name: instanceID, Namespace: i.namespace}, &vmi); err != nil {
 		if errors.IsNotFound(err) {
 			return false, nil
 		}
@@ -211,8 +211,8 @@ func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID
 		klog.Errorf("Failed to get instance with provider ID %s in namespace %s: %v", providerID, i.namespace, err)
 		return false, err
 	}
-	vmi, err := i.kubevirt.VirtualMachineInstance(i.namespace).Get(instanceID, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err := i.client.Get(ctx, client.ObjectKey{Name: instanceID, Namespace: i.namespace}, &vmi); err != nil {
 		if errors.IsNotFound(err) {
 			return false, cloudprovider.InstanceNotFound
 		}

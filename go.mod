@@ -25,6 +25,7 @@ replace (
 	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20191125132246-f6563a70e19a
 	github.com/operator-framework/operator-registry => github.com/operator-framework/operator-registry v1.14.3
 	google.golang.org/grpc => google.golang.org/grpc v1.27.0
+	gopkg.in/square/go-jose.v2 => gopkg.in/square/go-jose.v2 v2.2.2
 	k8s.io/api => k8s.io/api v0.19.3
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.19.3
 	k8s.io/apimachinery => k8s.io/apimachinery v0.19.3

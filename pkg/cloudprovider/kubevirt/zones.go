@@ -4,16 +4,16 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog"
-	"kubevirt.io/client-go/kubecli"
+	kubevirtv1 "kubevirt.io/client-go/api/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type zones struct {
 	namespace string
-	kubevirt  kubecli.KubevirtClient
+	client    client.Client
 }
 
 // GetZone returns the Zone containing the current failure zone and locality region that the program is running in
@@ -45,15 +45,15 @@ func (z *zones) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) 
 }
 
 func (z *zones) getZoneByInstanceID(ctx context.Context, instanceID string) (cloudprovider.Zone, error) {
-	vmi, err := z.kubevirt.VirtualMachineInstance(z.namespace).Get(instanceID, &metav1.GetOptions{})
-	if err != nil {
+	var vmi kubevirtv1.VirtualMachineInstance
+	if err := z.client.Get(ctx, client.ObjectKey{Name: instanceID, Namespace: z.namespace}, &vmi); err != nil {
 		klog.Errorf("Failed to get instance with name %s in namespace %s: %v", instanceID, z.namespace, err)
 		return cloudprovider.Zone{}, err
 	}
 
 	nodeName := vmi.Status.NodeName
-	node, err := z.kubevirt.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-	if err != nil {
+	var node corev1.Node
+	if err := z.client.Get(ctx, client.ObjectKey{Name: nodeName}, &node); err != nil {
 		klog.Errorf("Failed to get node %s: %v", nodeName, err)
 		return cloudprovider.Zone{}, err
 	}

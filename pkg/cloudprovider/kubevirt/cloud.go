@@ -6,10 +6,13 @@ import (
 	"io"
 
 	"gopkg.in/yaml.v2"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog"
-	"kubevirt.io/client-go/kubecli"
+	kubevirtv1 "kubevirt.io/client-go/api/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -17,9 +20,16 @@ const (
 	ProviderName = "kubevirt"
 )
 
+var scheme = runtime.NewScheme()
+
+func init() {
+	corev1.AddToScheme(scheme)
+	kubevirtv1.AddToScheme(scheme)
+}
+
 type cloud struct {
 	namespace string
-	kubevirt  kubecli.KubevirtClient
+	client    client.Client
 	config    CloudConfig
 }
 
@@ -92,9 +102,8 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, err
 	}
-	kubevirtClient, err := kubecli.GetKubevirtClientFromClientConfig(clientConfig)
+	restConfig, err := clientConfig.ClientConfig()
 	if err != nil {
-		klog.Errorf("Failed to create KubeVirt client: %v", err)
 		return nil, err
 	}
 	namespace, _, err := clientConfig.Namespace()
@@ -102,9 +111,15 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 		klog.Errorf("Could not find namespace in client config: %v", err)
 		return nil, err
 	}
+	c, err := client.New(restConfig, client.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &cloud{
 		namespace: namespace,
-		kubevirt:  kubevirtClient,
+		client:    c,
 		config:    cloudConf,
 	}, nil
 }
@@ -121,7 +136,7 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	}
 	return &loadbalancer{
 		namespace: c.namespace,
-		kubevirt:  c.kubevirt,
+		client:    c.client,
 		config:    c.config.LoadBalancer,
 	}, true
 }
@@ -133,9 +148,13 @@ func (c *cloud) Instances() (cloudprovider.Instances, bool) {
 	}
 	return &instances{
 		namespace: c.namespace,
-		kubevirt:  c.kubevirt,
+		client:    c.client,
 		config:    c.config.Instances,
 	}, true
+}
+
+func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
+	return nil, false
 }
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
@@ -145,7 +164,7 @@ func (c *cloud) Zones() (cloudprovider.Zones, bool) {
 	}
 	return &zones{
 		namespace: c.namespace,
-		kubevirt:  c.kubevirt,
+		client:    c.client,
 	}, true
 }
 
