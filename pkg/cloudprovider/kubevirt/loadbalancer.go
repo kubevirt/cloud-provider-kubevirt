@@ -157,7 +157,6 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		return err
 	}
 	if lbExists {
-
 		if err := lb.client.Delete(ctx, lbService); err != nil {
 			klog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
@@ -174,14 +173,14 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 }
 
 func (lb *loadbalancer) getLoadBalancerService(ctx context.Context, lbName string) (*corev1.Service, bool, error) {
-	var service *corev1.Service
-	if err := lb.client.Get(ctx, client.ObjectKey{Name: lbName, Namespace: lb.namespace}, service); err != nil {
+	var service corev1.Service
+	if err := lb.client.Get(ctx, client.ObjectKey{Name: lbName, Namespace: lb.namespace}, &service); err != nil {
 		if errors.IsNotFound(err) {
 			return nil, false, nil
 		}
 		return nil, false, err
 	}
-	return service, true, nil
+	return &service, true, nil
 }
 
 func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName string, service *corev1.Service) (*corev1.Service, error) {
@@ -234,7 +233,7 @@ func (lb *loadbalancer) applyServiceLabels(ctx context.Context, lbName, serviceN
 	if err := lb.client.List(ctx, &allVmis, client.InNamespace(lb.namespace)); err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
-	vmiUIDs := make([]string, len(instanceIDs))
+	var vmiUIDs []string
 
 	// Apply labels to all VMIs for the service to match
 	for _, vmi := range allVmis.Items {
