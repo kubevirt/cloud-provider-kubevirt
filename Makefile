@@ -27,7 +27,7 @@ clean:
 
 .PHONY:deps-update
 deps-update:
-	go mod tidy && GO111MODULE=on go mod vendor 
+	go mod tidy
 
 bin:
 	mkdir bin
@@ -38,7 +38,7 @@ test:
 
 .PHONY: build
 build: bin
-	GOFLAGS=-mod=vendor GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
+	GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
 .PHONY:image
 image: build
