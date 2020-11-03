@@ -5,8 +5,10 @@ go 1.15
 require (
 	github.com/go-logfmt/logfmt v0.5.0 // indirect
 	github.com/go-logr/logr v0.2.1 // indirect
+	github.com/golang/mock v1.4.4
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5
+	golang.org/x/tools v0.0.0-20201102212025-f46e4245211d // indirect
 	gopkg.in/yaml.v2 v2.3.0
 	k8s.io/api v0.19.3
 	k8s.io/apimachinery v0.19.3

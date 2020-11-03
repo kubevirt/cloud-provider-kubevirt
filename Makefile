@@ -47,3 +47,7 @@ image: build
 .PHONY: push
 push:
 	docker push $(REGISTRY)/kubevirt-cloud-controller-manager:$(VERSION)
+
+.PHONY: generate
+generate:
+	go generate ./pkg/...
