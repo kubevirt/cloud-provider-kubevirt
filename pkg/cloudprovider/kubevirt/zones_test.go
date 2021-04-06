@@ -11,85 +11,39 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/fake"
 	cloudprovider "k8s.io/cloud-provider"
 	kubevirtv1 "kubevirt.io/client-go/api/v1"
-	"kubevirt.io/client-go/kubecli"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt/mock/client"
 )
 
-func mockZones(t *testing.T, namespace string) cloudprovider.Zones {
-	ctrl := gomock.NewController(t)
+var (
+	emptyZone                   = cloudprovider.Zone{}
+	invalidNodeVMI              = kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "invalidNode", Namespace: "test"}, Status: kubevirtv1.VirtualMachineInstanceStatus{NodeName: "invalidNode"}}
+	noFailureDomainRegionVMI    = kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "noFailureDomainRegion", Namespace: "test"}, Status: kubevirtv1.VirtualMachineInstanceStatus{NodeName: "noFailureDomainRegion"}}
+	validFailureDomainRegionVMI = kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "validFailureDomainRegion", Namespace: "test"}, Status: kubevirtv1.VirtualMachineInstanceStatus{NodeName: "validFailureDomainRegion"}}
+	validFailureDomainVMI       = kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "validFailureDomain", Namespace: "test"}, Status: kubevirtv1.VirtualMachineInstanceStatus{NodeName: "validFailureDomain"}}
+	validRegionVMI              = kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{Name: "validRegion", Namespace: "test"}, Status: kubevirtv1.VirtualMachineInstanceStatus{NodeName: "validRegion"}}
 
-	nodeList := corev1.NodeList{
-		Items: []corev1.Node{
-			corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "noFailureDomainRegion",
-				},
-			},
-			corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "validFailureDomainRegion",
-					Labels: map[string]string{
-						"failure-domain.beta.kubernetes.io/zone":   "failureDomain",
-						"failure-domain.beta.kubernetes.io/region": "region",
-					},
-				},
-			},
-			corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "validFailureDomain",
-					Labels: map[string]string{
-						"failure-domain.beta.kubernetes.io/zone": "failureDomain",
-					},
-				},
-			},
-			corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "validRegion",
-					Labels: map[string]string{
-						"failure-domain.beta.kubernetes.io/region": "region",
-					},
-				},
-			},
-		},
-	}
-
-	kubevirt := kubecli.NewMockKubevirtClient(ctrl)
-
-	kubernetes := fake.NewSimpleClientset(&nodeList)
-	kubevirt.EXPECT().CoreV1().Return(kubernetes.CoreV1()).AnyTimes()
-
-	vmiInterface := kubecli.NewMockVirtualMachineInstanceInterface(ctrl)
-	kubevirt.EXPECT().VirtualMachineInstance(gomock.Eq(namespace)).Return(vmiInterface).AnyTimes()
-
-	vmiMap := map[string]*kubevirtv1.VirtualMachineInstance{
-		"invalidNode":              kubevirtv1.NewMinimalVMIWithNS(namespace, "invalidnode"),
-		"noFailureDomainRegion":    kubevirtv1.NewMinimalVMIWithNS(namespace, "noFailureDomainRegion"),
-		"validFailureDomainRegion": kubevirtv1.NewMinimalVMIWithNS(namespace, "validFailureDomainRegion"),
-		"validFailureDomain":       kubevirtv1.NewMinimalVMIWithNS(namespace, "validFailureDomain"),
-		"validRegion":              kubevirtv1.NewMinimalVMIWithNS(namespace, "validRegion"),
-	}
-
-	for name, vmi := range vmiMap {
-		vmi.Status.NodeName = name
-		vmiInterface.EXPECT().Get(gomock.Eq(name), gomock.Any()).Return(vmi, nil)
-	}
-	vmiInterface.EXPECT().Get(gomock.Eq("missingVMI"), gomock.Any()).Return(nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI"))
-
-	return &zones{
-		namespace: namespace,
-		kubevirt:  kubevirt,
-	}
-}
-
-var emptyZone = cloudprovider.Zone{}
+	noFailureDomainRegionNode    = corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "noFailureDomainRegion"}}
+	validFailureDomainRegionNode = corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "validFailureDomainRegion", Labels: map[string]string{"failure-domain.beta.kubernetes.io/zone": "failureDomain", "failure-domain.beta.kubernetes.io/region": "region"}}}
+	validFailureDomainNode       = corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "validFailureDomain", Labels: map[string]string{"failure-domain.beta.kubernetes.io/zone": "failureDomain"}}}
+	validRegionNode              = corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "validRegion", Labels: map[string]string{"failure-domain.beta.kubernetes.io/region": "region"}}}
+)
 
 func TestGetZone(t *testing.T) {
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+	z := &zones{
+		namespace: "test",
+		client:    c,
+	}
+
 	// The kubevirt cloud provider is an external cloud provider
 	// and does therefore not implement this method
-	z := mockZones(t, "testGetZone")
-	zone, err := z.GetZone(context.TODO())
+	zone, err := z.GetZone(ctx)
 
 	if zone != emptyZone {
 		t.Errorf("Expected: %v, got: %v", emptyZone, zone)
@@ -100,7 +54,28 @@ func TestGetZone(t *testing.T) {
 }
 
 func TestGetZoneByProviderID(t *testing.T) {
-	z := mockZones(t, "testGetZoneByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+	z := &zones{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "invalidNode", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, invalidNodeVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "invalidNode"}, gomock.AssignableToTypeOf(&corev1.Node{})).Return(errors.NewNotFound(schema.GroupResource{Group: "", Resource: "nodes"}, "invalidNode")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "noFailureDomainRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, noFailureDomainRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "noFailureDomainRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, noFailureDomainRegionNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomainRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validFailureDomainRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomainRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validFailureDomainRegionNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomain", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validFailureDomainVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomain"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validFailureDomainNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validRegionNode),
+	)
+
 	tests := []struct {
 		providerID    string
 		expectedZone  cloudprovider.Zone
@@ -116,7 +91,7 @@ func TestGetZoneByProviderID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		zone, err := z.GetZoneByProviderID(context.TODO(), test.providerID)
+		zone, err := z.GetZoneByProviderID(ctx, test.providerID)
 		if zone != test.expectedZone {
 			t.Errorf("Expected: %v, got: %v", test.expectedZone, zone)
 		}
@@ -127,7 +102,28 @@ func TestGetZoneByProviderID(t *testing.T) {
 }
 
 func TestGetZoneByNodeName(t *testing.T) {
-	z := mockZones(t, "testGetZoneByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+	z := &zones{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "invalidNode", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, invalidNodeVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "invalidNode"}, gomock.AssignableToTypeOf(&corev1.Node{})).Return(errors.NewNotFound(schema.GroupResource{Group: "", Resource: "nodes"}, "invalidNode")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "noFailureDomainRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, noFailureDomainRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "noFailureDomainRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, noFailureDomainRegionNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomainRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validFailureDomainRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomainRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validFailureDomainRegionNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomain", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validFailureDomainVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validFailureDomain"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validFailureDomainNode),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validRegion", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, validRegionVMI),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "validRegion"}, gomock.AssignableToTypeOf(&corev1.Node{})).SetArg(2, validRegionNode),
+	)
+
 	tests := []struct {
 		nodeName      types.NodeName
 		expectedZone  cloudprovider.Zone
@@ -142,7 +138,7 @@ func TestGetZoneByNodeName(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		zone, err := z.GetZoneByNodeName(context.TODO(), test.nodeName)
+		zone, err := z.GetZoneByNodeName(ctx, test.nodeName)
 		if zone != test.expectedZone {
 			t.Errorf("Expected: %v, got: %v", test.expectedZone, zone)
 		}

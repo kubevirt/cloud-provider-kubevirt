@@ -8,97 +8,170 @@ import (
 	"github.com/golang/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
 	kubevirtv1 "kubevirt.io/client-go/api/v1"
-	"kubevirt.io/client-go/kubecli"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt/mock/client"
 )
 
-func mockInstances(t *testing.T, namespace string) cloudprovider.Instances {
-	ctrl := gomock.NewController(t)
-	kubevirt := kubecli.NewMockKubevirtClient(ctrl)
-
-	vmiInterface := kubecli.NewMockVirtualMachineInstanceInterface(ctrl)
-	kubevirt.EXPECT().VirtualMachineInstance(gomock.Eq(namespace)).Return(vmiInterface).AnyTimes()
-
-	vmiMap := map[string]*kubevirtv1.VirtualMachineInstance{
-		"nodeHostname":         kubevirtv1.NewMinimalVMIWithNS(namespace, "nodehostname"),
-		"nodeNoHostname":       kubevirtv1.NewMinimalVMIWithNS(namespace, "nodenohostname"),
-		"nodeDomainHostname":   kubevirtv1.NewMinimalVMIWithNS(namespace, "node.domainhostname"),
-		"nodeDomainNoHostname": kubevirtv1.NewMinimalVMIWithNS(namespace, "node.domainnohostname"),
-		"nodePhaseUnset":       kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephaseunset"),
-		"nodePhasePending":     kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephasepending"),
-		"nodePhaseScheduling":  kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephasescheduling"),
-		"nodePhaseScheduled":   kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephasescheduled"),
-		"nodePhaseRunning":     kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephaserunning"),
-		"nodePhaseSucceeded":   kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephasesucceeded"),
-		"nodePhaseFailed":      kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephasefailed"),
-		"nodePhaseUnknown":     kubevirtv1.NewMinimalVMIWithNS(namespace, "nodephaseunknown"),
-		"nodeFlavor":           kubevirtv1.NewMinimalVMIWithNS(namespace, "nodeflavor"),
-		"nodeNoFlavor":         kubevirtv1.NewMinimalVMIWithNS(namespace, "nodenoflavor"),
-	}
-
-	vmiMap["nodeHostname"].Spec.Hostname = "hostname"
-	vmiMap["nodeDomainHostname"].Spec.Hostname = "node.domainname"
-
-	vmiMap["nodeNoHostname"].Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
-		kubevirtv1.VirtualMachineInstanceNetworkInterface{
-			IP: "10.0.0.10",
+var (
+	vmiNodeHostname = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeHostname",
+			Namespace: "test",
+		},
+		Spec: kubevirtv1.VirtualMachineInstanceSpec{
+			Hostname: "hostname",
 		},
 	}
-	vmiMap["nodeDomainHostname"].Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
-		kubevirtv1.VirtualMachineInstanceNetworkInterface{
-			IPs: []string{"10.0.0.11"},
+	vmiNodeNoHostname = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeNoHostname",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+				{IP: "10.0.0.10"},
+			},
 		},
 	}
-	vmiMap["nodeDomainNoHostname"].Status.Interfaces = []kubevirtv1.VirtualMachineInstanceNetworkInterface{
-		kubevirtv1.VirtualMachineInstanceNetworkInterface{
-			IP:  "10.0.0.12",
-			IPs: []string{"10.0.0.13"},
+	vmiNodeDomainHostname = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeDomainHostname",
+			Namespace: "test",
 		},
-		kubevirtv1.VirtualMachineInstanceNetworkInterface{
-			IPs: []string{"10.0.0.14", "10.0.0.15"},
+		Spec: kubevirtv1.VirtualMachineInstanceSpec{
+			Hostname: "node.domainname",
 		},
-		kubevirtv1.VirtualMachineInstanceNetworkInterface{
-			IP:  "10.0.0.16",
-			IPs: []string{"10.0.0.16", "10.0.0.17"},
-		},
-	}
-
-	vmiMap["nodePhaseUnset"].Status.Phase = ""
-	vmiMap["nodePhasePending"].Status.Phase = "Pending"
-	vmiMap["nodePhaseScheduling"].Status.Phase = "Scheduling"
-	vmiMap["nodePhaseScheduled"].Status.Phase = "Scheduled"
-	vmiMap["nodePhaseRunning"].Status.Phase = "Running"
-	vmiMap["nodePhaseSucceeded"].Status.Phase = "Succeeded"
-	vmiMap["nodePhaseFailed"].Status.Phase = "Failed"
-	vmiMap["nodePhaseUnknown"].Status.Phase = "Unknown"
-
-	vmiMap["nodeFlavor"].ObjectMeta.Annotations = map[string]string{
-		"cloud.kubevirt.io/flavor": "flavor",
-	}
-
-	vmiListItems := make([]kubevirtv1.VirtualMachineInstance, 0, len(vmiMap))
-	for name, vmi := range vmiMap {
-		vmiListItems = append(vmiListItems, *vmi)
-		vmiInterface.EXPECT().Get(gomock.Eq(name), gomock.Any()).Return(vmi, nil)
-		//vmiInterface.EXPECT().Get(gomock.Eq(vmi.ObjectMeta.Name), gomock.Any()).Return(vmi, nil)
-	}
-	vmiInterface.EXPECT().Get(gomock.Eq("missingVMI"), gomock.Any()).Return(nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI"))
-	vmiList := kubevirtv1.VirtualMachineInstanceList{
-		Items: vmiListItems,
-	}
-	vmiInterface.EXPECT().List(gomock.Any()).Return(&vmiList, nil).AnyTimes()
-
-	return &instances{
-		namespace: namespace,
-		kubevirt:  kubevirt,
-		config: InstancesConfig{
-			EnableInstanceTypes: true,
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+				{IPs: []string{"10.0.0.11"}},
+			},
 		},
 	}
-}
+	vmiNodeDomainNoHostname = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeDomainNoHostname",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+				{IP: "10.0.0.12", IPs: []string{"10.0.0.13"}},
+				{IPs: []string{"10.0.0.14", "10.0.0.15"}},
+				{IP: "10.0.0.16", IPs: []string{"10.0.0.16", "10.0.0.17"}},
+			},
+		},
+	}
+	vmiNodePhaseUnset = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseUnset",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.VmPhaseUnset,
+		},
+	}
+	vmiNodePhasePending = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhasePending",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Pending,
+		},
+	}
+	vmiNodePhaseScheduling = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseScheduling",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Scheduling,
+		},
+	}
+	vmiNodePhaseScheduled = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseScheduled",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Scheduled,
+		},
+	}
+	vmiNodePhaseRunning = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseRunning",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Running,
+		},
+	}
+	vmiNodePhaseSucceeded = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseSucceeded",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Succeeded,
+		},
+	}
+	vmiNodePhaseFailed = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseFailed",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Failed,
+		},
+	}
+	vmiNodePhaseUnknown = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodePhaseUnknown",
+			Namespace: "test",
+		},
+		Status: kubevirtv1.VirtualMachineInstanceStatus{
+			Phase: kubevirtv1.Unknown,
+		},
+	}
+	vmiNodeFlavor = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeFlavor",
+			Namespace: "test",
+			Annotations: map[string]string{
+				"cloud.kubevirt.io/flavor": "flavor",
+			},
+		},
+	}
+	vmiNodeNoFlavor = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nodeNoFlavor",
+			Namespace: "test",
+		},
+	}
+	vmiList = kubevirtv1.VirtualMachineInstanceList{
+		Items: []kubevirtv1.VirtualMachineInstance{
+			vmiNodeHostname,
+			vmiNodeNoHostname,
+			vmiNodeDomainHostname,
+			vmiNodeDomainNoHostname,
+			vmiNodePhaseUnset,
+			vmiNodePhasePending,
+			vmiNodePhaseScheduling,
+			vmiNodePhaseScheduled,
+			vmiNodePhaseRunning,
+			vmiNodePhaseSucceeded,
+			vmiNodePhaseFailed,
+			vmiNodePhaseUnknown,
+			vmiNodeFlavor,
+			vmiNodeNoFlavor,
+		},
+	}
+)
 
 func makeNodeAddressList(hostname string, internalIPs []string) []corev1.NodeAddress {
 	addresses := make([]corev1.NodeAddress, 0)
@@ -132,7 +205,23 @@ func cmpNodeAddresses(a, b []corev1.NodeAddress) bool {
 }
 
 func TestNodeAddresses(t *testing.T) {
-	i := mockInstances(t, "testNodeAddresses")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeNoHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeNoHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeDomainHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeDomainHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeDomainNoHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeDomainNoHostname),
+	)
+
 	tests := []struct {
 		nodeName              types.NodeName
 		expectedNodeAddresses []corev1.NodeAddress
@@ -146,7 +235,7 @@ func TestNodeAddresses(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		nodeAddresses, err := i.NodeAddresses(context.TODO(), test.nodeName)
+		nodeAddresses, err := i.NodeAddresses(ctx, test.nodeName)
 		if !cmpNodeAddresses(nodeAddresses, test.expectedNodeAddresses) {
 			t.Errorf("Expected: %v, got: %v", test.expectedNodeAddresses, nodeAddresses)
 		}
@@ -157,7 +246,23 @@ func TestNodeAddresses(t *testing.T) {
 }
 
 func TestNodeAddressesByProviderID(t *testing.T) {
-	i := mockInstances(t, "testNodeAddressesByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeNoHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeNoHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeDomainHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeDomainHostname),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeDomainNoHostname", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeDomainNoHostname),
+	)
+
 	tests := []struct {
 		providerID            string
 		expectedNodeAddresses []corev1.NodeAddress
@@ -172,7 +277,7 @@ func TestNodeAddressesByProviderID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		nodeAddresses, err := i.NodeAddressesByProviderID(context.TODO(), test.providerID)
+		nodeAddresses, err := i.NodeAddressesByProviderID(ctx, test.providerID)
 		if !cmpNodeAddresses(nodeAddresses, test.expectedNodeAddresses) {
 			t.Errorf("Expected: %v, got: %v", test.expectedNodeAddresses, nodeAddresses)
 		}
@@ -183,25 +288,45 @@ func TestNodeAddressesByProviderID(t *testing.T) {
 }
 
 func TestInstanceID(t *testing.T) {
-	i := mockInstances(t, "testInstanceID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseUnset", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseUnset),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhasePending", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhasePending),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseScheduling", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseScheduling),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseScheduled", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseScheduled),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseRunning", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseRunning),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseSucceeded", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "nodePhaseSucceeded")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseFailed", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "nodePhaseFailed")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseUnknown", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "nodePhaseUnknown")),
+	)
+
 	tests := []struct {
 		nodeName           types.NodeName
 		expectedInstanceID string
 		expectedError      error
 	}{
 		{types.NodeName("missingVMI"), "", cloudprovider.InstanceNotFound},
-		{types.NodeName("nodePhaseUnset"), "nodephaseunset", nil},
-		{types.NodeName("nodePhasePending"), "nodephasepending", nil},
-		{types.NodeName("nodePhaseScheduling"), "nodephasescheduling", nil},
-		{types.NodeName("nodePhaseScheduled"), "nodephasescheduled", nil},
-		{types.NodeName("nodePhaseRunning"), "nodephaserunning", nil},
+		{types.NodeName("nodePhaseUnset"), "nodePhaseUnset", nil},
+		{types.NodeName("nodePhasePending"), "nodePhasePending", nil},
+		{types.NodeName("nodePhaseScheduling"), "nodePhaseScheduling", nil},
+		{types.NodeName("nodePhaseScheduled"), "nodePhaseScheduled", nil},
+		{types.NodeName("nodePhaseRunning"), "nodePhaseRunning", nil},
 		{types.NodeName("nodePhaseSucceeded"), "", cloudprovider.InstanceNotFound},
 		{types.NodeName("nodePhaseFailed"), "", cloudprovider.InstanceNotFound},
 		{types.NodeName("nodePhaseUnknown"), "", cloudprovider.InstanceNotFound},
 	}
 
 	for _, test := range tests {
-		externalID, err := i.InstanceID(context.TODO(), test.nodeName)
+		externalID, err := i.InstanceID(ctx, test.nodeName)
 		if externalID != test.expectedInstanceID {
 			t.Errorf("Expected: %v, got: %v", test.expectedInstanceID, externalID)
 		}
@@ -212,7 +337,24 @@ func TestInstanceID(t *testing.T) {
 }
 
 func TestInstanceType(t *testing.T) {
-	i := mockInstances(t, "testInstanceType")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+		config: InstancesConfig{
+			EnableInstanceTypes: true,
+		},
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeFlavor", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeFlavor),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeNoFlavor", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeNoFlavor),
+	)
+
 	tests := []struct {
 		nodeName             types.NodeName
 		expectedInstanceType string
@@ -224,7 +366,7 @@ func TestInstanceType(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		instanceType, err := i.InstanceType(context.TODO(), test.nodeName)
+		instanceType, err := i.InstanceType(ctx, test.nodeName)
 		if instanceType != test.expectedInstanceType {
 			t.Errorf("Expected: %v, got: %v", test.expectedInstanceType, instanceType)
 		}
@@ -235,7 +377,24 @@ func TestInstanceType(t *testing.T) {
 }
 
 func TestInstanceTypeByProviderID(t *testing.T) {
-	i := mockInstances(t, "testInstanceTypeByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+		config: InstancesConfig{
+			EnableInstanceTypes: true,
+		},
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeFlavor", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeFlavor),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodeNoFlavor", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeNoFlavor),
+	)
+
 	tests := []struct {
 		providerID           string
 		expectedInstanceType string
@@ -248,7 +407,7 @@ func TestInstanceTypeByProviderID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		instanceType, err := i.InstanceTypeByProviderID(context.TODO(), test.providerID)
+		instanceType, err := i.InstanceTypeByProviderID(ctx, test.providerID)
 		if instanceType != test.expectedInstanceType {
 			t.Errorf("Expected: %v, got: %v", test.expectedInstanceType, instanceType)
 		}
@@ -259,30 +418,54 @@ func TestInstanceTypeByProviderID(t *testing.T) {
 }
 
 func TestAddSSHKeyToAllInstances(t *testing.T) {
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
 	// The kubevirt cloud provider does not implement the AddSSHKeyToAllInstances method
-	i := mockInstances(t, "testAddSSHKeyToAllInstances")
-	err := i.AddSSHKeyToAllInstances(context.TODO(), "user", []byte("keyData"))
+	err := i.AddSSHKeyToAllInstances(ctx, "user", []byte("keyData"))
 	if err != cloudprovider.NotImplemented {
 		t.Errorf("Expected: '%v', got '%v'", cloudprovider.NotImplemented, err)
 	}
 }
 
 func TestCurrentNodeName(t *testing.T) {
-	i := mockInstances(t, "testCurrentNodeName")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), client.InNamespace("test")).SetArg(1, vmiList),
+		c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), client.InNamespace("test")).SetArg(1, vmiList),
+		c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), client.InNamespace("test")).SetArg(1, vmiList),
+		c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), client.InNamespace("test")).SetArg(1, vmiList),
+		c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), client.InNamespace("test")).SetArg(1, vmiList),
+	)
+
 	tests := []struct {
 		hostname         string
 		expectedNodeName types.NodeName
 		expectedError    error
 	}{
 		{"missingVMI", "", cloudprovider.InstanceNotFound},
-		{"hostname", types.NodeName("nodehostname"), nil},
-		{"nodenohostname", types.NodeName("nodenohostname"), nil},
-		{"node.domainname", types.NodeName("node.domainhostname"), nil},
-		{"node.domainnohostname", types.NodeName("node.domainnohostname"), nil},
+		{"hostname", types.NodeName("nodeHostname"), nil},
+		{"nodeNoHostname", types.NodeName("nodeNoHostname"), nil},
+		{"node.domainname", types.NodeName("nodeDomainHostname"), nil},
+		{"nodeDomainNoHostname", types.NodeName("nodeDomainNoHostname"), nil},
 	}
 
 	for _, test := range tests {
-		nodeName, err := i.CurrentNodeName(context.TODO(), test.hostname)
+		nodeName, err := i.CurrentNodeName(ctx, test.hostname)
 		if nodeName != test.expectedNodeName {
 			t.Errorf("Expected: %v, got: %v", test.expectedNodeName, nodeName)
 		}
@@ -293,7 +476,22 @@ func TestCurrentNodeName(t *testing.T) {
 }
 
 func TestInstanceExistsByProviderID(t *testing.T) {
-	i := mockInstances(t, "testInstanceExistsByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseRunning", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseRunning),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseSucceeded", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseSucceeded),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseFailed", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseFailed),
+	)
+
 	tests := []struct {
 		providerID             string
 		expectedInstanceExists bool
@@ -306,7 +504,7 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		instanceExists, err := i.InstanceExistsByProviderID(context.TODO(), test.providerID)
+		instanceExists, err := i.InstanceExistsByProviderID(ctx, test.providerID)
 		if instanceExists != test.expectedInstanceExists {
 			t.Errorf("Expected: %v, got: %v", test.expectedInstanceExists, instanceExists)
 		}
@@ -317,7 +515,27 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 }
 
 func TestInstanceShutdownByProviderID(t *testing.T) {
-	i := mockInstances(t, "testInstanceShutdownByProviderID")
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "missingVMI", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseUnset", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseUnset),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhasePending", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhasePending),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseScheduling", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseScheduling),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseScheduled", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseScheduled),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseRunning", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseRunning),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseSucceeded", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseSucceeded),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseFailed", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseFailed),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "nodePhaseUnknown", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodePhaseUnknown),
+	)
+
 	tests := []struct {
 		providerID               string
 		expectedInstanceShutdown bool
@@ -336,7 +554,7 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		instanceShutdown, err := i.InstanceShutdownByProviderID(context.TODO(), test.providerID)
+		instanceShutdown, err := i.InstanceShutdownByProviderID(ctx, test.providerID)
 		if instanceShutdown != test.expectedInstanceShutdown {
 			t.Errorf("Expected: %v, got: %v", test.expectedInstanceShutdown, instanceShutdown)
 		}
