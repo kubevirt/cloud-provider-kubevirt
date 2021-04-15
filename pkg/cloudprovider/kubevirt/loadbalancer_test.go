@@ -49,8 +49,8 @@ var (
 	}
 	svc2 = corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a354699682ec311e9b210d663bd873d9",
-			Namespace: "test",
+			Name:        "a354699682ec311e9b210d663bd873d9",
+			Namespace:   "test",
 			Annotations: map[string]string{"foo": "bar"},
 		},
 		Spec: corev1.ServiceSpec{
@@ -60,7 +60,7 @@ var (
 			Selector: map[string]string{
 				"cloud.kubevirt.io/a354699682ec311e9b210d663bd873d9": "service2",
 			},
-			Type: corev1.ServiceTypeLoadBalancer,
+			Type:                  corev1.ServiceTypeLoadBalancer,
 			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
 		},
 	}
@@ -467,7 +467,7 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			"",
 			nil,
 			corev1.ServiceExternalTrafficPolicyTypeCluster,
-			errors.New("Failed to create Pod label selector: for 'in', 'notin' operators, values set can't be empty"),
+			errors.New("Failed to create Pod label selector: values: Invalid value: []string(nil): for 'in', 'notin' operators, values set can't be empty"),
 		},
 		// Testcase: No LB exists for service, single node given, annotation on original service
 		// Expected: LB Service will be created, one VMI & pod labelled, no error
