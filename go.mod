@@ -11,7 +11,6 @@ require (
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/cloud-provider v0.21.1
 	k8s.io/component-base v0.21.1
-	k8s.io/klog v1.0.0
 	k8s.io/klog/v2 v2.8.0
 	kubevirt.io/client-go v0.41.0
 	sigs.k8s.io/controller-runtime v0.8.3
