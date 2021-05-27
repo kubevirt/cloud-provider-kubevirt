@@ -189,11 +189,13 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lbName,
 			Namespace: lb.namespace,
+			Annotations: service.Annotations,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:    ports,
 			Selector: map[string]string{serviceLabelKey(lbName): service.ObjectMeta.Name},
 			Type:     corev1.ServiceTypeLoadBalancer,
+			ExternalTrafficPolicy: service.Spec.ExternalTrafficPolicy,
 		},
 	}
 	if len(service.Spec.ExternalIPs) > 0 {

@@ -3,6 +3,7 @@ package kubevirt
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -50,6 +51,7 @@ var (
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "a354699682ec311e9b210d663bd873d9",
 			Namespace: "test",
+			Annotations: map[string]string{"foo": "bar"},
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
@@ -59,6 +61,7 @@ var (
 				"cloud.kubevirt.io/a354699682ec311e9b210d663bd873d9": "service2",
 			},
 			Type: corev1.ServiceTypeLoadBalancer,
+			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
 		},
 	}
 	svc3 = corev1.Service{
@@ -436,11 +439,13 @@ func TestEnsureLoadBalancer(t *testing.T) {
 	)
 
 	tests := []struct {
-		service                *corev1.Service
-		nodes                  []*corev1.Node
-		clusterName            string
-		expectedLoadBalancerIP string
-		expectedError          error
+		service                       *corev1.Service
+		nodes                         []*corev1.Node
+		clusterName                   string
+		expectedLoadBalancerIP        string
+		expectedAnnotations           map[string]string
+		expectedExternalTrafficPolicy corev1.ServiceExternalTrafficPolicyType
+		expectedError                 error
 	}{
 		// Testcase: No LB exists for service, no nodes given
 		// Expected: LB Service will be created, no VMIs & pods labelled, error "Failed to create Pod label selector"
@@ -460,21 +465,25 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			[]*corev1.Node{},
 			"",
 			"",
+			nil,
+			corev1.ServiceExternalTrafficPolicyTypeCluster,
 			errors.New("Failed to create Pod label selector: for 'in', 'notin' operators, values set can't be empty"),
 		},
-		// Testcase: No LB exists for service, single node given
+		// Testcase: No LB exists for service, single node given, annotation on original service
 		// Expected: LB Service will be created, one VMI & pod labelled, no error
 		{
 			&corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "service2",
-					UID:  types.UID("35469968-2ec3-11e9-b210-d663bd873d93"),
+					Name:        "service2",
+					UID:         types.UID("35469968-2ec3-11e9-b210-d663bd873d93"),
+					Annotations: map[string]string{"foo": "bar"},
 				},
 				Spec: corev1.ServiceSpec{
 					Type: corev1.ServiceTypeLoadBalancer,
 					Ports: []corev1.ServicePort{
 						{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30002},
 					},
+					ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
 				},
 			},
 			[]*corev1.Node{
@@ -482,6 +491,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			},
 			"cluster1",
 			"192.168.0.38",
+			map[string]string{"foo": "bar"},
+			corev1.ServiceExternalTrafficPolicyTypeLocal,
 			nil,
 		},
 		// Testcase: No LB exists for service, three nodes given
@@ -508,6 +519,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			"cluster1",
 			"192.168.0.39",
 			nil,
+			corev1.ServiceExternalTrafficPolicyTypeCluster,
+			nil,
 		},
 		// Testcase: LB already exists for service, unchanged amount of nodes
 		// Expected: LB Service unchanged, labels on VMIs & pods unchanged, no error
@@ -530,6 +543,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			},
 			"cluster2",
 			"192.168.0.35",
+			nil,
+			corev1.ServiceExternalTrafficPolicyTypeCluster,
 			nil,
 		},
 		// Testcase: LB already exists for service, new nodes given
@@ -556,6 +571,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			"cluster2",
 			"192.168.0.35",
 			nil,
+			corev1.ServiceExternalTrafficPolicyTypeCluster,
+			nil,
 		},
 		// Testcase: LB already exists for service, nodes removed
 		// Expected: LB Service unchanged, labels removed from VMIs & pods, no error
@@ -575,6 +592,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			"cluster2",
 			"192.168.0.35",
 			nil,
+			corev1.ServiceExternalTrafficPolicyTypeCluster,
+			nil,
 		},
 	}
 
@@ -589,6 +608,12 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			}
 			if test.expectedLoadBalancerIP != lbStatus.Ingress[0].IP {
 				t.Errorf("Expected: '%v', got: '%v'", test.expectedLoadBalancerIP, lbStatus.Ingress[0].IP)
+			}
+			if !reflect.DeepEqual(test.expectedAnnotations, test.service.ObjectMeta.Annotations) {
+				t.Errorf("Expected: annotations '%s', got '%s'", test.expectedAnnotations, test.service.ObjectMeta.Annotations)
+			}
+			if test.service.Spec.ExternalTrafficPolicy != "" && test.expectedExternalTrafficPolicy != test.service.Spec.ExternalTrafficPolicy {
+				t.Errorf("Expected: ExternalTrafficPolicy '%s', got '%s'", test.expectedExternalTrafficPolicy, test.service.Spec.ExternalTrafficPolicy)
 			}
 		}
 		if test.expectedError != nil && err != nil && err.Error() != test.expectedError.Error() {
