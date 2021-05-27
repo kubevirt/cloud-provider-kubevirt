@@ -18,6 +18,9 @@ import (
 const (
 	// ProviderName is the name of the kubevirt provider
 	ProviderName = "kubevirt"
+	// Values for Mutator.Kind
+	ServiceAnnotation = "ServiceAnnotation"
+	ServiceLabel      = "ServiceLabel"
 )
 
 var scheme = runtime.NewScheme()
@@ -40,9 +43,17 @@ type CloudConfig struct {
 	Zones        ZonesConfig        `yaml:"zones"`
 }
 
+type Mutator struct {
+	Kind       string `yaml:"kind"`
+	SearchKey  string `yaml:"searchKey"`
+	SearchVal  string `yaml:"searchVal"`
+	ReplaceVal string `yaml:"replaceVal"`
+}
+
 type LoadBalancerConfig struct {
-	Enabled              bool `yaml:"enabled"`              // Enables the loadbalancer interface of the CCM
-	CreationPollInterval int  `yaml:"creationPollInterval"` // How many seconds to wait for the loadbalancer creation
+	Enabled              bool      `yaml:"enabled"`              // Enables the loadbalancer interface of the CCM
+	CreationPollInterval int       `yaml:"creationPollInterval"` // How many seconds to wait for the loadbalancer creation
+	Mutators             []Mutator `yaml:"mutators"`             // Service proxy mutators
 }
 
 type InstancesConfig struct {

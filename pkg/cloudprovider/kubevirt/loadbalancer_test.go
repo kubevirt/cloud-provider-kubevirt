@@ -49,9 +49,9 @@ var (
 	}
 	svc2 = corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a354699682ec311e9b210d663bd873d9",
-			Namespace: "test",
-			Annotations: map[string]string{"foo": "bar"},
+			Name:        "a354699682ec311e9b210d663bd873d9",
+			Namespace:   "test",
+			Annotations: map[string]string{"foo": "baz"},
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
@@ -60,7 +60,7 @@ var (
 			Selector: map[string]string{
 				"cloud.kubevirt.io/a354699682ec311e9b210d663bd873d9": "service2",
 			},
-			Type: corev1.ServiceTypeLoadBalancer,
+			Type:                  corev1.ServiceTypeLoadBalancer,
 			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
 		},
 	}
@@ -321,6 +321,12 @@ func TestEnsureLoadBalancer(t *testing.T) {
 		client:    c,
 		config: LoadBalancerConfig{
 			CreationPollInterval: 1,
+			Mutators: []Mutator{{
+				Kind:       ServiceAnnotation,
+				SearchKey:  "foo",
+				SearchVal:  "bar",
+				ReplaceVal: "baz",
+			}},
 		},
 	}
 
@@ -491,7 +497,7 @@ func TestEnsureLoadBalancer(t *testing.T) {
 			},
 			"cluster1",
 			"192.168.0.38",
-			map[string]string{"foo": "bar"},
+			map[string]string{"foo": "baz"},
 			corev1.ServiceExternalTrafficPolicyTypeLocal,
 			nil,
 		},

@@ -3,6 +3,7 @@ package kubevirt
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -207,6 +208,9 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 	if service.Spec.HealthCheckNodePort > 0 {
 		lbService.Spec.HealthCheckNodePort = service.Spec.HealthCheckNodePort
 	}
+	if err := lb.mutateService(lbService); err != nil {
+		return nil, err
+	}
 
 	if err := lb.client.Create(ctx, lbService); err != nil {
 		klog.Errorf("Failed to create LB %s: %v", lbName, err)
@@ -319,6 +323,41 @@ func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
 	}
 	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
 	return defaultLoadBalancerCreatePollInterval
+}
+
+func (lb *loadbalancer) mutateService(svc *corev1.Service) error {
+	for _, m := range lb.config.Mutators {
+		switch m.Kind {
+		case ServiceAnnotation:
+			err := processMap(&m, &(*svc).Annotations)
+			if err != nil {
+				return err
+			}
+		case ServiceLabel:
+			err := processMap(&m, &(*svc).Labels)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func processMap(m *Mutator, t *map[string]string) error {
+	for key, val := range *t {
+		keyRe, err := regexp.Compile(m.SearchKey)
+		if err != nil {
+			return err
+		}
+		valRe, err := regexp.Compile(m.SearchVal)
+		if err != nil {
+			return err
+		}
+		if keyRe.MatchString(key) && valRe.MatchString(val) {
+			(*t)[key] = valRe.ReplaceAllString(val, m.ReplaceVal)
+		}
+	}
+	return nil
 }
 
 func buildInstanceIDMap(nodes []*corev1.Node) map[string]struct{} {
