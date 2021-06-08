@@ -6,7 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	kubevirtv1 "kubevirt.io/client-go/api/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
