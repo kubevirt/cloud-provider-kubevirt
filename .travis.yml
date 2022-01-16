@@ -1,5 +1,0 @@
-language: go
-dist: xenial
-go_import_path: kubevirt.io/cloud-provider-kubevirt
-go:
-- 1.15.x
