@@ -8,6 +8,8 @@ import (
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
@@ -28,9 +30,10 @@ func init() {
 }
 
 type cloud struct {
-	namespace string
-	client    client.Client
-	config    CloudConfig
+	namespace            string
+	client               client.Client
+	managedClusterClient *kubernetes.Clientset
+	config               CloudConfig
 }
 
 type CloudConfig struct {
@@ -127,6 +130,13 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 // Initialize provides the cloud with a kubernetes client builder and may spawn goroutines
 // to perform housekeeping activities within the cloud provider.
 func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
+	clientBuilder.ConfigOrDie("")
+	clientSet, err := kubernetes.NewForConfig(clientBuilder.ConfigOrDie(""))
+	if err != nil {
+		klog.Fatalf("Failed to intialize cloud provider client: %v", err)
+	}
+
+	c.managedClusterClient = clientSet
 }
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
@@ -134,10 +144,12 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	if !c.config.LoadBalancer.Enabled {
 		return nil, false
 	}
+
 	return &loadbalancer{
-		namespace: c.namespace,
-		client:    c.client,
-		config:    c.config.LoadBalancer,
+		namespace:           c.namespace,
+		cloudProviderClient: c.client,
+		client:              c.managedClusterClient,
+		config:              c.config.LoadBalancer,
 	}, true
 }
 

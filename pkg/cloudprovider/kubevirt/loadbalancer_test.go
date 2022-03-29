@@ -243,8 +243,8 @@ func TestGetLoadBalancer(t *testing.T) {
 	c := mockclient.NewMockClient(ctrl)
 
 	lb := &loadbalancer{
-		namespace: "test",
-		client:    c,
+		namespace:           "test",
+		cloudProviderClient: c,
 	}
 
 	gomock.InOrder(
@@ -288,8 +288,8 @@ func TestGetLoadBalancerName(t *testing.T) {
 	c := mockclient.NewMockClient(ctrl)
 
 	lb := &loadbalancer{
-		namespace: "test",
-		client:    c,
+		namespace:           "test",
+		cloudProviderClient: c,
 	}
 
 	tests := []struct {
@@ -317,8 +317,8 @@ func TestEnsureLoadBalancer(t *testing.T) {
 	c := mockclient.NewMockClient(ctrl)
 
 	lb := &loadbalancer{
-		namespace: "test",
-		client:    c,
+		namespace:           "test",
+		cloudProviderClient: c,
 		config: LoadBalancerConfig{
 			CreationPollInterval: 1,
 		},
@@ -628,8 +628,8 @@ func TestUpdateLoadBalancer(t *testing.T) {
 	c := mockclient.NewMockClient(ctrl)
 
 	lb := &loadbalancer{
-		namespace: "test",
-		client:    c,
+		namespace:           "test",
+		cloudProviderClient: c,
 	}
 
 	createdByVMINodes12Req, _ := labels.NewRequirement("kubevirt.io/created-by", selection.In, []string{"3546a480-2ec3-11e9-b210-d663bd873d93", "3546a354-2ec3-11e9-b210-d663bd873d93"})
@@ -770,8 +770,8 @@ func TestEnsureLoadBalancerDeleted(t *testing.T) {
 	c := mockclient.NewMockClient(ctrl)
 
 	lb := &loadbalancer{
-		namespace: "test",
-		client:    c,
+		namespace:           "test",
+		cloudProviderClient: c,
 	}
 
 	listOptionsSvc1 := &client.ListOptions{Namespace: "test", LabelSelector: labels.SelectorFromSet(labels.Set{"cloud.kubevirt.io/af6ebf1722bb111e9b210d663bd873d9": "service1"})}

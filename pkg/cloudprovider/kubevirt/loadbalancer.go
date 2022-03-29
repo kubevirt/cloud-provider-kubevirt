@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
 	kubevirtv1 "kubevirt.io/client-go/api/v1"
@@ -29,8 +30,11 @@ const (
 
 type loadbalancer struct {
 	namespace string
-	client    client.Client
-	config    LoadBalancerConfig
+	// cloudProviderClient is the client for the underlying KubeVirt cluster where VMs are created.
+	cloudProviderClient client.Client
+	// client is the kuberentes cluster client that is constructed out of the created VMs in the KubeVirt cluster.
+	client *kubernetes.Clientset
+	config LoadBalancerConfig
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -64,6 +68,15 @@ func (lb *loadbalancer) GetLoadBalancerName(ctx context.Context, clusterName str
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) (*corev1.LoadBalancerStatus, error) {
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
+	if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		matchedNodes, err := lb.filterNodes(service, nodes)
+		if err != nil {
+			klog.Errorf("Failed to filter nodes: %v", err)
+			return nil, err
+		}
+
+		nodes = matchedNodes
+	}
 
 	err := lb.applyServiceLabels(ctx, lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
@@ -84,7 +97,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if lbExists {
 		if !equality.Semantic.DeepEqual(service.Spec.Ports, lbService.Spec.Ports) {
 			lbService.Spec.Ports = lb.createLoadBalancerServicePorts(service)
-			if err := lb.client.Update(ctx, lbService); err != nil {
+			if err := lb.cloudProviderClient.Update(ctx, lbService); err != nil {
 				klog.Errorf("Failed to update LoadBalancer service: %v", err)
 				return nil, err
 			}
@@ -127,6 +140,16 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
+	if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		matchedNodes, err := lb.filterNodes(service, nodes)
+		if err != nil {
+			klog.Errorf("Failed to filter nodes: %v", err)
+			return err
+		}
+
+		nodes = matchedNodes
+	}
+
 	err := lb.applyServiceLabels(ctx, lbName, service.ObjectMeta.Name, nodes)
 	if err != nil {
 		klog.Errorf("Failed to add nodes to LoadBalancer service: %v", err)
@@ -157,7 +180,7 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		return err
 	}
 	if lbExists {
-		if err := lb.client.Delete(ctx, lbService); err != nil {
+		if err := lb.cloudProviderClient.Delete(ctx, lbService); err != nil {
 			klog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
 		}
@@ -174,7 +197,7 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 
 func (lb *loadbalancer) getLoadBalancerService(ctx context.Context, lbName string) (*corev1.Service, bool, error) {
 	var service corev1.Service
-	if err := lb.client.Get(ctx, client.ObjectKey{Name: lbName, Namespace: lb.namespace}, &service); err != nil {
+	if err := lb.cloudProviderClient.Get(ctx, client.ObjectKey{Name: lbName, Namespace: lb.namespace}, &service); err != nil {
 		if errors.IsNotFound(err) {
 			return nil, false, nil
 		}
@@ -208,7 +231,7 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		lbService.Spec.HealthCheckNodePort = service.Spec.HealthCheckNodePort
 	}
 
-	if err := lb.client.Create(ctx, lbService); err != nil {
+	if err := lb.cloudProviderClient.Create(ctx, lbService); err != nil {
 		klog.Errorf("Failed to create LB %s: %v", lbName, err)
 		return nil, err
 	}
@@ -232,7 +255,7 @@ func (lb *loadbalancer) createLoadBalancerServicePorts(service *corev1.Service) 
 func (lb *loadbalancer) applyServiceLabels(ctx context.Context, lbName, serviceName string, nodes []*corev1.Node) error {
 	instanceIDs := buildInstanceIDMap(nodes)
 	var allVmis kubevirtv1.VirtualMachineInstanceList
-	if err := lb.client.List(ctx, &allVmis, client.InNamespace(lb.namespace)); err != nil {
+	if err := lb.cloudProviderClient.List(ctx, &allVmis, client.InNamespace(lb.namespace)); err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
 	var vmiUIDs []string
@@ -241,7 +264,7 @@ func (lb *loadbalancer) applyServiceLabels(ctx context.Context, lbName, serviceN
 	for _, vmi := range allVmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; ok {
 			vmi.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-			if err := lb.client.Update(ctx, &vmi); err != nil {
+			if err := lb.cloudProviderClient.Update(ctx, &vmi); err != nil {
 				klog.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			} else {
 				// Remember updated VMI UIDs to find the corresponding pods
@@ -256,7 +279,7 @@ func (lb *loadbalancer) applyServiceLabels(ctx context.Context, lbName, serviceN
 	if err != nil {
 		return fmt.Errorf("Failed to create Pod label selector: %v", err)
 	}
-	if err := lb.client.List(ctx, &vmiPods, client.InNamespace(lb.namespace), client.MatchingLabelsSelector{
+	if err := lb.cloudProviderClient.List(ctx, &vmiPods, client.InNamespace(lb.namespace), client.MatchingLabelsSelector{
 		Selector: labels.NewSelector().Add(*createdByVMIReq),
 	}); err != nil {
 		return fmt.Errorf("Failed to list VMI pods: %v", err)
@@ -265,7 +288,7 @@ func (lb *loadbalancer) applyServiceLabels(ctx context.Context, lbName, serviceN
 	// Apply labels to all found pods
 	for _, pod := range vmiPods.Items {
 		pod.ObjectMeta.Labels[serviceLabelKey(lbName)] = serviceName
-		if err := lb.client.Update(ctx, &pod); err != nil {
+		if err := lb.cloudProviderClient.Update(ctx, &pod); err != nil {
 			klog.Errorf("Failed to update pod %s: %v", pod.ObjectMeta.Name, err)
 		}
 	}
@@ -281,11 +304,11 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(ctx context.Context, lbName, 
 		}),
 	}
 	var vmis kubevirtv1.VirtualMachineInstanceList
-	if err := lb.client.List(ctx, &vmis, listOptions); err != nil {
+	if err := lb.cloudProviderClient.List(ctx, &vmis, listOptions); err != nil {
 		return fmt.Errorf("Failed to list VMIs: %v", err)
 	}
 	var pods corev1.PodList
-	if err := lb.client.List(ctx, &pods, listOptions); err != nil {
+	if err := lb.cloudProviderClient.List(ctx, &pods, listOptions); err != nil {
 		return fmt.Errorf("Failed to list pods: %v", err)
 	}
 	vmiUIDs := make(map[string]struct{}, len(instanceIDs))
@@ -294,7 +317,7 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(ctx context.Context, lbName, 
 	for _, vmi := range vmis.Items {
 		if _, ok := instanceIDs[vmi.ObjectMeta.Name]; !ok {
 			delete(vmi.ObjectMeta.Labels, serviceLabelKey(lbName))
-			if err := lb.client.Update(ctx, &vmi); err != nil {
+			if err := lb.cloudProviderClient.Update(ctx, &vmi); err != nil {
 				return fmt.Errorf("Failed to update VMI %s: %v", vmi.ObjectMeta.Name, err)
 			}
 			vmiUIDs[string(vmi.ObjectMeta.UID)] = struct{}{}
@@ -304,7 +327,7 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(ctx context.Context, lbName, 
 		if podCreatedBy, ok := pod.ObjectMeta.Labels["kubevirt.io/created-by"]; ok {
 			if _, ok := vmiUIDs[podCreatedBy]; ok {
 				delete(pod.ObjectMeta.Labels, serviceLabelKey(lbName))
-				if err := lb.client.Update(ctx, &pod); err != nil {
+				if err := lb.cloudProviderClient.Update(ctx, &pod); err != nil {
 					return fmt.Errorf("Failed to update pod: %s: %v", pod.ObjectMeta.Name, err)
 				}
 			}
@@ -319,6 +342,39 @@ func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
 	}
 	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
 	return defaultLoadBalancerCreatePollInterval
+}
+
+func (lb *loadbalancer) filterNodes(service *corev1.Service, nodes []*corev1.Node) ([]*corev1.Node, error) {
+	labelSelector := metav1.LabelSelector{MatchLabels: service.Spec.Selector}
+	listOptions := metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+		Limit:         100,
+	}
+
+	podsList, err := lb.client.CoreV1().Pods(service.Namespace).List(context.TODO(), listOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %v", err)
+	}
+
+	var nodesNames = map[string]struct{}{}
+	for _, pod := range podsList.Items {
+		for key, val := range pod.Labels {
+			if s, ok := service.Spec.Selector[key]; ok {
+				if val == s {
+					nodesNames[pod.Spec.NodeName] = struct{}{}
+				}
+			}
+		}
+	}
+
+	var matchedNodes []*corev1.Node
+	for _, node := range nodes {
+		if _, ok := nodesNames[node.Name]; ok {
+			matchedNodes = append(matchedNodes, node)
+		}
+	}
+
+	return matchedNodes, nil
 }
 
 func buildInstanceIDMap(nodes []*corev1.Node) map[string]struct{} {
