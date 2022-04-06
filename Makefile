@@ -1,5 +1,5 @@
-VERSION ?= v0.0.8
-REGISTRY ?= dgonzalez
+VERSION ?= v0.1.0
+REGISTRY ?= kubevirt
 
 CLUSTER_NAME ?= kubevirt
 KUBECONFIG := dev/kubeconfig

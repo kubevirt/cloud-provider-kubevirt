@@ -36,8 +36,8 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugins
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
-	// For existing cloud providers, the option to import legacy providers is still available.
-	// e.g. _"k8s.io/legacy-cloud-providers/<provider>"
+
+	"kubevirt.io/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt"
 )
 
 func main() {
@@ -47,6 +47,7 @@ func main() {
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
+	ccmOptions.KubeCloudShared.CloudProvider.Name = kubevirt.ProviderName
 
 	fss := cliflag.NamedFlagSets{}
 	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, app.DefaultInitFuncConstructors, fss, wait.NeverStop)
