@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -23,7 +22,7 @@ const (
 type instances struct {
 	namespace string
 	client    client.Client
-	config    InstancesConfig
+	config    CloudConfig
 }
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
@@ -34,7 +33,10 @@ var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_-
 // returns the address of the calling instance. We should do a rename to
 // make this clearer.
 func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]corev1.NodeAddress, error) {
-	instanceID := instanceIDFromNodeName(string(name))
+	instanceID, err := instanceIDFromNodeName(string(name), i.config.Instances.MatchInstanceIDRegexp)
+	if err != nil {
+		return nil, err
+	}
 	return i.nodeAddressesByInstanceID(ctx, instanceID)
 }
 
@@ -96,7 +98,11 @@ func (i *instances) ExternalID(ctx context.Context, nodeName types.NodeName) (st
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
 // Note that if the instance does not exist or is no longer running, we must return ("", cloudprovider.InstanceNotFound)
 func (i *instances) InstanceID(ctx context.Context, nodeName types.NodeName) (string, error) {
-	name := instanceIDFromNodeName(string(nodeName))
+	name, err := instanceIDFromNodeName(string(nodeName), i.config.Instances.MatchInstanceIDRegexp)
+	if err != nil {
+		return "", err
+	}
+
 	var vmi kubevirtv1.VirtualMachineInstance
 	if err := i.client.Get(ctx, client.ObjectKey{Name: name, Namespace: i.namespace}, &vmi); err != nil {
 		if errors.IsNotFound(err) {
@@ -120,7 +126,10 @@ func (i *instances) InstanceID(ctx context.Context, nodeName types.NodeName) (st
 
 // InstanceType returns the type of the specified instance.
 func (i *instances) InstanceType(ctx context.Context, name types.NodeName) (string, error) {
-	instanceID := instanceIDFromNodeName(string(name))
+	instanceID, err := instanceIDFromNodeName(string(name), i.config.Instances.MatchInstanceIDRegexp)
+	if err != nil {
+		return "", err
+	}
 	return i.instanceTypeByInstanceID(ctx, instanceID)
 }
 
@@ -135,7 +144,7 @@ func (i *instances) InstanceTypeByProviderID(ctx context.Context, providerID str
 }
 
 func (i *instances) instanceTypeByInstanceID(ctx context.Context, instanceID string) (string, error) {
-	if !i.config.EnableInstanceTypes {
+	if !i.config.Instances.EnableInstanceTypes {
 		// Only try to detect instance type if enabled
 		return "", nil
 	}
@@ -190,7 +199,10 @@ func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID s
 	instanceID, err := instanceIDFromProviderID(providerID)
 	if err != nil {
 		// Retry getting instanceID with the node name if we do not have a valid providerID
-		instanceID = instanceIDFromNodeName(providerID)
+		instanceID, err = instanceIDFromNodeName(providerID, i.config.Instances.MatchInstanceIDRegexp)
+		if err != nil {
+			return false, err
+		}
 	}
 	// If we can not get the VMI by its providerID, assume it no longer exists
 	var vmi kubevirtv1.VirtualMachineInstance
@@ -230,11 +242,19 @@ func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID
 	return false, nil
 }
 
-// instanceIDFromNodeName extracts the instance ID from a given node name. In
-// case the node name is a FQDN the hostname will be extracted as instance ID.
-func instanceIDFromNodeName(nodeName string) string {
-	data := strings.SplitN(nodeName, ".", 2)
-	return data[0]
+// instanceIDFromNodeName extracts the instance ID from a given node name based on the provided regexp.
+// If the regexp is empty instance id will have the same value as a node name.
+func instanceIDFromNodeName(nodeName, instanceRegexp string) (string, error) {
+	if instanceRegexp == "" {
+		return nodeName, nil
+	}
+
+	exp, err := regexp.CompilePOSIX(instanceRegexp)
+	if err != nil {
+		return "", err
+	}
+
+	return exp.FindString(nodeName), nil
 }
 
 func instanceIDsFromNodes(nodes []*corev1.Node) []string {

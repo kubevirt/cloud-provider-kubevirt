@@ -30,7 +30,7 @@ const (
 type loadbalancer struct {
 	namespace string
 	client    client.Client
-	config    LoadBalancerConfig
+	config    CloudConfig
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -314,10 +314,10 @@ func (lb *loadbalancer) ensureServiceLabelsDeleted(ctx context.Context, lbName, 
 }
 
 func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
-	if lb.config.CreationPollInterval > 0 {
-		return time.Duration(lb.config.CreationPollInterval)
+	if lb.config.LoadBalancer.CreationPollInterval > 0 {
+		return time.Duration(lb.config.LoadBalancer.CreationPollInterval)
 	}
-	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
+	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.LoadBalancer.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
 	return defaultLoadBalancerCreatePollInterval
 }
 

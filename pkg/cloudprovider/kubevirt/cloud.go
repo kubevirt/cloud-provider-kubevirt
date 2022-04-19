@@ -28,7 +28,7 @@ type cloud struct {
 }
 
 type CloudConfig struct {
-	Kubeconfig   string             `yaml:"kubeconfig"` // The kubeconfig used to connect to the underkube
+	Kubeconfig   string             `yaml:"kubeconfig"` // The kubeconfig used to connect to the infra cluster
 	LoadBalancer LoadBalancerConfig `yaml:"loadbalancer"`
 	Instances    InstancesConfig    `yaml:"instances"`
 	Zones        ZonesConfig        `yaml:"zones"`
@@ -40,8 +40,9 @@ type LoadBalancerConfig struct {
 }
 
 type InstancesConfig struct {
-	Enabled             bool `yaml:"enabled"`             // Enables the instances interface of the CCM
-	EnableInstanceTypes bool `yaml:"enableInstanceTypes"` // Enables 'flavor' annotation to detect instance types
+	Enabled               bool   `yaml:"enabled"`               // Enables the instances interface of the CCM
+	EnableInstanceTypes   bool   `yaml:"enableInstanceTypes"`   // Enables 'flavor' annotation to detect instance types
+	MatchInstanceIDRegexp string `yaml:"matchInstanceIDRegexp"` // Regexp to match instance id from node name
 }
 
 type ZonesConfig struct {
@@ -125,7 +126,7 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	return &loadbalancer{
 		namespace: c.namespace,
 		client:    c.client,
-		config:    c.config.LoadBalancer,
+		config:    c.config,
 	}, true
 }
 
@@ -137,7 +138,7 @@ func (c *cloud) Instances() (cloudprovider.Instances, bool) {
 	return &instances{
 		namespace: c.namespace,
 		client:    c.client,
-		config:    c.config.Instances,
+		config:    c.config,
 	}, true
 }
 
@@ -153,6 +154,7 @@ func (c *cloud) Zones() (cloudprovider.Zones, bool) {
 	return &zones{
 		namespace: c.namespace,
 		client:    c.client,
+		config:    c.config,
 	}, true
 }
 

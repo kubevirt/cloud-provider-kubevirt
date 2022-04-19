@@ -153,6 +153,19 @@ var (
 			Namespace: "test",
 		},
 	}
+	vmiNodeMatchRegexp = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vmNode1",
+			Namespace: "test",
+		},
+	}
+	vmiNodeMatchRegexp2 = kubevirtv1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vmNode2",
+			Namespace: "test",
+		},
+	}
+
 	vmiList = kubevirtv1.VirtualMachineInstanceList{
 		Items: []kubevirtv1.VirtualMachineInstance{
 			vmiNodeHostname,
@@ -169,6 +182,8 @@ var (
 			vmiNodePhaseUnknown,
 			vmiNodeFlavor,
 			vmiNodeNoFlavor,
+			vmiNodeMatchRegexp,
+			vmiNodeMatchRegexp2,
 		},
 	}
 )
@@ -336,6 +351,47 @@ func TestInstanceID(t *testing.T) {
 	}
 }
 
+func TestInstanceIDMatchedByRegex(t *testing.T) {
+	ctrl, ctx := gomock.WithContext(context.Background(), t)
+	defer ctrl.Finish()
+	c := mockclient.NewMockClient(ctrl)
+
+	i := &instances{
+		namespace: "test",
+		client:    c,
+		config: CloudConfig{
+			Instances: InstancesConfig{
+				EnableInstanceTypes:   true,
+				MatchInstanceIDRegexp: "vmNode[0-9]*",
+			},
+		},
+	}
+
+	gomock.InOrder(
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "vmNode1", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeMatchRegexp),
+		c.EXPECT().Get(ctx, client.ObjectKey{Name: "vmNode2", Namespace: "test"}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).SetArg(2, vmiNodeMatchRegexp2),
+	)
+
+	tests := []struct {
+		nodeName           types.NodeName
+		expectedInstanceID string
+		expectedError      error
+	}{
+		{types.NodeName("local.vmNode1"), "vmNode1", nil},
+		{types.NodeName("local.example.vmNode2"), "vmNode2", nil},
+	}
+
+	for _, test := range tests {
+		externalID, err := i.InstanceID(ctx, test.nodeName)
+		if externalID != test.expectedInstanceID {
+			t.Errorf("Expected: %v, got: %v", test.expectedInstanceID, externalID)
+		}
+		if test.expectedError != nil && err != nil && err.Error() != test.expectedError.Error() {
+			t.Errorf("Expected: '%v', got '%v'", test.expectedError, err)
+		}
+	}
+}
+
 func TestInstanceType(t *testing.T) {
 	ctrl, ctx := gomock.WithContext(context.Background(), t)
 	defer ctrl.Finish()
@@ -344,8 +400,10 @@ func TestInstanceType(t *testing.T) {
 	i := &instances{
 		namespace: "test",
 		client:    c,
-		config: InstancesConfig{
-			EnableInstanceTypes: true,
+		config: CloudConfig{
+			Instances: InstancesConfig{
+				EnableInstanceTypes: true,
+			},
 		},
 	}
 
@@ -384,8 +442,10 @@ func TestInstanceTypeByProviderID(t *testing.T) {
 	i := &instances{
 		namespace: "test",
 		client:    c,
-		config: InstancesConfig{
-			EnableInstanceTypes: true,
+		config: CloudConfig{
+			Instances: InstancesConfig{
+				EnableInstanceTypes: true,
+			},
 		},
 	}
 

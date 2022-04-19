@@ -319,8 +319,10 @@ func TestEnsureLoadBalancer(t *testing.T) {
 	lb := &loadbalancer{
 		namespace: "test",
 		client:    c,
-		config: LoadBalancerConfig{
-			CreationPollInterval: 1,
+		config: CloudConfig{
+			LoadBalancer: LoadBalancerConfig{
+				CreationPollInterval: 1,
+			},
 		},
 	}
 

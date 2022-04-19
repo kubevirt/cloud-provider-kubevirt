@@ -14,6 +14,7 @@ import (
 type zones struct {
 	namespace string
 	client    client.Client
+	config    CloudConfig
 }
 
 // GetZone returns the Zone containing the current failure zone and locality region that the program is running in
@@ -40,7 +41,10 @@ func (z *zones) GetZoneByProviderID(ctx context.Context, providerID string) (clo
 // This method is particularly used in the context of external cloud providers where node initialization must be down
 // outside the kubelets.
 func (z *zones) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) (cloudprovider.Zone, error) {
-	instanceID := instanceIDFromNodeName(string(nodeName))
+	instanceID, err := instanceIDFromNodeName(string(nodeName), z.config.Instances.MatchInstanceIDRegexp)
+	if err != nil {
+		return cloudprovider.Zone{}, err
+	}
 	return z.getZoneByInstanceID(ctx, instanceID)
 }
 
