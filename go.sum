@@ -1117,8 +1117,9 @@ k8s.io/apimachinery v0.0.0-20190719140911-bfcf53abc9f8/go.mod h1:sBJWIJZfxLhp7mR
 k8s.io/apimachinery v0.20.1/go.mod h1:WlLqWAHZGg07AeltaI0MV5uk1Omp8xaN0JGLY6gkRpU=
 k8s.io/apimachinery v0.20.2/go.mod h1:WlLqWAHZGg07AeltaI0MV5uk1Omp8xaN0JGLY6gkRpU=
 k8s.io/apimachinery v0.23.1/go.mod h1:SADt2Kl8/sttJ62RRsi9MIV4o8f5S3coArm0Iu3fBno=
-k8s.io/apimachinery v0.23.5 h1:Va7dwhp8wgkUPWsEXk6XglXWU4IKYLKNlv8VkX7SDM0=
 k8s.io/apimachinery v0.23.5/go.mod h1:BEuFMMBaIbcOqVIJqNZJXGFTP4W6AycEpb5+m/97hrM=
+k8s.io/apimachinery v0.23.6 h1:RH1UweWJkWNTlFx0D8uxOpaU1tjIOvVVWV/bu5b3/NQ=
+k8s.io/apimachinery v0.23.6/go.mod h1:BEuFMMBaIbcOqVIJqNZJXGFTP4W6AycEpb5+m/97hrM=
 k8s.io/apiserver v0.20.1/go.mod h1:ro5QHeQkgMS7ZGpvf4tSMx6bBOgPfE+f52KwvXfScaU=
 k8s.io/apiserver v0.20.2/go.mod h1:2nKd93WyMhZx4Hp3RfgH2K5PhwyTrprrkWYnI7id7jA=
 k8s.io/apiserver v0.23.1/go.mod h1:Bqt0gWbeM2NefS8CjWswwd2VNAKN6lUKR85Ft4gippY=
