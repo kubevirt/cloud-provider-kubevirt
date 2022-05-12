@@ -13,7 +13,7 @@ require (
 	k8s.io/component-base v0.24.0
 	k8s.io/klog/v2 v2.60.1
 	kubevirt.io/api v0.53.0
-	sigs.k8s.io/controller-runtime v0.11.2
+	sigs.k8s.io/controller-runtime v0.12.0
 )
 
 require (
@@ -94,7 +94,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
-	k8s.io/apiextensions-apiserver v0.23.5 // indirect
+	k8s.io/apiextensions-apiserver v0.24.0 // indirect
 	k8s.io/apiserver v0.24.0 // indirect
 	k8s.io/component-helpers v0.24.0 // indirect
 	k8s.io/controller-manager v0.24.0 // indirect
