@@ -1,4 +1,4 @@
-package kubevirt
+package provider
 
 import (
 	"bytes"
@@ -6,9 +6,12 @@ import (
 	"io"
 
 	"gopkg.in/yaml.v2"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -17,8 +20,12 @@ const (
 	ProviderName = "kubevirt"
 )
 
+var scheme = runtime.NewScheme()
+
 func init() {
 	cloudprovider.RegisterCloudProvider(ProviderName, kubevirtCloudProviderFactory)
+	corev1.AddToScheme(scheme)
+	kubevirtv1.AddToScheme(scheme)
 }
 
 type cloud struct {
@@ -28,10 +35,9 @@ type cloud struct {
 }
 
 type CloudConfig struct {
-	Kubeconfig   string             `yaml:"kubeconfig"` // The kubeconfig used to connect to the underkube
-	LoadBalancer LoadBalancerConfig `yaml:"loadbalancer"`
-	Instances    InstancesConfig    `yaml:"instances"`
-	Zones        ZonesConfig        `yaml:"zones"`
+	InfraKubeconfig string             `yaml:"infraKubeconfig"` // The kubeconfig used to connect to the infra kubevirt cluster
+	LoadBalancer    LoadBalancerConfig `yaml:"loadBalancer"`
+	InstancesV2     InstancesV2Config  `yaml:"instancesV2"`
 }
 
 type LoadBalancerConfig struct {
@@ -39,13 +45,8 @@ type LoadBalancerConfig struct {
 	CreationPollInterval int  `yaml:"creationPollInterval"` // How many seconds to wait for the loadbalancer creation
 }
 
-type InstancesConfig struct {
-	Enabled             bool `yaml:"enabled"`             // Enables the instances interface of the CCM
-	EnableInstanceTypes bool `yaml:"enableInstanceTypes"` // Enables 'flavor' annotation to detect instance types
-}
-
-type ZonesConfig struct {
-	Enabled bool `yaml:"enabled"` // Enables the zones interface of the CCM
+type InstancesV2Config struct {
+	Enabled bool `yaml:"enabled"` // Enables the instances interface of the CCM
 }
 
 // createDefaultCloudConfig creates a CloudConfig object filled with default values.
@@ -56,10 +57,7 @@ func createDefaultCloudConfig() CloudConfig {
 			Enabled:              true,
 			CreationPollInterval: defaultLoadBalancerCreatePollInterval,
 		},
-		Instances: InstancesConfig{
-			Enabled: true,
-		},
-		Zones: ZonesConfig{
+		InstancesV2: InstancesV2Config{
 			Enabled: true,
 		},
 	}
@@ -88,7 +86,7 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal cloud provider config: %v", err)
 	}
-	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(cloudConf.Kubeconfig))
+	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(cloudConf.InfraKubeconfig))
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +99,9 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 		klog.Errorf("Could not find namespace in client config: %v", err)
 		return nil, err
 	}
-	c, err := client.New(restConfig, client.Options{})
+	c, err := client.New(restConfig, client.Options{
+		Scheme: scheme,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -131,29 +131,24 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 
 // Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
-	if !c.config.Instances.Enabled {
-		return nil, false
-	}
-	return &instances{
-		namespace: c.namespace,
-		client:    c.client,
-		config:    c.config.Instances,
-	}, true
-}
-
-func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 	return nil, false
 }
 
-// Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
-func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	if !c.config.Zones.Enabled {
+func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
+	if !c.config.InstancesV2.Enabled {
 		return nil, false
 	}
-	return &zones{
+	return &instancesV2{
 		namespace: c.namespace,
 		client:    c.client,
+		config:    c.config.InstancesV2,
 	}, true
+}
+
+// Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
+// DEPRECATED: Zones is deprecated in favor of retrieving zone/region information from InstancesV2.
+func (c *cloud) Zones() (cloudprovider.Zones, bool) {
+	return nil, false
 }
 
 // Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.
