@@ -1058,8 +1058,9 @@ k8s.io/code-generator v0.23.3/go.mod h1:S0Q1JVA+kSzTI1oUvbKAxZY/DYbA/ZUb4Uknog12
 k8s.io/code-generator v0.23.5/go.mod h1:S0Q1JVA+kSzTI1oUvbKAxZY/DYbA/ZUb4Uknog12ETk=
 k8s.io/component-base v0.23.1/go.mod h1:6llmap8QtJIXGDd4uIWJhAq0Op8AtQo6bDW2RrNMTeo=
 k8s.io/component-base v0.23.5/go.mod h1:c5Nq44KZyt1aLl0IpHX82fhsn84Sb0jjzwjpcA42bY0=
-k8s.io/component-base v0.24.0 h1:h5jieHZQoHrY/lHG+HyrSbJeyfuitheBvqvKwKHVC0g=
 k8s.io/component-base v0.24.0/go.mod h1:Dgazgon0i7KYUsS8krG8muGiMVtUZxG037l1MKyXgrA=
+k8s.io/component-base v0.24.1 h1:APv6W/YmfOWZfo+XJ1mZwep/f7g7Tpwvdbo9CQLDuts=
+k8s.io/component-base v0.24.1/go.mod h1:DW5vQGYVCog8WYpNob3PMmmsY8A3L9QZNg4j/dV3s38=
 k8s.io/component-helpers v0.24.0 h1:hZIHGfdd55thhqd9oxjDTw68OAPauDMJ+8hC69aNw1I=
 k8s.io/component-helpers v0.24.0/go.mod h1:Q2SlLm4h6g6lPTC9GMMfzdywfLSvJT2f1hOnnjaWD8c=
 k8s.io/controller-manager v0.24.0 h1:mR8mlcwCd5s/V9vCoCAgZm9WJMTaOeRVmOn6gxNW5LA=
