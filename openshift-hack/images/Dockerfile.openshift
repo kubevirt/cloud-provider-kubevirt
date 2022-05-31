@@ -1,0 +1,13 @@
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.11 as builder
+
+WORKDIR /build
+COPY . .
+RUN make build
+
+FROM registry.ci.openshift.org/ocp/4.11:base
+
+LABEL description="KubeVirt Cloud Controller Manager"
+
+COPY --from=builder /build/bin/kubevirt-cloud-controller-manager /bin/kubevirt-cloud-controller-manager
+
+ENTRYPOINT [ "/bin/kubevirt-cloud-controller-manager" ]
