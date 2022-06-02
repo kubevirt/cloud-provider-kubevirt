@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
 	v1helper "k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog/v2"
@@ -37,8 +36,12 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bo
 		return false, err
 	}
 
-	err = i.client.Get(ctx, types.NamespacedName{Name: instanceID, Namespace: i.namespace}, nil)
+	_, err = InstanceByVMIName(instanceID).Get(ctx, i.client, i.namespace)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			klog.Infof("Unable to find virtual machine instance %s", instanceID)
+			return false, nil
+		}
 		return false, err
 	}
 
@@ -47,15 +50,16 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bo
 
 // InstanceShutdown returns true if the instance is shutdown according to the cloud provider.
 func (i *instancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (bool, error) {
-	var instance kubevirtv1.VirtualMachineInstance
-
 	instanceID, err := instanceIDFromProviderID(node.Spec.ProviderID)
 	if err != nil {
 		return false, err
 	}
 
-	err = i.client.Get(ctx, types.NamespacedName{Name: instanceID, Namespace: i.namespace}, &instance)
+	instance, err := InstanceByVMIName(instanceID).Get(ctx, i.client, i.namespace)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
 		return false, err
 	}
 
@@ -81,7 +85,7 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 		instanceFetchers = append(instanceFetchers, InstanceByVMIName(node.Name), InstanceByVMIHostname(node.Name))
 	}
 
-	instance, err := i.getInstance(ctx, instanceFetchers...)
+	instance, err := i.findInstance(ctx, instanceFetchers...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +115,8 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 	}, nil
 }
 
-// getInstance finds a virtual machine instance of the corresponding node
-func (i *instancesV2) getInstance(ctx context.Context, fetchers ...InstanceFetcher) (*kubevirtv1.VirtualMachineInstance, error) {
+// findInstance finds a virtual machine instance of the corresponding node
+func (i *instancesV2) findInstance(ctx context.Context, fetchers ...InstanceFetcher) (*kubevirtv1.VirtualMachineInstance, error) {
 	var (
 		instance *kubevirtv1.VirtualMachineInstance
 		err      error

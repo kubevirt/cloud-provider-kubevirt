@@ -306,7 +306,7 @@ var _ = Describe("Instances V2", func() {
 				}
 
 				mockClient.EXPECT().
-					Get(ctx, types.NamespacedName{Name: vmi.Name, Namespace: vmi.Namespace}, nil).
+					Get(ctx, types.NamespacedName{Name: vmi.Name, Namespace: vmi.Namespace}, &kubevirtv1.VirtualMachineInstance{}).
 					Times(1)
 
 				i := instancesV2{namespace: vmi.Namespace, client: mockClient}
@@ -315,7 +315,7 @@ var _ = Describe("Instances V2", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("Should return an error if VMI does not exist", func() {
+			It("Should not return an error if VMI does not exist", func() {
 				namespace := "cluster-test"
 
 				node := corev1.Node{
@@ -328,14 +328,14 @@ var _ = Describe("Instances V2", func() {
 				}
 
 				mockClient.EXPECT().
-					Get(ctx, types.NamespacedName{Name: node.Name, Namespace: namespace}, nil).
+					Get(ctx, types.NamespacedName{Name: node.Name, Namespace: namespace}, &kubevirtv1.VirtualMachineInstance{}).
 					Return(errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, "missingVMI")).
 					Times(1)
 
 				i := instancesV2{namespace: namespace, client: mockClient}
 				exists, err := i.InstanceExists(ctx, &node)
 				Expect(exists).To(BeFalse())
-				Expect(err).To(HaveOccurred())
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Should return an error if provider id is invalid", func() {
