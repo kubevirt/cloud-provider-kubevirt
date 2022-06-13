@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("Instance fetchers", func() {
+var _ = Describe("Instance getters", func() {
 
 	var (
 		mockClient *mockclient.MockClient

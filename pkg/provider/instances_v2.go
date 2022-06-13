@@ -77,15 +77,15 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (
 
 // InstanceMetadata returns the instance's metadata.
 func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceMetadata, error) {
-	var instanceFetchers []InstanceFetcher
+	var instanceGetters []InstanceGetter
 
 	if val, ok := node.Labels[instanceIDLabelKey]; ok {
-		instanceFetchers = append(instanceFetchers, InstanceByVMIName(val))
+		instanceGetters = append(instanceGetters, InstanceByVMIName(val))
 	} else {
-		instanceFetchers = append(instanceFetchers, InstanceByVMIName(node.Name), InstanceByVMIHostname(node.Name))
+		instanceGetters = append(instanceGetters, InstanceByVMIName(node.Name), InstanceByVMIHostname(node.Name))
 	}
 
-	instance, err := i.findInstance(ctx, instanceFetchers...)
+	instance, err := i.findInstance(ctx, instanceGetters...)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +96,9 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 		instanceType = val
 	}
 
-	region := ""
-	if val, ok := instance.Labels[corev1.LabelTopologyRegion]; ok {
-		region = val
-	}
-
-	zone := ""
-	if val, ok := instance.Labels[corev1.LabelTopologyZone]; ok {
-		zone = val
+	region, zone, err := i.getRegionAndZone(ctx, instance.Status.NodeName)
+	if err != nil {
+		return nil, err
 	}
 
 	return &cloudprovider.InstanceMetadata{
@@ -116,7 +111,7 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 }
 
 // findInstance finds a virtual machine instance of the corresponding node
-func (i *instancesV2) findInstance(ctx context.Context, fetchers ...InstanceFetcher) (*kubevirtv1.VirtualMachineInstance, error) {
+func (i *instancesV2) findInstance(ctx context.Context, fetchers ...InstanceGetter) (*kubevirtv1.VirtualMachineInstance, error) {
 	var (
 		instance *kubevirtv1.VirtualMachineInstance
 		err      error
@@ -153,6 +148,25 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 	}
 
 	return addrs
+}
+
+func (i *instancesV2) getRegionAndZone(ctx context.Context, nodeName string) (string, string, error) {
+	region, zone := "", ""
+	node := corev1.Node{}
+
+	err := i.client.Get(ctx, client.ObjectKey{Name: nodeName}, &node)
+	if err != nil {
+		return "", "", err
+	}
+
+	if val, ok := node.Labels[corev1.LabelTopologyRegion]; ok {
+		region = val
+	}
+	if val, ok := node.Labels[corev1.LabelTopologyZone]; ok {
+		zone = val
+	}
+
+	return region, zone, nil
 }
 
 func getProviderID(instanceID string) string {

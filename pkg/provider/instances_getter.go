@@ -10,8 +10,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// InstanceFetcher allows fetching virtual machine instances with multiple fetching strategies
-type InstanceFetcher interface {
+// InstanceGetter allows fetching virtual machine instances with multiple fetching strategies
+type InstanceGetter interface {
 	// Get gets a virtual machine instance
 	Get(ctx context.Context, cli client.Client, namespace string) (*kubevirtv1.VirtualMachineInstance, error)
 }

@@ -46,11 +46,23 @@ var _ = Describe("Instances V2", func() {
 				namespace := "cluster-qwedas"
 				i := instancesV2{namespace: namespace, client: mockClient}
 
-				vmi := kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{
-					Name:      vmiName,
-					Namespace: namespace,
-				}}
-				node := corev1.Node{
+				infraNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "infra-node",
+					},
+				}
+
+				vmi := kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vmiName,
+						Namespace: namespace,
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						NodeName: infraNode.Name,
+					},
+				}
+
+				tenantNode := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "custom-node-name",
 						Labels: map[string]string{
@@ -59,12 +71,18 @@ var _ = Describe("Instances V2", func() {
 					},
 				}
 
-				mockClient.EXPECT().
-					Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
-					SetArg(2, vmi).
-					Times(1)
+				gomock.InOrder(
+					mockClient.EXPECT().
+						Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+						SetArg(2, vmi).
+						Times(1),
+					mockClient.EXPECT().
+						Get(ctx, client.ObjectKey{Name: infraNode.Name}, gomock.AssignableToTypeOf(&corev1.Node{})).
+						SetArg(2, infraNode).
+						Times(1),
+				)
 
-				metadata, err := i.InstanceMetadata(ctx, &node)
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
 				Expect(err).To(BeNil())
 				Expect(metadata.ProviderID).To(Equal("kubevirt://test-vm"))
 			})
@@ -101,16 +119,22 @@ var _ = Describe("Instances V2", func() {
 				namespace := "cluster-qwedas"
 				i := instancesV2{namespace: namespace, client: mockClient}
 
+				infraNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "infra-node",
+						Labels: map[string]string{
+							corev1.LabelTopologyRegion: "region-a",
+							corev1.LabelTopologyZone:   "zone-1",
+						},
+					},
+				}
+
 				vmi := kubevirtv1.VirtualMachineInstance{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      vmiName,
 						Namespace: namespace,
 						Annotations: map[string]string{
 							kubevirtv1.FlavorAnnotation: "highPerformance",
-						},
-						Labels: map[string]string{
-							corev1.LabelTopologyRegion: "region-a",
-							corev1.LabelTopologyZone:   "zone-1",
 						},
 					},
 					Status: kubevirtv1.VirtualMachineInstanceStatus{
@@ -127,20 +151,28 @@ var _ = Describe("Instances V2", func() {
 								IP: "10.246.0.1",
 							},
 						},
+						NodeName: infraNode.Name,
 					},
 				}
-				node := corev1.Node{
+
+				tenantNode := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: vmiName,
 					},
 				}
 
-				mockClient.EXPECT().
-					Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
-					SetArg(2, vmi).
-					Times(1)
+				gomock.InOrder(
+					mockClient.EXPECT().
+						Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+						SetArg(2, vmi).
+						Times(1),
+					mockClient.EXPECT().
+						Get(ctx, client.ObjectKey{Name: infraNode.Name}, gomock.AssignableToTypeOf(&corev1.Node{})).
+						SetArg(2, infraNode).
+						Times(1),
+					)
 
-				metadata, err := i.InstanceMetadata(ctx, &node)
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
 				Expect(err).To(BeNil())
 
 				idFn := func(index int, element interface{}) string {
@@ -194,6 +226,12 @@ var _ = Describe("Instances V2", func() {
 				namespace := "cluster-qwedas"
 				i := instancesV2{namespace: namespace, client: mockClient}
 
+				infraNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "infra-node",
+					},
+				}
+
 				vmis := kubevirtv1.VirtualMachineInstanceList{
 					Items: []kubevirtv1.VirtualMachineInstance{
 						{
@@ -204,10 +242,14 @@ var _ = Describe("Instances V2", func() {
 							Spec: kubevirtv1.VirtualMachineInstanceSpec{
 								Hostname: vmiHostname,
 							},
+							Status: kubevirtv1.VirtualMachineInstanceStatus{
+								NodeName: infraNode.Name,
+							},
 						},
 					},
 				}
-				node := corev1.Node{
+
+				tenantNode := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: vmiHostname,
 					},
@@ -215,7 +257,7 @@ var _ = Describe("Instances V2", func() {
 
 				lo := &client.ListOptions{
 					Namespace:     namespace,
-					FieldSelector: fields.SelectorFromSet(fields.Set{"spec.hostname": node.Name}),
+					FieldSelector: fields.SelectorFromSet(fields.Set{"spec.hostname": tenantNode.Name}),
 				}
 				gomock.InOrder(
 					mockClient.EXPECT().
@@ -226,9 +268,13 @@ var _ = Describe("Instances V2", func() {
 						List(ctx, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstanceList{}), lo).
 						SetArg(1, vmis).
 						Times(1),
+					mockClient.EXPECT().
+						Get(ctx, client.ObjectKey{Name: infraNode.Name}, gomock.AssignableToTypeOf(&corev1.Node{})).
+						SetArg(2, infraNode).
+						Times(1),
 				)
 
-				metadata, err := i.InstanceMetadata(ctx, &node)
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
 				Expect(err).To(BeNil())
 				Expect(metadata.ProviderID).To(Equal("kubevirt://test-vm"))
 			})
