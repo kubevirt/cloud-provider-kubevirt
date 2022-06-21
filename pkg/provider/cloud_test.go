@@ -30,12 +30,12 @@ users:
 `
 
 var (
-	minimalConf      = fmt.Sprintf("infraKubeconfig: |\n%s", indent(kubeconfig, "  "))
-	loadbalancerConf = fmt.Sprintf("infraKubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
-	instancesConf    = fmt.Sprintf("infraKubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
-	zonesConf        = fmt.Sprintf("infraKubeconfig: |\n%s\nzones:\n  enabled: %t", indent(kubeconfig, "  "), false)
-	allConf          = fmt.Sprintf("infraKubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t", indent(kubeconfig, "  "), false, false)
-	invalidKubeconf  = "infraKubeconfig: bla"
+	minimalConf      = fmt.Sprintf("kubeconfig: |\n%s", indent(kubeconfig, "  "))
+	loadbalancerConf = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
+	instancesConf    = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
+	zonesConf        = fmt.Sprintf("kubeconfig: |\n%s\nzones:\n  enabled: %t", indent(kubeconfig, "  "), false)
+	allConf          = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t", indent(kubeconfig, "  "), false, false)
+	invalidKubeconf  = "kubeconfig: bla"
 )
 
 func indent(s, indent string) string {
@@ -44,7 +44,7 @@ func indent(s, indent string) string {
 
 func makeCloudConfig(kubeconfig string, loadbalancerEnabled, instancesEnabled bool, lbCreationPollInterval int) CloudConfig {
 	return CloudConfig{
-		InfraKubeconfig: kubeconfig,
+		Kubeconfig: kubeconfig,
 		LoadBalancer: LoadBalancerConfig{
 			Enabled:              loadbalancerEnabled,
 			CreationPollInterval: lbCreationPollInterval,

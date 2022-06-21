@@ -24,13 +24,13 @@ find example manifests for `kubevirt-cloud-controller-manager` in the [manifests
 static Pod, Deployment and DaemonSet configurations.
 
 To get it to run, you'll need to provide a kubeconfig for the infrastructure cluster to the `kubevirt-cloud-controller-manager` configuration.
-The configuration should contain an `infraKubeconfig` key, like in the following example:
+The configuration should contain an `kubeconfig` key, like in the following example:
 ```shell
 cat /etc/kubernetes/cloud/config
 ```
 Output:
 ```yaml
-infraKubeconfig: |
+kubeconfig: |
   <kubeconfig>
 loadBalancer:
   creationPollInterval: 30
@@ -48,7 +48,7 @@ touch dev/cloud-config
 Next add a kubeconfig to the cloud-config file.
 The kubeconfig must point to the infrastructure cluster where KubeVirt is installed.
 ```shell
-infraKubeconfig: |
+kubeconfig: |
   <kubeconfig>
 ```
 For more configuration options look at the

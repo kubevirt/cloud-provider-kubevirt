@@ -170,7 +170,7 @@ var _ = Describe("Instances V2", func() {
 						Get(ctx, client.ObjectKey{Name: infraNode.Name}, gomock.AssignableToTypeOf(&corev1.Node{})).
 						SetArg(2, infraNode).
 						Times(1),
-					)
+				)
 
 				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
 				Expect(err).To(BeNil())
@@ -458,7 +458,11 @@ var _ = Describe("Instances V2", func() {
 				i := instancesV2{namespace: vmi.Namespace, client: mockClient}
 				status, err := i.InstanceShutdown(ctx, &node)
 				Expect(status).To(Equal(shutdown))
-				Expect(err).ToNot(HaveOccurred())
+				if phase == kubevirtv1.Unknown {
+					Expect(err).To(HaveOccurred())
+				} else {
+					Expect(err).ToNot(HaveOccurred())
+				}
 			},
 				Entry(fmt.Sprintf("Should return true with '%s' status phase", kubevirtv1.Succeeded), kubevirtv1.Succeeded, true),
 				Entry(fmt.Sprintf("Should return true with '%s' status phase", kubevirtv1.Failed), kubevirtv1.Failed, true),

@@ -35,18 +35,21 @@ type cloud struct {
 }
 
 type CloudConfig struct {
-	InfraKubeconfig string             `yaml:"infraKubeconfig"` // The kubeconfig used to connect to the infra kubevirt cluster
-	LoadBalancer    LoadBalancerConfig `yaml:"loadBalancer"`
-	InstancesV2     InstancesV2Config  `yaml:"instancesV2"`
+	Kubeconfig   string             `yaml:"kubeconfig"`
+	LoadBalancer LoadBalancerConfig `yaml:"loadBalancer"`
+	InstancesV2  InstancesV2Config  `yaml:"instancesV2"`
 }
 
 type LoadBalancerConfig struct {
-	Enabled              bool `yaml:"enabled"`              // Enables the loadbalancer interface of the CCM
-	CreationPollInterval int  `yaml:"creationPollInterval"` // How many seconds to wait for the loadbalancer creation
+	// Enabled activates the load balancer interface of the CCM
+	Enabled bool `yaml:"enabled"`
+	// CreationPollInterval determines how many seconds to wait for the load balancer creation
+	CreationPollInterval int `yaml:"creationPollInterval"`
 }
 
 type InstancesV2Config struct {
-	Enabled bool `yaml:"enabled"` // Enables the instances interface of the CCM
+	// Enabled activates the instances interface of the CCM
+	Enabled bool `yaml:"enabled"`
 }
 
 // createDefaultCloudConfig creates a CloudConfig object filled with default values.
@@ -86,7 +89,7 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal cloud provider config: %v", err)
 	}
-	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(cloudConf.InfraKubeconfig))
+	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(cloudConf.Kubeconfig))
 	if err != nil {
 		return nil, err
 	}

@@ -68,8 +68,7 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (
 		klog.Infof("instance %s is shut down.", instance.Name)
 		return true, nil
 	case kubevirtv1.Unknown:
-		klog.Infof("instance %s is in an unknown state (host probably down).", instance.Name)
-		return true, nil
+		return true, fmt.Errorf("Instance is in unkown state (propably host down)")
 	default:
 		return false, nil
 	}
