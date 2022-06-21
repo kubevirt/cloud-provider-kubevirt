@@ -1,4 +1,4 @@
-package kubevirt
+package provider
 
 import (
 	"context"
@@ -16,9 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
+	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/provider/mock/client"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/cloudprovider/kubevirt/mock/client"
 )
 
 var (

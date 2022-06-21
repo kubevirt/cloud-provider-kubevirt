@@ -1,4 +1,4 @@
-package kubevirt
+package provider
 
 import (
 	"context"

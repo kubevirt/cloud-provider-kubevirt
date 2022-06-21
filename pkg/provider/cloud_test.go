@@ -1,4 +1,4 @@
-package kubevirt
+package provider
 
 import (
 	"fmt"
@@ -31,10 +31,10 @@ users:
 
 var (
 	minimalConf      = fmt.Sprintf("kubeconfig: |\n%s", indent(kubeconfig, "  "))
-	loadbalancerConf = fmt.Sprintf("kubeconfig: |\n%s\nloadbalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
-	instancesConf    = fmt.Sprintf("kubeconfig: |\n%s\ninstances:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
+	loadbalancerConf = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
+	instancesConf    = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
 	zonesConf        = fmt.Sprintf("kubeconfig: |\n%s\nzones:\n  enabled: %t", indent(kubeconfig, "  "), false)
-	allConf          = fmt.Sprintf("kubeconfig: |\n%s\nloadbalancer:\n  enabled: %t\ninstances:\n  enabled: %t\nzones:\n  enabled: %t", indent(kubeconfig, "  "), false, false, false)
+	allConf          = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t", indent(kubeconfig, "  "), false, false)
 	invalidKubeconf  = "kubeconfig: bla"
 )
 
@@ -42,19 +42,15 @@ func indent(s, indent string) string {
 	return indent + strings.ReplaceAll(s, "\n", fmt.Sprintf("\n%s", indent))
 }
 
-func makeCloudConfig(kubeconfig string, loadbalancerEnabled, instancesEnabled, zonesEnabled bool, lbCreationPollInterval int, enableInstanceTypes bool) CloudConfig {
+func makeCloudConfig(kubeconfig string, loadbalancerEnabled, instancesEnabled bool, lbCreationPollInterval int) CloudConfig {
 	return CloudConfig{
 		Kubeconfig: kubeconfig,
 		LoadBalancer: LoadBalancerConfig{
 			Enabled:              loadbalancerEnabled,
 			CreationPollInterval: lbCreationPollInterval,
 		},
-		Instances: InstancesConfig{
-			Enabled:             instancesEnabled,
-			EnableInstanceTypes: enableInstanceTypes,
-		},
-		Zones: ZonesConfig{
-			Enabled: zonesEnabled,
+		InstancesV2: InstancesV2Config{
+			Enabled: instancesEnabled,
 		},
 	}
 }
@@ -65,11 +61,10 @@ func TestNewCloudConfigFromBytes(t *testing.T) {
 		expectedCloudConfig CloudConfig
 		expectedError       error
 	}{
-		{minimalConf, makeCloudConfig(kubeconfig, true, true, true, 5, false), nil},
-		{loadbalancerConf, makeCloudConfig(kubeconfig, false, true, true, 3, false), nil},
-		{instancesConf, makeCloudConfig(kubeconfig, true, false, true, 5, true), nil},
-		{zonesConf, makeCloudConfig(kubeconfig, true, true, false, 5, false), nil},
-		{allConf, makeCloudConfig(kubeconfig, false, false, false, 5, false), nil},
+		{minimalConf, makeCloudConfig(kubeconfig, true, true, 5), nil},
+		{loadbalancerConf, makeCloudConfig(kubeconfig, false, true, 3), nil},
+		{instancesConf, makeCloudConfig(kubeconfig, true, false, 5), nil},
+		{allConf, makeCloudConfig(kubeconfig, false, false, 5), nil},
 	}
 
 	for _, test := range tests {
