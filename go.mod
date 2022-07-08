@@ -12,7 +12,7 @@ require (
 	k8s.io/client-go v0.24.2
 	k8s.io/cloud-provider v0.24.2
 	k8s.io/component-base v0.24.2
-	k8s.io/klog/v2 v2.70.0
+	k8s.io/klog/v2 v2.70.1
 	kubevirt.io/api v0.54.0
 	sigs.k8s.io/controller-runtime v0.12.2
 )
