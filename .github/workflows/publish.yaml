@@ -1,0 +1,30 @@
+name: publish
+
+on:
+  push:
+    branches:
+    - main
+    tags:
+    - 'v*.*.*'
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{github.ref_name}}
+      REGISTRY: quay.io/kubevirt
+    steps:
+      - uses: actions/checkout@v2
+      - uses: arnested/go-version-action@v1
+        id: go-versions
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ steps.go-versions.outputs.minimal }}
+      - name: Logging to quay.io
+        run: 
+          docker login -u ${{ secrets.QUAY_USER }} -p ${{ secrets.QUAY_TOKEN }} quay.io
+      - name: Build and push image
+        run: make build push
