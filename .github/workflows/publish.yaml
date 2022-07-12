@@ -27,4 +27,4 @@ jobs:
         run: 
           docker login -u ${{ secrets.QUAY_USER }} -p ${{ secrets.QUAY_TOKEN }} quay.io
       - name: Build and push image
-        run: make build push
+        run: make image push
