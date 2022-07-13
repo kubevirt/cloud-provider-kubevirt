@@ -57,7 +57,7 @@ spec:
           secretName: cloud-config
         name: cloud-config
       - secret:
-          secretName: kvcluster-kubeconfig
+          secretName: kubeconfig
         name: kubeconfig
       nodeSelector:
         node-role.kubernetes.io/master: ""

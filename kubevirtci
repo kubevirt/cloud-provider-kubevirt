@@ -175,30 +175,19 @@ function kubevirtci::sync() {
 
     REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
 
-    $_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > infra-kubeconfig.yaml
-
-    cat << EOF > cloud-config.yaml
+    cat << EOF > config/secret/cloud-config
 kubeconfig: |
-$(cat infra-kubeconfig.yaml | sed "s/^/  /g")
+$($_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf | sed "s/^/  /g")
 loadBalancer:
   creationPollInterval: 30
 namespace: ${TENANT_CLUSTER_NAMESPACE}
 EOF
-
-    ${_kubectl} -n kube-system create secret generic cloud-config --from-file=cloud-config=cloud-config.yaml
-
-    $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > ${TENANT_CLUSTER_NAME}-kubeconfig
-
-    ${_kubectl} -n kube-system create secret generic ${TENANT_CLUSTER_NAME}-kubeconfig --from-file=kubeconfig=${TENANT_CLUSTER_NAME}-kubeconfig
-    
+    $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
     ${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
 }
 
 function kubevirtci::delete() {
-    ${_kubectl} -n kube-system delete secret cloud-config --ignore-not-found
-    ${_kubectl} -n kube-system delete secret generic ${TENANT_CLUSTER_NAME}-kubeconfig --ignore-not-found
     ${_kubectl} kustomize config/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
-
 }
 
 function kubevirtci::install_calico {
