@@ -1,0 +1,7 @@
+namespace: kube-system
+bases: 
+ - ../rbac
+ - ../manager
+
+patchesStrategicMerge:
+  - manager_image_patch.yaml

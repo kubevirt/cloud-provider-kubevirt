@@ -190,16 +190,14 @@ EOF
     $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > ${TENANT_CLUSTER_NAME}-kubeconfig
 
     ${_kubectl} -n kube-system create secret generic ${TENANT_CLUSTER_NAME}-kubeconfig --from-file=kubeconfig=${TENANT_CLUSTER_NAME}-kubeconfig
-
-    ${_kubectl} apply -f cluster/addons/rbac
-    ${_kubectl} apply -f cluster/manifests/
+    
+    ${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
 }
 
 function kubevirtci::delete() {
     ${_kubectl} -n kube-system delete secret cloud-config --ignore-not-found
     ${_kubectl} -n kube-system delete secret generic ${TENANT_CLUSTER_NAME}-kubeconfig --ignore-not-found
-    ${_kubectl} delete -f cluster/addons/rbac --ignore-not-found
-    ${_kubectl} delete -f cluster/manifests --ignore-not-found
+    ${_kubectl} kustomize config/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
 
 }
 
