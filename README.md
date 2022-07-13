@@ -30,8 +30,7 @@ cat /etc/kubernetes/cloud/config
 ```
 Output:
 ```yaml
-kubeconfig: |
-  <kubeconfig>
+kubeconfig: <infraKubeConfigPath>
 loadBalancer:
   creationPollInterval: 30
 ```
@@ -45,11 +44,10 @@ First create a cloud config file in the project directory
 ```shell
 touch dev/cloud-config
 ```
-Next add a kubeconfig to the cloud-config file.
+Next add a kubeconfig path to the cloud-config file.
 The kubeconfig must point to the infrastructure cluster where KubeVirt is installed.
 ```shell
-kubeconfig: |
-  <kubeconfig>
+kubeconfig: <infraKubeConfigPath>
 ```
 For more configuration options look at the
 [cloud configuration](https://github.com/kubevirt/cloud-provider-kubevirt/blob/main/pkg/cloudprovider/kubevirt/cloud.go#L30) 
