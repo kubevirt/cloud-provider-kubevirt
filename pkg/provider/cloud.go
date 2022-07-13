@@ -51,6 +51,8 @@ type LoadBalancerConfig struct {
 type InstancesV2Config struct {
 	// Enabled activates the instances interface of the CCM
 	Enabled bool `yaml:"enabled"`
+	// ZoneAndRegionEnabled indicates if need to get Region and zone labels from the cloud provider
+	ZoneAndRegionEnabled bool `yaml:"zoneAndRegionEnabled"`
 }
 
 // createDefaultCloudConfig creates a CloudConfig object filled with default values.
@@ -62,7 +64,8 @@ func createDefaultCloudConfig() CloudConfig {
 			CreationPollInterval: defaultLoadBalancerCreatePollInterval,
 		},
 		InstancesV2: InstancesV2Config{
-			Enabled: true,
+			Enabled:              true,
+			ZoneAndRegionEnabled: true,
 		},
 	}
 }
@@ -148,7 +151,7 @@ func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 	return &instancesV2{
 		namespace: c.namespace,
 		client:    c.client,
-		config:    c.config.InstancesV2,
+		config:    &c.config.InstancesV2,
 	}, true
 }
 

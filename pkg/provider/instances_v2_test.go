@@ -117,7 +117,14 @@ var _ = Describe("Instances V2", func() {
 			It("Should fetch a vmi by node name and return a complete metadata object", func() {
 				vmiName := "test-vm"
 				namespace := "cluster-qwedas"
-				i := instancesV2{namespace: namespace, client: mockClient}
+				i := instancesV2{
+					namespace: namespace,
+					client:    mockClient,
+					config: &InstancesV2Config{
+						Enabled:              true,
+						ZoneAndRegionEnabled: true,
+					},
+				}
 
 				infraNode := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -189,6 +196,87 @@ var _ = Describe("Instances V2", func() {
 					"InstanceType": Equal("highPerformance"),
 					"Region":       Equal("region-a"),
 					"Zone":         Equal("zone-1"),
+				}))
+			})
+
+			It("Should fetch a vmi by node name and return a complete metadata object - zone and region disabled", func() {
+				vmiName := "test-vm"
+				namespace := "cluster-qwedas"
+				i := instancesV2{
+					namespace: namespace,
+					client:    mockClient,
+					config: &InstancesV2Config{
+						Enabled:              true,
+						ZoneAndRegionEnabled: false,
+					},
+				}
+
+				infraNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "infra-node",
+						Labels: map[string]string{
+							corev1.LabelTopologyRegion: "region-a",
+							corev1.LabelTopologyZone:   "zone-1",
+						},
+					},
+				}
+
+				vmi := kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vmiName,
+						Namespace: namespace,
+						Annotations: map[string]string{
+							kubevirtv1.FlavorAnnotation: "highPerformance",
+						},
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+							{
+								IP:   "10.244.0.1",
+								Name: "default",
+							},
+							{
+								IP:   "10.245.0.1",
+								Name: "unknown",
+							},
+							{
+								IP: "10.246.0.1",
+							},
+						},
+						NodeName: infraNode.Name,
+					},
+				}
+
+				tenantNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vmiName,
+					},
+				}
+
+				gomock.InOrder(
+					mockClient.EXPECT().
+						Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+						SetArg(2, vmi).
+						Times(1),
+				)
+
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
+				Expect(err).To(BeNil())
+
+				idFn := func(index int, element interface{}) string {
+					return strconv.Itoa(index)
+				}
+				Expect(*metadata).To(MatchAllFields(Fields{
+					"ProviderID": Equal("kubevirt://test-vm"),
+					"NodeAddresses": MatchAllElementsWithIndex(idFn, Elements{
+						"0": MatchAllFields(Fields{
+							"Address": Equal("10.244.0.1"),
+							"Type":    Equal(corev1.NodeInternalIP),
+						}),
+					}),
+					"InstanceType": Equal("highPerformance"),
+					"Region":       Equal(""),
+					"Zone":         Equal(""),
 				}))
 			})
 
