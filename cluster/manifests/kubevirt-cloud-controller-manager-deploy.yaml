@@ -26,20 +26,25 @@ spec:
         args:
         - --cloud-provider=kubevirt
         - --cloud-config=/etc/cloud/cloud-config
-        - --use-service-account-credentials=true
-        - --kubeconfig=/etc/kubernetes/controller-manager.conf
-        image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.7
+        - --kubeconfig=/etc/kubernetes/kubeconfig/kubeconfig
+        - --cluster-name=ellorent-hosted
+        command:
+        - /bin/kubevirt-cloud-controller-manager
+        image: registry:5000/kubevirt-cloud-controller-manager:main
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
         resources:
           requests:
             cpu: 100m
         volumeMounts:
-        - mountPath: /etc/kubernetes/pki
+        - mountPath: /var/lib/kubelet/pki
           name: k8s-certs
           readOnly: true
         - mountPath: /etc/ssl/certs
           name: ca-certs
           readOnly: true
-        - mountPath: /etc/kubernetes/controller-manager.conf
+        - mountPath: /etc/kubernetes/kubeconfig
           name: kubeconfig
           readOnly: true
         - mountPath: /etc/cloud
@@ -47,20 +52,19 @@ spec:
           readOnly: true
       volumes:
       - hostPath:
-          path: /etc/kubernetes/pki
+          path: /var/lib/kubelet/pki
           type: DirectoryOrCreate
         name: k8s-certs
       - hostPath:
           path: /etc/ssl/certs
           type: DirectoryOrCreate
         name: ca-certs
-      - hostPath:
-          path: /etc/kubernetes/controller-manager.conf
-          type: FileOrCreate
-        name: kubeconfig
       - secret:
           secretName: cloud-config
         name: cloud-config
+      - secret:
+          secretName: kvcluster-kubeconfig
+        name: kubeconfig
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:
