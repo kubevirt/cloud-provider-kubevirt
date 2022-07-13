@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
@@ -93,7 +94,11 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal cloud provider config: %v", err)
 	}
-	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(cloudConf.Kubeconfig))
+	infraKubeConfig, err := getInfraKubeConfig(cloudConf.Kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(infraKubeConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -179,4 +184,17 @@ func (c *cloud) ProviderName() string {
 // HasClusterID returns true if a ClusterID is required and set
 func (c *cloud) HasClusterID() bool {
 	return true
+}
+
+func getInfraKubeConfig(infraKubeConfigPath string) (string, error) {
+	config, err := os.Open(infraKubeConfigPath)
+	if err != nil {
+		return "", fmt.Errorf("Couldn't open infra-kubeconfig: %v", err)
+	}
+	buf := new(bytes.Buffer)
+	_, err = buf.ReadFrom(config)
+	if err != nil {
+		return "", fmt.Errorf("Failed to read infra-kubeconfig: %v", err)
+	}
+	return buf.String(), nil
 }
