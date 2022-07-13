@@ -30,21 +30,21 @@ users:
 `
 
 var (
-	ns               = "aNamespace"
-	minimalConf      = fmt.Sprintf("kubeconfig: |\n%s", indent(kubeconfig, "  "))
-	loadbalancerConf = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
-	instancesConf    = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
-	zonesConf        = fmt.Sprintf("kubeconfig: |\n%s\nzones:\n  enabled: %t", indent(kubeconfig, "  "), false)
-	namespaceConf    = fmt.Sprintf("kubeconfig: |\n%s\nnamespace: %s", indent(kubeconfig, "  "), ns)
-	allConf          = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t\nnamespace: %s", indent(kubeconfig, "  "), false, false, ns)
-	invalidKubeconf  = "kubeconfig: bla"
+	ns                = "aNamespace"
+	minimalConf       = fmt.Sprintf("kubeconfig: |\n%s", indent(kubeconfig, "  "))
+	loadbalancerConf  = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
+	instancesConf     = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
+	zoneAndRegionConf = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  zoneAndRegionEnabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
+	namespaceConf     = fmt.Sprintf("kubeconfig: |\n%s\nnamespace: %s", indent(kubeconfig, "  "), ns)
+	allConf           = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t\nnamespace: %s", indent(kubeconfig, "  "), false, false, ns)
+	invalidKubeconf   = "kubeconfig: bla"
 )
 
 func indent(s, indent string) string {
 	return indent + strings.ReplaceAll(s, "\n", fmt.Sprintf("\n%s", indent))
 }
 
-func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, lbCreationPollInterval int) CloudConfig {
+func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, zoneAndRegionEnabled bool, lbCreationPollInterval int) CloudConfig {
 	return CloudConfig{
 		Kubeconfig: kubeconfig,
 		LoadBalancer: LoadBalancerConfig{
@@ -52,7 +52,8 @@ func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instance
 			CreationPollInterval: lbCreationPollInterval,
 		},
 		InstancesV2: InstancesV2Config{
-			Enabled: instancesEnabled,
+			Enabled:              instancesEnabled,
+			ZoneAndRegionEnabled: zoneAndRegionEnabled,
 		},
 		Namespace: namespace,
 	}
@@ -64,11 +65,12 @@ func TestNewCloudConfigFromBytes(t *testing.T) {
 		expectedCloudConfig CloudConfig
 		expectedError       error
 	}{
-		{minimalConf, makeCloudConfig(kubeconfig, "", true, true, 5), nil},
-		{loadbalancerConf, makeCloudConfig(kubeconfig, "", false, true, 3), nil},
-		{instancesConf, makeCloudConfig(kubeconfig, "", true, false, 5), nil},
-		{namespaceConf, makeCloudConfig(kubeconfig, ns, true, true, 5), nil},
-		{allConf, makeCloudConfig(kubeconfig, ns, false, false, 5), nil},
+		{minimalConf, makeCloudConfig(kubeconfig, "", true, true, true, 5), nil},
+		{loadbalancerConf, makeCloudConfig(kubeconfig, "", false, true, true, 3), nil},
+		{instancesConf, makeCloudConfig(kubeconfig, "", true, false, true, 5), nil},
+		{zoneAndRegionConf, makeCloudConfig(kubeconfig, "", true, true, false, 5), nil},
+		{namespaceConf, makeCloudConfig(kubeconfig, ns, true, true, true, 5), nil},
+		{allConf, makeCloudConfig(kubeconfig, ns, false, false, true, 5), nil},
 	}
 
 	for _, test := range tests {

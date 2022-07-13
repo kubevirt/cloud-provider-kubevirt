@@ -26,7 +26,7 @@ var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_-
 type instancesV2 struct {
 	namespace string
 	client    client.Client
-	config    InstancesV2Config
+	config    *InstancesV2Config
 }
 
 // InstanceExists returns true if the instance for the given node exists according to the cloud provider.
@@ -151,6 +151,10 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 
 func (i *instancesV2) getRegionAndZone(ctx context.Context, nodeName string) (string, string, error) {
 	region, zone := "", ""
+	if i.config != nil && !i.config.ZoneAndRegionEnabled {
+		return region, zone, nil
+	}
+
 	node := corev1.Node{}
 
 	err := i.client.Get(ctx, client.ObjectKey{Name: nodeName}, &node)
