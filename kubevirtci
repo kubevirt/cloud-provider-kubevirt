@@ -184,6 +184,7 @@ namespace: ${TENANT_CLUSTER_NAMESPACE}
 EOF
     $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
     ${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
+    ${_kubectl} rollout status -w -n kube-system deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {
