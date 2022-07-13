@@ -2,9 +2,12 @@ package provider
 
 import (
 	"fmt"
-	"reflect"
+	"io/ioutil"
+	"os"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 const kubeconfig = `apiVersion: v1
@@ -30,14 +33,15 @@ users:
 `
 
 var (
-	ns                = "aNamespace"
-	minimalConf       = fmt.Sprintf("kubeconfig: |\n%s", indent(kubeconfig, "  "))
-	loadbalancerConf  = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", indent(kubeconfig, "  "), false, 3)
-	instancesConf     = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
-	zoneAndRegionConf = fmt.Sprintf("kubeconfig: |\n%s\ninstancesV2:\n  zoneAndRegionEnabled: %t\n  enableInstanceTypes: %t", indent(kubeconfig, "  "), false, true)
-	namespaceConf     = fmt.Sprintf("kubeconfig: |\n%s\nnamespace: %s", indent(kubeconfig, "  "), ns)
-	allConf           = fmt.Sprintf("kubeconfig: |\n%s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t\nnamespace: %s", indent(kubeconfig, "  "), false, false, ns)
-	invalidKubeconf   = "kubeconfig: bla"
+	ns                  = "aNamespace"
+	infraKubeConfigPath = "infraKubeConfig"
+	minimalConf         = fmt.Sprintf("kubeconfig: %s", infraKubeConfigPath)
+	loadbalancerConf    = fmt.Sprintf("kubeconfig: %s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", infraKubeConfigPath, false, 3)
+	instancesConf       = fmt.Sprintf("kubeconfig: %s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", infraKubeConfigPath, false, true)
+	zoneAndRegionConf   = fmt.Sprintf("kubeconfig: %s\ninstancesV2:\n  zoneAndRegionEnabled: %t\n  enableInstanceTypes: %t", infraKubeConfigPath, false, true)
+	namespaceConf       = fmt.Sprintf("kubeconfig: %s\nnamespace: %s", infraKubeConfigPath, ns)
+	allConf             = fmt.Sprintf("kubeconfig: %s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t\nnamespace: %s", infraKubeConfigPath, false, false, ns)
+	invalidKubeconf     = "bla"
 )
 
 func indent(s, indent string) string {
@@ -59,42 +63,54 @@ func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instance
 	}
 }
 
-func TestNewCloudConfigFromBytes(t *testing.T) {
-	tests := []struct {
-		configBytes         string
-		expectedCloudConfig CloudConfig
-		expectedError       error
-	}{
-		{minimalConf, makeCloudConfig(kubeconfig, "", true, true, true, 5), nil},
-		{loadbalancerConf, makeCloudConfig(kubeconfig, "", false, true, true, 3), nil},
-		{instancesConf, makeCloudConfig(kubeconfig, "", true, false, true, 5), nil},
-		{zoneAndRegionConf, makeCloudConfig(kubeconfig, "", true, true, false, 5), nil},
-		{namespaceConf, makeCloudConfig(kubeconfig, ns, true, true, true, 5), nil},
-		{allConf, makeCloudConfig(kubeconfig, ns, false, false, true, 5), nil},
-	}
+var _ = Describe("Cloud config", func() {
 
-	for _, test := range tests {
-		config, err := NewCloudConfigFromBytes([]byte(test.configBytes))
-		if !reflect.DeepEqual(config, test.expectedCloudConfig) {
-			t.Errorf("Expected: %v, got %v", test.expectedCloudConfig, config)
-		}
-		if test.expectedError != nil && err != nil && err.Error() != test.expectedError.Error() {
-			t.Errorf("Expected: '%v', got '%v'", test.expectedError, err)
-		}
-	}
-}
+	DescribeTable("Get CloudConfig from bytes", func(configBytes string, expectedCloudConfig CloudConfig, expectedError error) {
+		config, err := NewCloudConfigFromBytes([]byte(configBytes))
+		Expect(config).To(Equal(expectedCloudConfig))
+		Expect(err).To(BeNil())
+	},
+		Entry("With minimal configuration", minimalConf, makeCloudConfig(infraKubeConfigPath, "", true, true, true, 5), nil),
+		Entry("With loadBalancer configuration", loadbalancerConf, makeCloudConfig(infraKubeConfigPath, "", false, true, true, 3), nil),
+		Entry("With instance configuration", instancesConf, makeCloudConfig(infraKubeConfigPath, "", true, false, true, 5), nil),
+		Entry("With zone and region configuration", zoneAndRegionConf, makeCloudConfig(infraKubeConfigPath, "", true, true, false, 5), nil),
+		Entry("With namespace configuration", namespaceConf, makeCloudConfig(infraKubeConfigPath, ns, true, true, true, 5), nil),
+		Entry("With full configuration", allConf, makeCloudConfig(infraKubeConfigPath, ns, false, false, true, 5), nil),
+	)
 
-func TestKubevirtCloudProviderFactory(t *testing.T) {
-	// Calling kubevirtCloudProviderFactory without config should return an error
-	_, err := kubevirtCloudProviderFactory(nil)
-	if err == nil {
-		t.Error("Expected: 'No kubevirt cloud provider config file given', got 'nil'")
-	} else if err.Error() != "No kubevirt cloud provider config file given" {
-		t.Errorf("Expected: 'No kubevirt cloud provider config file given', got '%v'", err)
-	}
+	Describe("KubeVirt Cloud Factory", func() {
 
-	_, err = kubevirtCloudProviderFactory(strings.NewReader(invalidKubeconf))
-	if err == nil || !strings.Contains(err.Error(), "couldn't get version/kind; json parse error") {
-		t.Errorf("Expected error containing: 'couldn't get version/kind; json parse error', got '%v'", err)
-	}
-}
+		Context("With nil config", func() {
+
+			It("Should return an error", func() {
+				_, err := kubevirtCloudProviderFactory(nil)
+				Expect(err).To(HaveOccurred())
+			})
+
+		})
+
+		Context("With invalid infraKubeConfig", func() {
+			var (
+				err             error
+				infraKubeConfig *os.File
+			)
+
+			BeforeEach(func() {
+				infraKubeConfig, err = ioutil.TempFile("", "infraKubeConfig")
+				Expect(err).NotTo(HaveOccurred())
+				infraKubeConfig.Write([]byte(invalidKubeconf))
+			})
+
+			AfterEach(func() {
+				os.Remove(infraKubeConfig.Name())
+			})
+
+			It("Should return an error", func() {
+				_, err = kubevirtCloudProviderFactory(strings.NewReader(fmt.Sprintf("kubeconfig: %s", infraKubeConfig.Name())))
+				Expect(err).To(HaveOccurred())
+			})
+
+		})
+
+	})
+})
