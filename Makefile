@@ -6,6 +6,8 @@ KUBECONFIG := dev/kubeconfig
 CLOUD_CONFIG := dev/cloud-config
 CERT_DIR := dev/
 
+GOLANGCI_LINT_VERSION ?= v1.46.2
+
 .PHONY: all
 all: clean test build
 
@@ -67,3 +69,6 @@ cluster-down:
 .PHONY: functest
 functest:
 	./hack/functest.sh
+.PHONY: lint
+lint:
+	go run github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --timeout=10m
