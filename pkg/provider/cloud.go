@@ -25,8 +25,12 @@ var scheme = runtime.NewScheme()
 
 func init() {
 	cloudprovider.RegisterCloudProvider(ProviderName, kubevirtCloudProviderFactory)
-	corev1.AddToScheme(scheme)
-	kubevirtv1.AddToScheme(scheme)
+	if err := corev1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
+	if err := kubevirtv1.AddToScheme(scheme); err != nil {
+		panic(err)
+	}
 }
 
 type cloud struct {

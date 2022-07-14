@@ -10,28 +10,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const kubeconfig = `apiVersion: v1
-clusters:
-- cluster:
-    certificate-authority-data: cert-auth-data
-    server: https://127.0.0.1:6443
-  name: kubernetes
-contexts:
-- context:
-    cluster: kubernetes
-    user: kubernetes-admin
-    namespace: default
-  name: kubernetes-admin@kubernetes
-current-context: kubernetes-admin@kubernetes
-kind: Config
-preferences: {}
-users:
-- name: kubernetes-admin
-  user:
-    client-certificate-data: cert-data
-    client-key-data: key-data
-`
-
 var (
 	ns                  = "aNamespace"
 	infraKubeConfigPath = "infraKubeConfig"
@@ -43,10 +21,6 @@ var (
 	allConf             = fmt.Sprintf("kubeconfig: %s\nloadBalancer:\n  enabled: %t\ninstancesV2:\n  enabled: %t\nnamespace: %s", infraKubeConfigPath, false, false, ns)
 	invalidKubeconf     = "bla"
 )
-
-func indent(s, indent string) string {
-	return indent + strings.ReplaceAll(s, "\n", fmt.Sprintf("\n%s", indent))
-}
 
 func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, zoneAndRegionEnabled bool, lbCreationPollInterval int) CloudConfig {
 	return CloudConfig{
@@ -98,7 +72,8 @@ var _ = Describe("Cloud config", func() {
 			BeforeEach(func() {
 				infraKubeConfig, err = ioutil.TempFile("", "infraKubeConfig")
 				Expect(err).NotTo(HaveOccurred())
-				infraKubeConfig.Write([]byte(invalidKubeconf))
+				_, err = infraKubeConfig.Write([]byte(invalidKubeconf))
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			AfterEach(func() {
