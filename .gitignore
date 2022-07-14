@@ -2,5 +2,4 @@ bin/
 dev/
 .idea/
 cluster-up/
-config/secret/kubeconfig
-config/secret/cloud-config
+config/secret/*kubeconfig
