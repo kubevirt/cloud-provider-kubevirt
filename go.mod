@@ -13,7 +13,7 @@ require (
 	k8s.io/cloud-provider v0.24.3
 	k8s.io/component-base v0.24.3
 	k8s.io/klog/v2 v2.70.1
-	kubevirt.io/api v0.54.0
+	kubevirt.io/api v0.55.0
 	sigs.k8s.io/controller-runtime v0.12.3
 )
 
@@ -102,7 +102,7 @@ require (
 	k8s.io/controller-manager v0.24.3 // indirect
 	k8s.io/kube-openapi v0.0.0-20220328201542-3ee0da9b0b42 // indirect
 	k8s.io/utils v0.0.0-20220210201930-3a6ce19ff2f9 // indirect
-	kubevirt.io/containerized-data-importer-api v1.47.0 // indirect
+	kubevirt.io/containerized-data-importer-api v1.50.0 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.30 // indirect
 	sigs.k8s.io/json v0.0.0-20211208200746-9f7c6b3444d2 // indirect
