@@ -84,7 +84,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if lbExists {
 		if !equality.Semantic.DeepEqual(service.Spec.Ports, lbService.Spec.Ports) {
 			lbService.Spec.Ports = lb.createLoadBalancerServicePorts(service)
-			if err := lb.client.Update(ctx, lbService); err != nil {
+			if err = lb.client.Update(ctx, lbService); err != nil {
 				klog.Errorf("Failed to update LoadBalancer service: %v", err)
 				return nil, err
 			}
@@ -102,7 +102,9 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		if len(lbService.Status.LoadBalancer.Ingress) != 0 {
 			return true, nil
 		}
-		service, exists, err := lb.getLoadBalancerService(ctx, lbName)
+		var service *corev1.Service
+		var exists bool
+		service, exists, err = lb.getLoadBalancerService(ctx, lbName)
 		if err != nil {
 			klog.Errorf("Failed to get LoadBalancer service: %v", err)
 			return false, err
@@ -157,7 +159,7 @@ func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		return err
 	}
 	if lbExists {
-		if err := lb.client.Delete(ctx, lbService); err != nil {
+		if err = lb.client.Delete(ctx, lbService); err != nil {
 			klog.Errorf("Failed to delete LoadBalancer service: %v", err)
 			return err
 		}
