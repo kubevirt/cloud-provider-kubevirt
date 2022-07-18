@@ -1,4 +1,4 @@
-VERSION ?= v0.1.0
+VERSION ?= main
 REGISTRY ?= kubevirt
 
 CLUSTER_NAME ?= kubevirt
@@ -51,3 +51,19 @@ push:
 .PHONY: generate
 generate:
 	go generate ./pkg/...
+
+.PHONY: cluster-up
+cluster-up:
+	./kubevirtci up
+
+.PHONY: cluster-sync
+cluster-sync:
+	./kubevirtci sync
+
+.PHONY: cluster-down
+cluster-down:
+	./kubevirtci down
+
+.PHONY: functest
+functest:
+	./hack/functest.sh

@@ -1,0 +1,3 @@
+resources:
+- kccm_role_binding.yaml
+- service_account.yaml

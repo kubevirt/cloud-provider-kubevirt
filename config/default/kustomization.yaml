@@ -1,0 +1,5 @@
+namespace: kube-system
+bases: 
+ - ../rbac
+ - ../manager
+ - ../secret

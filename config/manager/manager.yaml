@@ -1,22 +1,15 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: cloud-controller-manager
-  namespace: kube-system
----
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: kubevirt-cloud-controller-manager
   namespace: kube-system
   labels:
     k8s-app: kubevirt-cloud-controller-manager
 spec:
+  replicas: 1
   selector:
     matchLabels:
       k8s-app: kubevirt-cloud-controller-manager
-  updateStrategy:
-    type: RollingUpdate
   template:
     metadata:
       labels:
@@ -27,41 +20,51 @@ spec:
         args:
         - --cloud-provider=kubevirt
         - --cloud-config=/etc/cloud/cloud-config
-        - --use-service-account-credentials=true
-        - --kubeconfig=/etc/kubernetes/controller-manager.conf
-        image: docker.io/dgonzalez/kubevirt-cloud-controller-manager:v0.0.7
+        - --kubeconfig=/etc/kubernetes/kubeconfig/kubeconfig
+        - --cluster-name=kvcluster
+        command:
+        - /bin/kubevirt-cloud-controller-manager
+        image: quay.io/kubevirt/kubevirt-cloud-controller-manager:main
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
         resources:
           requests:
             cpu: 100m
         volumeMounts:
-        - mountPath: /etc/kubernetes/pki
+        - mountPath: /var/lib/kubelet/pki
           name: k8s-certs
           readOnly: true
         - mountPath: /etc/ssl/certs
           name: ca-certs
           readOnly: true
-        - mountPath: /etc/kubernetes/controller-manager.conf
+        - mountPath: /etc/kubernetes/kubeconfig
           name: kubeconfig
+          readOnly: true
+        - mountPath: /etc/kubernetes/infra-kubeconfig
+          name: infra-kubeconfig
           readOnly: true
         - mountPath: /etc/cloud
           name: cloud-config
           readOnly: true
       volumes:
       - hostPath:
-          path: /etc/kubernetes/pki
+          path: /var/lib/kubelet/pki
           type: DirectoryOrCreate
         name: k8s-certs
       - hostPath:
           path: /etc/ssl/certs
           type: DirectoryOrCreate
         name: ca-certs
-      - hostPath:
-          path: /etc/kubernetes/controller-manager.conf
-          type: FileOrCreate
-        name: kubeconfig
       - secret:
           secretName: cloud-config
         name: cloud-config
+      - secret:
+          secretName: kubeconfig
+        name: kubeconfig
+      - secret:
+          secretName: infra-kubeconfig
+        name: infra-kubeconfig
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:
@@ -71,4 +74,3 @@ spec:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
       serviceAccountName: cloud-controller-manager
-      hostNetwork: true

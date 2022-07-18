@@ -1,3 +1,5 @@
 bin/
 dev/
 .idea/
+cluster-up/
+config/secret/*kubeconfig
