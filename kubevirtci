@@ -152,8 +152,8 @@ function kubevirtci::create_cluster() {
 }
 
 function kubevirtci::create_tenant_namespace {
-    echo "creating namespace ${TENANT_CLUSTER_NAMESPACE}"
-    ${_kubectl} apply -f - <<EOF
+	echo "creating namespace ${TENANT_CLUSTER_NAMESPACE}"
+	${_kubectl} apply -f - <<EOF
 ---
 apiVersion: v1
 kind: Namespace
@@ -172,20 +172,20 @@ function kubevirtci::install_capk_release {
 
 function kubevirtci::sync() {
 
-    REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
-    $_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
-    $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
-    ${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
-    ${_kubectl} rollout status -w -n kube-system deployment/kubevirt-cloud-controller-manager
+	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
+	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
+	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
+	${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
+	${_kubectl} rollout status -w -n kube-system deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {
-    ${_kubectl} kustomize config/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
+	${_kubectl} kustomize config/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
 }
 
 function kubevirtci::install_calico {
 	kubevirtci::kubectl_tenant apply -f https://docs.projectcalico.org/${CALICO_VERSION}/manifests/calico.yaml
-    kubevirtci::kubectl_tenant wait node --for=condition=Ready --all --timeout=5m
+	kubevirtci::kubectl_tenant wait node --for=condition=Ready --all --timeout=5m
 }
 
 function kubevirtci::install_metallb {
@@ -270,108 +270,107 @@ EOF
 
 
 function kubevirtci::kubectl_tenant {
-    vms_list=$(${_kubectl} get vm -n ${TENANT_CLUSTER_NAMESPACE} --no-headers -o custom-columns=":metadata.name")
-    for vm in $vms_list
-    do
-	if [[ "$vm" == ${TENANT_CLUSTER_NAME}-control-plane* ]]; then
-            control_plane_vm_name=$vm
+	vms_list=$(${_kubectl} get vm -n ${TENANT_CLUSTER_NAMESPACE} --no-headers -o custom-columns=":metadata.name")
+	for vm in $vms_list; do
+		if [[ "$vm" == ${TENANT_CLUSTER_NAME}-control-plane* ]]; then
+			control_plane_vm_name=$vm
+		fi
+	done
+	if [ -n "${control_plane_vm_name}" ]; then
+		echo "Found control plane VM: ${control_plane_vm_name} in namespace ${TENANT_CLUSTER_NAMESPACE}"
+	else
+		echo "control-plane vm is not found in namespace ${TENANT_CLUSTER_NAMESPACE} (looking for regex ${TENANT_CLUSTER_NAME}-control-plane*)"
+		exit 1
 	fi
-    done
-    if [ -n "${control_plane_vm_name}" ]; then
-  	echo "Found control plane VM: ${control_plane_vm_name} in namespace ${TENANT_CLUSTER_NAMESPACE}"
-    else
-  	echo "control-plane vm is not found in namespace ${TENANT_CLUSTER_NAMESPACE} (looking for regex ${TENANT_CLUSTER_NAME}-control-plane*)"
-	exit 1
-    fi
-    ${_default_virtctl_path} port-forward -n ${TENANT_CLUSTER_NAMESPACE} vm/${control_plane_vm_name} 64443:6443 > /dev/null 2>&1 &
-    trap 'kill $(jobs -p) > /dev/null 2>&1' EXIT
-    rm -f .${TENANT_CLUSTER_NAME}-kubeconfig
-    $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > .${TENANT_CLUSTER_NAME}-kubeconfig
-    sleep 0.1
-    kubectl --kubeconfig .${TENANT_CLUSTER_NAME}-kubeconfig --insecure-skip-tls-verify --server https://localhost:64443 "$@"
+	${_default_virtctl_path} port-forward -n ${TENANT_CLUSTER_NAMESPACE} vm/${control_plane_vm_name} 64443:6443 > /dev/null 2>&1 &
+	trap 'kill $(jobs -p) > /dev/null 2>&1' EXIT
+	rm -f .${TENANT_CLUSTER_NAME}-kubeconfig
+	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > .${TENANT_CLUSTER_NAME}-kubeconfig
+	sleep 0.1
+	kubectl --kubeconfig .${TENANT_CLUSTER_NAME}-kubeconfig --insecure-skip-tls-verify --server https://localhost:64443 "$@"
 }
 
 function kubevirtci::logs {
-   ${_kubectl} logs -n kube-system -l k8s-app=kubevirt-cloud-controller-manager 
+	${_kubectl} logs -n kube-system -l k8s-app=kubevirt-cloud-controller-manager 
 }
 
 kubevirtci::fetch_kubevirtci
 
 case ${_action} in
-"up")
-	kubevirtci::up
-    kubevirtci::prepare
-	;;
-"down")
-	kubevirtci::down
-	;;
-"prepare")
-    kubevirtci::prepare
-    ;;
-"sync")
-	kubevirtci::sync
-	;;
-"install-capk")
-	kubevirtci::install_capk_release
-	;;
-"install-metallb")
-	kubevirtci::install_metallb
-	;;
-"install-calico")
-	kubevirtci::install_calico
-	;;
-"install-cpk")
-    kubevirtci::install_cpk
-    ;;
-"curl-lb")
-	kubevirtci::curl_lb "$@"
-	;;
-"kubeconfig")
-	kubevirtci::kubeconfig
-	;;
-"kubectl")
-	${_kubectl} "$@"
-	;;
-"kubectl-tenant")
-	kubevirtci::kubectl_tenant "$@"
-	;;
-"virtctl")
-	${_default_virtctl_path} "$@"
-	;;
-"ssh-infra")
-	$_ssh_infra "$@"
-	;;
-"ssh-tenant")
-	kubevirtci::ssh_tenant "$@"
-	;;
-"clusterctl")
-	$CLUSTERCTL_PATH "$@"
-	;;
-"create-cluster")
-	kubevirtci::create_tenant_namespace
-	kubevirtci::create_cluster
-	;;
-"destroy-cluster")
-	kubevirtci::destroy_cluster
-	;;
-"delete")
-	kubevirtci::delete
-    ;;
-"clean-cache")
-	rm ${_default_clusterctl_path}
-	rm ${_default_virtctl_path}
-	rm -rf ${_default_tmp_path}
-	;;
-"logs")
-    kubevirtci::logs
-    ;;
-"help")
-	kubevirtci::usage
-	;;
-*)
-	echo "Error: Unknown kubevirtci command"
-	echo ""
-	kubevirtci::usage
-	exit 1
-	;;
+	"up")
+		kubevirtci::up
+		kubevirtci::prepare
+		;;
+	"down")
+		kubevirtci::down
+		;;
+	"prepare")
+		kubevirtci::prepare
+		;;
+	"sync")
+		kubevirtci::sync
+		;;
+	"install-capk")
+		kubevirtci::install_capk_release
+		;;
+	"install-metallb")
+		kubevirtci::install_metallb
+		;;
+	"install-calico")
+		kubevirtci::install_calico
+		;;
+	"install-cpk")
+		kubevirtci::install_cpk
+		;;
+	"curl-lb")
+		kubevirtci::curl_lb "$@"
+		;;
+	"kubeconfig")
+		kubevirtci::kubeconfig
+		;;
+	"kubectl")
+		${_kubectl} "$@"
+		;;
+	"kubectl-tenant")
+		kubevirtci::kubectl_tenant "$@"
+		;;
+	"virtctl")
+		${_default_virtctl_path} "$@"
+		;;
+	"ssh-infra")
+		$_ssh_infra "$@"
+		;;
+	"ssh-tenant")
+		kubevirtci::ssh_tenant "$@"
+		;;
+	"clusterctl")
+		$CLUSTERCTL_PATH "$@"
+		;;
+	"create-cluster")
+		kubevirtci::create_tenant_namespace
+		kubevirtci::create_cluster
+		;;
+	"destroy-cluster")
+		kubevirtci::destroy_cluster
+		;;
+	"delete")
+		kubevirtci::delete
+		;;
+	"clean-cache")
+		rm ${_default_clusterctl_path}
+		rm ${_default_virtctl_path}
+		rm -rf ${_default_tmp_path}
+		;;
+	"logs")
+		kubevirtci::logs
+		;;
+	"help")
+		kubevirtci::usage
+		;;
+	*)
+		echo "Error: Unknown kubevirtci command"
+		echo ""
+		kubevirtci::usage
+		exit 1
+		;;
 esac
