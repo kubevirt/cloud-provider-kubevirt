@@ -112,7 +112,16 @@ EOF
 	kubevirtci::install_metallb
 	kubevirtci::create_tenant_namespace
 	kubevirtci::create_cluster
+	echo "Wait for tenant cluster kubernetes apiserver up"
+ 	kubevirtci::retry_until_success kubevirtci::kubectl_tenant get pods -n kube-system
+	echo "Waiting for worker VMI in tenant cluster namespace"
+	kubevirtci::wait_for_vm "${TENANT_CLUSTER_NAME}-md-"
 	kubevirtci::install_calico
+	echo "Waiting for calico pods rollout"
+	while [[ "$(kubevirtci::kubectl_tenant get ds -n kube-system --no-headers | grep -v Found | grep calico-node | wc -l)" -eq 0 ]]; do
+		sleep 5
+	done
+	kubevirtci::kubectl_tenant rollout status ds/calico-node -n kube-system --timeout=2m
 }
 
 function kubevirtci::down() {
@@ -289,6 +298,37 @@ function kubevirtci::kubectl_tenant {
     $CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > .${TENANT_CLUSTER_NAME}-kubeconfig
     sleep 0.1
     kubectl --kubeconfig .${TENANT_CLUSTER_NAME}-kubeconfig --insecure-skip-tls-verify --server https://localhost:64443 "$@"
+}
+
+function kubevirtci::retry_until_success {
+    set +e
+    while true; do
+        sleep 5
+        $@
+        ret=$?
+        if [[ "$ret" == "0" ]]; then
+            break
+        fi
+    done
+    set -e
+}
+
+function kubevirtci::wait_for_vm {
+    local vm_name=$1
+    while true ; do
+		vms_list=$(${_kubectl} get vm -n ${TENANT_CLUSTER_NAMESPACE} --no-headers -o custom-columns=":metadata.name")
+		for vm in $vms_list ; do
+			if [[ "$vm" =~ .*"$vm_name".* ]]; then
+				tenant_vm=$vm
+			fi
+		done
+		if [[ "${tenant_vm}" == "" ]]; then
+			echo "tenant VM not found"
+			sleep 10
+			continue
+		fi
+		break
+	done
 }
 
 function kubevirtci::logs {
