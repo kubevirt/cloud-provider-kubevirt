@@ -32,9 +32,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run:
           sed -i "s/main/${{github.ref_name}}/" $(git grep -l :main config/)
+          tar -cvzf kustomize.tar.gz config
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           generate_release_notes: true
-          files: config/*
+          files: kustomize.tar.gz
