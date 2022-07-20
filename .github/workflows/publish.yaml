@@ -30,7 +30,7 @@ jobs:
         run: make image push
       - name: Tag manifests
         if: startsWith(github.ref, 'refs/tags/')
-        run:
+        run: |
           sed -i "s/main/${{github.ref_name}}/" $(git grep -l :main config/)
           tar -cvzf kustomize.tar.gz config
       - name: Release
