@@ -37,4 +37,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           generate_release_notes: true
-          files: config/
+          files: config/*
