@@ -28,3 +28,13 @@ jobs:
           docker login -u ${{ secrets.QUAY_USER }} -p ${{ secrets.QUAY_TOKEN }} quay.io
       - name: Build and push image
         run: make image push
+      - name: Tag manifests
+        if: startsWith(github.ref, 'refs/tags/')
+        run:
+          sed -i "s/main/${{github.ref_name}}/" $(git grep -l :main config/)
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true
+          files: config/
