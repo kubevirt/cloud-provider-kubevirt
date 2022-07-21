@@ -16,80 +16,83 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kubevirt.io/cloud-provider-kubevirt/test/resources"
 )
 
 const namespace = "default"
-const deploymentName = "test-server"
+const testAppName = "test-app"
 
 var _ = Describe("Load Balancer", func() {
 	var (
-		err                     error
-		server                  *appsv1.Deployment
-		service                 *v1.Service
-		curlJob                 *batchv1.Job
-		orphanPropagationpolicy = metav1.DeletePropagationBackground
+		err                   error
+		server                *appsv1.Deployment
+		service               *v1.Service
+		curlJob               *batchv1.Job
+		backgroundPropagation = metav1.DeletePropagationBackground
 	)
 
+	BeforeEach(func() {
+		server = resources.HTTPServerDeployment(testAppName, namespace)
+		service = resources.HTTPServerService(testAppName, namespace)
+	})
 	Context("when a LB service is created in tenant cluster", func() {
 		BeforeEach(func() {
-			server, err = tenantClient.AppsV1().Deployments(namespace).Create(context.TODO(), resources.HTTPServerDeployment(deploymentName), metav1.CreateOptions{})
+			err = tenantClient.Create(context.TODO(), server)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
-				server, err = tenantClient.AppsV1().Deployments(namespace).Get(context.TODO(), server.Name, metav1.GetOptions{})
+				err = tenantClient.Get(context.TODO(), namespacedName(server), server)
 				Expect(err).NotTo(HaveOccurred())
 				return server.Status.ReadyReplicas == *server.Spec.Replicas
 			}, 60*time.Second, time.Second).Should(BeTrue())
 
-			service, err = tenantClient.CoreV1().Services(namespace).Create(context.TODO(), resources.HTTPServerService(deploymentName), metav1.CreateOptions{})
+			err = tenantClient.Create(context.TODO(), service)
 			Expect(err).NotTo(HaveOccurred())
 
 			DeferCleanup(func() {
-				err := tenantClient.AppsV1().Deployments(namespace).Delete(context.TODO(), server.Name, metav1.DeleteOptions{})
+				err = tenantClient.Delete(context.TODO(), server)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() error {
-					_, err = tenantClient.AppsV1().Deployments(namespace).Get(context.TODO(), server.Name, metav1.GetOptions{})
-					return err
+					return tenantClient.Get(context.TODO(), namespacedName(server), server)
 				}, 120*time.Second, time.Second).Should(WithTransform(errors.IsNotFound, BeTrue()))
 
-				err = tenantClient.CoreV1().Services(namespace).Delete(context.TODO(), service.Name, metav1.DeleteOptions{})
+				err = tenantClient.Delete(context.TODO(), service)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() error {
-					_, err := tenantClient.CoreV1().Services(namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-					return err
+					return tenantClient.Get(context.TODO(), namespacedName(service), service)
 				}, 120*time.Second, time.Second).Should(WithTransform(errors.IsNotFound, BeTrue()))
 			})
 		})
 
 		It("should succeed to curl the LB service", func() {
-			loadBalancerService, err := findInfraLoadBalancerService(tenantClusterName, service.Name)
+			loadBalancerService, err := findInfraLoadBalancerService(service.Name)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(loadBalancerService.Status.LoadBalancer.Ingress).To(HaveLen(1))
-			Expect(loadBalancerService.Spec.Ports).To(HaveLen(1))
 
-			curlJob = resources.CurlLoadBalancerJob("curl-test", loadBalancerService.Status.LoadBalancer.Ingress[0].IP, strconv.FormatInt(int64(loadBalancerService.Spec.Ports[0].Port), 10))
-			curlJob, err = client.BatchV1().Jobs(tenantClusterName).Create(
-				context.TODO(),
-				curlJob,
-				metav1.CreateOptions{},
-			)
+			Eventually(func() []v1.LoadBalancerIngress {
+				err = infraClient.Get(context.TODO(), namespacedName(loadBalancerService), loadBalancerService)
+				Expect(err).NotTo(HaveOccurred())
+				return loadBalancerService.Status.LoadBalancer.Ingress
+			}, 10*time.Second, time.Second).Should(HaveLen(1))
+
+			curlJob = resources.CurlLoadBalancerJob("curl-test", tenantClusterName, loadBalancerService.Status.LoadBalancer.Ingress[0].IP, strconv.FormatInt(int64(loadBalancerService.Spec.Ports[0].Port), 10))
+			err = infraClient.Create(context.TODO(), curlJob)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
-				err := client.BatchV1().Jobs(tenantClusterName).Delete(context.TODO(), curlJob.Name, metav1.DeleteOptions{PropagationPolicy: &orphanPropagationpolicy})
+				err := infraClient.Delete(context.TODO(), curlJob, &client.DeleteOptions{PropagationPolicy: &backgroundPropagation})
 				Expect(err).NotTo(HaveOccurred())
 			})
 
 			Eventually(func() int {
-				job, err := client.BatchV1().Jobs(tenantClusterName).Get(context.TODO(), curlJob.Name, metav1.GetOptions{})
+				err := infraClient.Get(context.TODO(), namespacedName(curlJob), curlJob)
 				Expect(err).NotTo(HaveOccurred())
-				return int(job.Status.Succeeded)
+				return int(curlJob.Status.Succeeded)
 			}, time.Second*30, time.Second).Should(BeNumerically(">", 0))
 		})
 	})
 })
 
-func findInfraLoadBalancerService(tenantNamespace, tenantServiceName string) (*v1.Service, error) {
+func findInfraLoadBalancerService(tenantServiceName string) (*v1.Service, error) {
 	lbService := v1.Service{}
 	retryInterval := wait.Backoff{
 		Steps:    5,
@@ -102,11 +105,12 @@ func findInfraLoadBalancerService(tenantNamespace, tenantServiceName string) (*v
 		return err == lbServiceNotFoundError
 	}
 	err := retry.OnError(retryInterval, isRetriable, func() error {
-		services, err := client.CoreV1().Services(tenantNamespace).List(context.TODO(), metav1.ListOptions{})
+		serviceList := v1.ServiceList{}
+		err := infraClient.List(context.TODO(), &serviceList)
 		if err != nil {
 			return err
 		}
-		for _, s := range services.Items {
+		for _, s := range serviceList.Items {
 			lbService = s
 			if isLoadBalancerServiceType(lbService) && hasSelector(lbService.Spec.Selector, lbService.Name, tenantServiceName) {
 				return nil

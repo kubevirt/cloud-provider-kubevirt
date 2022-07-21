@@ -8,10 +8,11 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-func HTTPServerDeployment(name string) *appsv1.Deployment {
+func HTTPServerDeployment(name, namespace string) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
@@ -51,10 +52,11 @@ func HTTPServerDeployment(name string) *appsv1.Deployment {
 	}
 }
 
-func HTTPServerService(name string) *v1.Service {
+func HTTPServerService(name, namespace string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: v1.ServiceSpec{
 			Selector: map[string]string{

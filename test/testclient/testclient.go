@@ -3,11 +3,11 @@ package testclient
 import (
 	"os"
 
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func CreateClientForKubeconfig(kubeconfig string) (*kubernetes.Clientset, error) {
+func CreateClientForKubeconfig(kubeconfig string) (client.Client, error) {
 	kc, err := os.ReadFile(kubeconfig)
 	if err != nil {
 		return nil, err
@@ -18,10 +18,9 @@ func CreateClientForKubeconfig(kubeconfig string) (*kubernetes.Clientset, error)
 		return nil, err
 	}
 
-	client, err := kubernetes.NewForConfig(config)
+	client, err := client.New(config, client.Options{})
 	if err != nil {
 		return nil, err
 	}
-
 	return client, nil
 }

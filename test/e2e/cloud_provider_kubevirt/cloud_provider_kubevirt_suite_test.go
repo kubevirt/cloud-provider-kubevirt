@@ -5,7 +5,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/client-go/kubernetes"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"kubevirt.io/cloud-provider-kubevirt/test/environment"
 	"kubevirt.io/cloud-provider-kubevirt/test/testclient"
@@ -17,8 +18,8 @@ var (
 	kubeconfig       = environment.GetVarWithDefault("INFRA_KUBECONFIG", "config/secret/infra-kubeconfig")
 	tenantKubeconfig = environment.GetVarWithDefault("TENANT_KUBECONFIG", "config/secret/kubeconfig")
 
-	client       *kubernetes.Clientset
-	tenantClient *kubernetes.Clientset
+	infraClient  client.Client
+	tenantClient client.Client
 )
 
 func TestCloudProviderKubevirt(t *testing.T) {
@@ -28,7 +29,7 @@ func TestCloudProviderKubevirt(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	var err error
-	client, err = testclient.CreateClientForKubeconfig(kubeconfig)
+	infraClient, err = testclient.CreateClientForKubeconfig(kubeconfig)
 	Expect(err).NotTo(HaveOccurred())
 
 	tenantClient, err = testclient.CreateClientForKubeconfig(tenantKubeconfig)

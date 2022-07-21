@@ -9,10 +9,11 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-func CurlLoadBalancerJob(name, ip, port string) *batchv1.Job {
+func CurlLoadBalancerJob(name, namespace, ip, port string) *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: v1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
