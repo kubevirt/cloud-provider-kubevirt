@@ -30,7 +30,7 @@ func HTTPServerDeployment(name string) *appsv1.Deployment {
 					Containers: []v1.Container{
 						{
 							Name:  name,
-							Image: "alpine:3",
+							Image: "quay.io/rhrazdil/alpine:v0.1",
 							Ports: []v1.ContainerPort{
 								{
 									ContainerPort: 80,

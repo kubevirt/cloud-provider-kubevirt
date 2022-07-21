@@ -20,7 +20,7 @@ func CurlLoadBalancerJob(name, ip, port string) *batchv1.Job {
 					Containers: []corev1.Container{
 						{
 							Name:  "alpine",
-							Image: "alpine:3",
+							Image: "quay.io/rhrazdil/alpine:v0.1",
 							Command: []string{
 								"/bin/sh",
 							},
