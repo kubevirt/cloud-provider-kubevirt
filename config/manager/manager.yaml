@@ -56,8 +56,8 @@ spec:
           path: /etc/ssl/certs
           type: DirectoryOrCreate
         name: ca-certs
-      - secret:
-          secretName: cloud-config
+      - configMap:
+          name: cloud-config
         name: cloud-config
       - secret:
           secretName: kubeconfig

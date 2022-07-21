@@ -1,0 +1,7 @@
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+- name: cloud-config
+  namespace: kube-system
+  files:
+  - cloud-config
