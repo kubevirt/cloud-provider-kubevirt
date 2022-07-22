@@ -12,12 +12,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"kubevirt.io/cloud-provider-kubevirt/test/e2e/naming"
+	"kubevirt.io/cloud-provider-kubevirt/test/e2e/resource"
 	"kubevirt.io/cloud-provider-kubevirt/test/resources"
 )
 
@@ -39,29 +40,16 @@ var _ = Describe("Load Balancer", func() {
 	})
 	Context("when a LB service is created in tenant cluster", func() {
 		BeforeEach(func() {
-			err = tenantClient.Create(context.TODO(), server)
-			Expect(err).NotTo(HaveOccurred())
+			resource.Create(tenantClient, server)
 			Eventually(func() bool {
-				err = tenantClient.Get(context.TODO(), namespacedName(server), server)
+				err = tenantClient.Get(context.TODO(), naming.NamespacedName(server), server)
 				Expect(err).NotTo(HaveOccurred())
 				return server.Status.ReadyReplicas == *server.Spec.Replicas
 			}, 60*time.Second, time.Second).Should(BeTrue())
-
-			err = tenantClient.Create(context.TODO(), service)
-			Expect(err).NotTo(HaveOccurred())
-
+			resource.Create(tenantClient, service)
 			DeferCleanup(func() {
-				err = tenantClient.Delete(context.TODO(), server)
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(func() error {
-					return tenantClient.Get(context.TODO(), namespacedName(server), server)
-				}, 120*time.Second, time.Second).Should(WithTransform(errors.IsNotFound, BeTrue()))
-
-				err = tenantClient.Delete(context.TODO(), service)
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(func() error {
-					return tenantClient.Get(context.TODO(), namespacedName(service), service)
-				}, 120*time.Second, time.Second).Should(WithTransform(errors.IsNotFound, BeTrue()))
+				resource.Delete(tenantClient, server)
+				resource.Delete(tenantClient, service)
 			})
 		})
 
@@ -70,7 +58,7 @@ var _ = Describe("Load Balancer", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() []v1.LoadBalancerIngress {
-				err = infraClient.Get(context.TODO(), namespacedName(loadBalancerService), loadBalancerService)
+				err = infraClient.Get(context.TODO(), naming.NamespacedName(loadBalancerService), loadBalancerService)
 				Expect(err).NotTo(HaveOccurred())
 				return loadBalancerService.Status.LoadBalancer.Ingress
 			}, 10*time.Second, time.Second).Should(HaveLen(1))
@@ -79,12 +67,11 @@ var _ = Describe("Load Balancer", func() {
 			err = infraClient.Create(context.TODO(), curlJob)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
-				err := infraClient.Delete(context.TODO(), curlJob, &client.DeleteOptions{PropagationPolicy: &backgroundPropagation})
-				Expect(err).NotTo(HaveOccurred())
+				resource.Delete(infraClient, curlJob, &client.DeleteOptions{PropagationPolicy: &backgroundPropagation})
 			})
 
 			Eventually(func() int {
-				err := infraClient.Get(context.TODO(), namespacedName(curlJob), curlJob)
+				err := infraClient.Get(context.TODO(), naming.NamespacedName(curlJob), curlJob)
 				Expect(err).NotTo(HaveOccurred())
 				return int(curlJob.Status.Succeeded)
 			}, time.Second*30, time.Second).Should(BeNumerically(">", 0))
