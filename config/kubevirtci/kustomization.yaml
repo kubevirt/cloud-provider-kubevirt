@@ -17,4 +17,4 @@ patchesJson6902:
     group: rbac.authorization.k8s.io
     version: v1
     kind: RoleBinding
-    name: kccm-extension-apiserver-authorization-reader
+    name: kccm

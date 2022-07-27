@@ -1,3 +1,4 @@
 resources:
+- kccm_role_binding.yaml
+- kccm_role.yaml
 - service_account.yaml
-- ext_apiserver_auth_role_binding.yaml
