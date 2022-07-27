@@ -2,5 +2,6 @@ namespace: kube-system
 bases: 
  - ../base
 
+namePrefix: kvcluster-
 patchesStrategicMerge:
   - manager_image_patch.yaml
