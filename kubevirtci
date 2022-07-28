@@ -185,7 +185,7 @@ function kubevirtci::sync() {
 	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
 	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
 	${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
-	${_kubectl} rollout status -w -n kube-system deployment/kubevirt-cloud-controller-manager
+	${_kubectl} rollout status -w -n ${TENANT_CLUSTER_NAMESPACE} deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {
@@ -331,7 +331,7 @@ function kubevirtci::wait_for_vm {
 }
 
 function kubevirtci::logs {
-	${_kubectl} logs -n kube-system -l k8s-app=kubevirt-cloud-controller-manager 
+	${_kubectl} logs -n ${TENANT_CLUSTER_NAMESPACE} -l k8s-app=kubevirt-cloud-controller-manager 
 }
 
 kubevirtci::fetch_kubevirtci

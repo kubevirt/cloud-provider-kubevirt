@@ -2,6 +2,6 @@ generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
 - name: cloud-config
-  namespace: kube-system
+  namespace: default
   files:
   - cloud-config
