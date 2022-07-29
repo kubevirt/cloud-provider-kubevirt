@@ -83,3 +83,7 @@ build-e2e-test:
 .PHONY: e2e-test
 e2e-test: build-e2e-test
 	./hack/run-e2e.sh
+
+.PHONY: conformance
+conformance:
+	./hack/conformance.sh
