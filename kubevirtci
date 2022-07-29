@@ -182,10 +182,11 @@ function kubevirtci::install_capk_release {
 function kubevirtci::sync() {
 
 	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
-	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
-	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
+	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/kubevirtci/infra-kubeconfig
+	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/kubevirtci/kubeconfig
 	${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
-	${_kubectl} rollout status -w -n ${TENANT_CLUSTER_NAMESPACE} deployment/kubevirt-cloud-controller-manager
+    ${_kubectl} delete pod -n kvcluster -l k8s-app=kubevirt-cloud-controller-manager
+    ${_kubectl} rollout status -w -n ${TENANT_CLUSTER_NAMESPACE} deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {

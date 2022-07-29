@@ -20,7 +20,7 @@ spec:
         args:
         - --cloud-provider=kubevirt
         - --cloud-config=/etc/cloud/cloud-config
-        - --kubeconfig=/etc/kubernetes/kubeconfig/kubeconfig
+        - --kubeconfig=/etc/kubernetes/kubeconfig/value
         - --cluster-name=kvcluster
         command:
         - /bin/kubevirt-cloud-controller-manager
@@ -41,9 +41,6 @@ spec:
         - mountPath: /etc/kubernetes/kubeconfig
           name: kubeconfig
           readOnly: true
-        - mountPath: /etc/kubernetes/infra-kubeconfig
-          name: infra-kubeconfig
-          readOnly: true
         - mountPath: /etc/cloud
           name: cloud-config
           readOnly: true
@@ -59,12 +56,6 @@ spec:
       - configMap:
           name: cloud-config
         name: cloud-config
-      - secret:
-          secretName: kubeconfig
-        name: kubeconfig
-      - secret:
-          secretName: infra-kubeconfig
-        name: infra-kubeconfig
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:
