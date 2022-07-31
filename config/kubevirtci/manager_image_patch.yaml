@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment                                                                
 metadata:                                                                       
   name: kubevirt-cloud-controller-manager
-  namespace: kube-system
+  namespace: default
 spec:                                                                           
   template:                                                                     
     spec:                                                                       

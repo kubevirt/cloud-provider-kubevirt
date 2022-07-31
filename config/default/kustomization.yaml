@@ -1,3 +1,17 @@
-namespace: kube-system
+namespace: default
 bases: 
  - ../base
+
+patchesJson6902:
+- patch: |-
+    - op: add
+      path: /metadata/namespace
+      value: kube-system
+    - op: add
+      path: /subjects/0/namespace
+      value: default
+  target:
+    group: rbac.authorization.k8s.io
+    version: v1
+    kind: RoleBinding
+    name: kccm-extension-apiserver-authorization-reader
