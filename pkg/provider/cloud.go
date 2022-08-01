@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
@@ -98,24 +99,34 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal cloud provider config: %v", err)
 	}
-	infraKubeConfig, err := getInfraKubeConfig(cloudConf.Kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-	clientConfig, err := clientcmd.NewClientConfigFromBytes([]byte(infraKubeConfig))
-	if err != nil {
-		return nil, err
-	}
-	restConfig, err := clientConfig.ClientConfig()
-	if err != nil {
-		return nil, err
-	}
 	namespace := cloudConf.Namespace
-	if namespace == "" {
-		namespace, _, err = clientConfig.Namespace()
+	var restConfig *rest.Config
+	if cloudConf.Kubeconfig == "" {
+		restConfig, err = rest.InClusterConfig()
 		if err != nil {
-			klog.Errorf("Could not find namespace in client config: %v", err)
 			return nil, err
+		}
+	} else {
+		var infraKubeConfig string
+		infraKubeConfig, err = getInfraKubeConfig(cloudConf.Kubeconfig)
+		if err != nil {
+			return nil, err
+		}
+		var clientConfig clientcmd.ClientConfig
+		clientConfig, err = clientcmd.NewClientConfigFromBytes([]byte(infraKubeConfig))
+		if err != nil {
+			return nil, err
+		}
+		restConfig, err = clientConfig.ClientConfig()
+		if err != nil {
+			return nil, err
+		}
+		if namespace == "" {
+			namespace, _, err = clientConfig.Namespace()
+			if err != nil {
+				klog.Errorf("Could not find namespace in client config: %v", err)
+				return nil, err
+			}
 		}
 	}
 	c, err := client.New(restConfig, client.Options{
