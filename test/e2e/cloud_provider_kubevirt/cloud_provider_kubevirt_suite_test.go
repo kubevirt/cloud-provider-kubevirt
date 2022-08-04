@@ -15,8 +15,8 @@ import (
 var (
 	tenantClusterName = environment.GetVarWithDefault("TENANT_CLUSTER_NAME", "kvcluster")
 
-	kubeconfig       = environment.GetVarWithDefault("INFRA_KUBECONFIG", "config/secret/infra-kubeconfig")
-	tenantKubeconfig = environment.GetVarWithDefault("TENANT_KUBECONFIG", "config/secret/kubeconfig")
+	kubeconfig       = environment.GetVarWithDefault("INFRA_KUBECONFIG", "config/kubevirtci/infra-kubeconfig")
+	tenantKubeconfig = environment.GetVarWithDefault("TENANT_KUBECONFIG", "config/kubevirtci/kubeconfig")
 
 	infraClient  client.Client
 	tenantClient client.Client

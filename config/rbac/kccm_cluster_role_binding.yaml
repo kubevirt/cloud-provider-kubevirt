@@ -1,12 +1,11 @@
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata: 
-  name: kccm-extension-apiserver-authorization-reader
-  namespace: kube-system
+  name: kccm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: extension-apiserver-authentication-reader
+  kind: ClusterRole
+  name: kccm
 subjects:
 - kind: ServiceAccount
   name: cloud-controller-manager

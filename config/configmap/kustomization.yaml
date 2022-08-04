@@ -1,7 +1,0 @@
-generatorOptions:
-  disableNameSuffixHash: true
-configMapGenerator:
-- name: cloud-config
-  namespace: default
-  files:
-  - cloud-config

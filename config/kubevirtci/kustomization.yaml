@@ -4,6 +4,7 @@ bases:
 
 patchesStrategicMerge:
   - manager_image_patch.yaml
+  - manager_tenant_kubeconfig_secret_patch.yaml
 
 patchesJson6902:
 - patch: |-
@@ -18,3 +19,19 @@ patchesJson6902:
     version: v1
     kind: RoleBinding
     name: kccm
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: cloud-config
+  namespace: default
+  files:
+  - cloud-config
+
+secretGenerator:
+- name: kubeconfig
+  namespace: default
+  files:
+  - value=kubeconfig
+
