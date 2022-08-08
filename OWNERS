@@ -1,10 +1,10 @@
 reviewers:
-  - gonzolino
   - nirarg
-  - rmohr
   - davidvossel
+  - rhrazdil
+  - qinqon
 approvers:
-  - gonzolino
   - nirarg
-  - rmohr
   - davidvossel
+  - rhrazdil
+  - qinqon
