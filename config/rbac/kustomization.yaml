@@ -1,0 +1,6 @@
+resources:
+- service_account.yaml
+- kccm_cluster_role.yaml
+- kccm_cluster_role_binding.yaml
+- kccm_role.yaml
+- kccm_role_binding.yaml

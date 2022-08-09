@@ -1,0 +1,41 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: kccm
+rules:
+- apiGroups: 
+  - kubevirt.io
+  resources: 
+  - virtualmachines
+  verbs: 
+  - get
+  - watch
+  - list
+- apiGroups: 
+  - kubevirt.io
+  resources: 
+  - virtualmachineinstances
+  verbs: 
+  - get
+  - watch
+  - list
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - "*"
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - "*"
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
