@@ -1,7 +1,5 @@
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.11 as builder
 
-ENV GOFLAGS="-mod=readonly"
-
 WORKDIR /build
 COPY . .
 RUN make build

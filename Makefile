@@ -42,7 +42,7 @@ test:
 
 .PHONY: build
 build: bin
-	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
+	CGO_ENABLED=0 GOOS=linux go build -mod vendor -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
 .PHONY:image
 image:
