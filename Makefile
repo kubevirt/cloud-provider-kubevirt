@@ -1,10 +1,14 @@
-VERSION ?= v0.1.0
+VERSION ?= main
 REGISTRY ?= kubevirt
 
 CLUSTER_NAME ?= kubevirt
 KUBECONFIG := dev/kubeconfig
 CLOUD_CONFIG := dev/cloud-config
 CERT_DIR := dev/
+
+export BIN_DIR := bin
+
+GOLANGCI_LINT_VERSION ?= v1.46.2
 
 .PHONY: all
 all: clean test build
@@ -38,10 +42,10 @@ test:
 
 .PHONY: build
 build: bin
-	GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
+	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
 .PHONY:image
-image: build
+image:
 	docker build -t $(REGISTRY)/kubevirt-cloud-controller-manager:$(VERSION) -f build/images/kubevirt-cloud-controller-manager/Dockerfile .
 
 .PHONY: push
@@ -51,3 +55,31 @@ push:
 .PHONY: generate
 generate:
 	go generate ./pkg/...
+
+.PHONY: cluster-up
+cluster-up:
+	./kubevirtci up
+
+.PHONY: cluster-sync
+cluster-sync:
+	./kubevirtci sync
+
+.PHONY: cluster-down
+cluster-down:
+	./kubevirtci down
+
+.PHONY: lint
+lint:
+	go run github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --timeout=10m
+
+.PHONY: functest
+functest:
+	./hack/functest.sh
+
+.PHONY: build-e2e-test
+build-e2e-test:
+	./hack/build-e2e.sh
+
+.PHONY: e2e-test
+e2e-test: build-e2e-test
+	./hack/run-e2e.sh

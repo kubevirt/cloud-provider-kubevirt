@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubevirt-cloud-controller-manager
+  namespace: default
+  labels:
+    k8s-app: kubevirt-cloud-controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kubevirt-cloud-controller-manager
+  template:
+    metadata:
+      labels:
+        k8s-app: kubevirt-cloud-controller-manager
+    spec:
+      containers:
+      - name: kubevirt-cloud-controller-manager
+        args:
+        - --cloud-provider=kubevirt
+        - --cloud-config=/etc/cloud/cloud-config
+        - --kubeconfig=/etc/kubernetes/kubeconfig/value
+        - --cluster-name=kvcluster
+        command:
+        - /bin/kubevirt-cloud-controller-manager
+        image: quay.io/kubevirt/kubevirt-cloud-controller-manager:main
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            cpu: 100m
+        volumeMounts:
+        - mountPath: /var/lib/kubelet/pki
+          name: k8s-certs
+          readOnly: true
+        - mountPath: /etc/ssl/certs
+          name: ca-certs
+          readOnly: true
+        - mountPath: /etc/kubernetes/kubeconfig
+          name: kubeconfig
+          readOnly: true
+        - mountPath: /etc/cloud
+          name: cloud-config
+          readOnly: true
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/pki
+          type: DirectoryOrCreate
+        name: k8s-certs
+      - hostPath:
+          path: /etc/ssl/certs
+          type: DirectoryOrCreate
+        name: ca-certs
+      - configMap:
+          name: cloud-config
+        name: cloud-config
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      serviceAccountName: cloud-controller-manager

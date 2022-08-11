@@ -1,0 +1,124 @@
+# Copyright 2021 The NMPolicy Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
+linters-settings:
+  dupl:
+    threshold: 100
+  funlen:
+    lines: 100
+    statements: 50
+  gci:
+    local-prefixes: github.com/kubevirt/cloud-provider-kubevirt
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # https://github.com/go-critic/go-critic/issues/845
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+  gocyclo:
+    min-complexity: 15
+  goheader:
+    values:
+      regexp: 
+        year-regexp: 2\d\d\d
+    template-path: header.tpl
+  goimports:
+    local-prefixes: github.com/kubevirt/cloud-provider-kubevirt
+  gomnd:
+    settings:
+      mnd:
+        # don't include the "operation" and "assign"
+        checks: argument,case,condition,return
+  govet:
+    check-shadowing: true
+  lll:
+    line-length: 140
+  maligned:
+    suggest-new: true
+  misspell:
+    locale: US
+  nolintlint:
+    allow-leading-space: true # don't require machine-readable nolint directives (i.e. with no leading space)
+    allow-unused: false # report any unused nolint directives
+    require-explanation: false # don't require an explanation for nolint directives
+    require-specific: false # don't require nolint directives to be specific about which linter is being skipped
+
+linters:
+  disable-all: true
+  enable:
+    #- bodyclose
+    - deadcode
+    #- depguard
+    #- dogsled
+    #- dupl
+    - errcheck
+    #- exportloopref
+    #- exhaustive
+    #- funlen
+    #- gochecknoinits
+    #- goconst
+    #- gocritic
+    #- gocyclo
+    - gofmt
+    #- goheader
+    - goimports
+    #- gomnd
+    #- goprintffuncname
+    #- gosec
+    #- gosimple
+    - govet
+    #- ineffassign
+    #- lll
+    #- misspell
+    #- nakedret
+    #- noctx
+    #- nolintlint
+    #- rowserrcheck
+    #- staticcheck
+    #- structcheck
+    #- stylecheck
+    #- typecheck
+    #- unconvert
+    - unparam
+    - unused
+    - varcheck
+    #- whitespace
+
+  # don't enable:
+  # - asciicheck
+  # - scopelint
+  # - gochecknoglobals
+  # - gocognit
+  # - godot
+  # - godox
+  # - goerr113
+  # - interfacer
+  # - maligned
+  # - nestif
+  # - prealloc
+  # - testpackage
+  # - revive
+  # - wsl
