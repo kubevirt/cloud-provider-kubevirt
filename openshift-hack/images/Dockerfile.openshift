@@ -1,10 +1,10 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.11 as builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
 
 WORKDIR /build
 COPY . .
 RUN make build
 
-FROM registry.ci.openshift.org/ocp/4.11:base
+FROM registry.ci.openshift.org/ocp/4.12:base
 
 LABEL description="KubeVirt Cloud Controller Manager"
 
