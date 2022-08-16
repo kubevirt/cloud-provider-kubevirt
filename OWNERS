@@ -8,3 +8,6 @@ approvers:
   - davidvossel
   - rhrazdil
   - qinqon
+
+component: "Cloud Compute"
+subcomponent: "Cloud Controller Manager"
