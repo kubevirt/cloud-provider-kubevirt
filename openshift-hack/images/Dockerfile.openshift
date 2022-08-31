@@ -6,6 +6,7 @@ RUN make build
 
 FROM registry.ci.openshift.org/ocp/4.12:base
 
+LABEL io.openshift.release.operator=true
 LABEL description="KubeVirt Cloud Controller Manager"
 
 COPY --from=builder /build/bin/kubevirt-cloud-controller-manager /bin/kubevirt-cloud-controller-manager
