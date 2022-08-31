@@ -63,7 +63,7 @@ function verify_merge() {
 	done
 }
 
-DS_FILES=(OWNERS hack/sync-upstream.sh)
+DS_FILES=(OWNERS hack/sync-upstream.sh openshift-hack/images/Dockerfile.openshift)
 
 set +e
 git remote add $UPSTREAM_REMOTE $UPSTREAM_REMOTE_REPO
