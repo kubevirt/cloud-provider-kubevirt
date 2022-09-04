@@ -54,7 +54,7 @@ var _ = Describe("Load Balancer", func() {
 		})
 
 		It("should succeed to curl the LB service", func() {
-			loadBalancerService, err := findInfraLoadBalancerService(service.Name)
+			loadBalancerService, err := findInfraLoadBalancerService(service.Name, service.Namespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() []v1.LoadBalancerIngress {
@@ -79,7 +79,7 @@ var _ = Describe("Load Balancer", func() {
 	})
 })
 
-func findInfraLoadBalancerService(tenantServiceName string) (*v1.Service, error) {
+func findInfraLoadBalancerService(tenantServiceName string, tenantServiceNamespace string) (*v1.Service, error) {
 	lbService := v1.Service{}
 	retryInterval := wait.Backoff{
 		Steps:    5,
@@ -99,7 +99,7 @@ func findInfraLoadBalancerService(tenantServiceName string) (*v1.Service, error)
 		}
 		for _, s := range serviceList.Items {
 			lbService = s
-			if isLoadBalancerServiceType(lbService) && hasSelector(lbService.Spec.Selector, lbService.Name, tenantServiceName) {
+			if isLoadBalancerServiceType(lbService) && hasLabel(lbService.Labels, "tenant-service-name", tenantServiceName) && hasLabel(lbService.Labels, "tenant-service-namespace", tenantServiceNamespace) {
 				return nil
 			}
 		}
@@ -116,9 +116,9 @@ func isLoadBalancerServiceType(service v1.Service) bool {
 	return service.Spec.Type == v1.ServiceTypeLoadBalancer
 }
 
-func hasSelector(selector map[string]string, key string, value string) bool {
-	for k, v := range selector {
-		if k == fmt.Sprintf("cloud.kubevirt.io/%s", key) && v == value {
+func hasLabel(labels map[string]string, key string, value string) bool {
+	for k, v := range labels {
+		if k == fmt.Sprintf("cluster.x-k8s.io/%s", key) && v == value {
 			return true
 		}
 	}
