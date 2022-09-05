@@ -17,6 +17,16 @@ The cloud-provider also ensures tenant cluster services of type
 [LoadBalancer](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer) are properly exposed
 through services in the UnderKube.
 
+## Prerequisites
+In order to have the LoadBalancer logic working in the "tenant KubeVirt cluster, user must make sure the the KubeVirt
+VMs, used for the tenant cluster nodes, are created with the following labels:
+```shell
+cluster.x-k8s.io/cluster-name: <tenant-cluster-name>
+cluster.x-k8s.io/role: worker
+```
+Those labels are used by the infra cluster services as a NodeSelector - traffic from the
+infra cluster services created for the tenant cluster is redirected into VM with those Labels
+
 ## How to run `kubevirt-cloud-controller-manager`
 See [Running cloud-controller-manager](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#running-cloud-controller-manager)
 for general information on how to configure your tenant cluster to run `kubevirt-cloud-controller-manager`. You can
