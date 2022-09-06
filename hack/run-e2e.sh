@@ -4,7 +4,7 @@ set -e -o pipefail
 
 export TENANT_CLUSTER_NAME=${TENANT_CLUSTER_NAME:-kvcluster}
 export TENANT_CLUSTER_NAMESPACE=${TENANT_CLUSTER_NAMESPACE:-kvcluster}
-export TENANT_KUBECONFIG="config/kubevirtci/kubeconfig"
+export TENANT_KUBECONFIG="config/secret/kubeconfig"
 export INFRA_KUBECONFIG=$(./kubevirtci kubeconfig)
 export KUBECONFIG=$(./kubevirtci kubeconfig)
 virtctl_path=./hack/tools/bin/virtctl

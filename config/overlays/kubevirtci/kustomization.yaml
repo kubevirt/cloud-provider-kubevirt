@@ -1,0 +1,6 @@
+namespace: kvcluster
+bases: 
+- ../isolated
+
+patchesStrategicMerge:
+- manager_image_patch.yaml

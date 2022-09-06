@@ -2,6 +2,6 @@ bin/
 dev/
 .idea/
 cluster-up/
-config/kubevirtci/kubeconfig
-config/kubevirtci/infra-kubeconfig
+config/secret/kubeconfig
+config/secret/infra-kubeconfig
 *-kubeconfig
