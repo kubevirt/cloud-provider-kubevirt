@@ -1,9 +1,6 @@
 namespace: default
 bases: 
- - ../base
-
-patchesStrategicMerge:
-  - manager_tenant_kubeconfig_secret_patch.yaml
+ - ../../base
 
 patchesJson6902:
 - patch: |-
@@ -24,10 +21,3 @@ configMapGenerator:
   namespace: default
   files:
   - cloud-config
-
-secretGenerator:
-- name: kubeconfig
-  namespace: default
-  files:
-  - kubeconfig
-
