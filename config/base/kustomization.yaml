@@ -1,10 +1,3 @@
 bases: 
  - ../rbac
  - ../manager
- - ../secret
-
-generatorOptions:
-  disableNameSuffixHash: true
-
-patchesStrategicMerge:
-- manager_tenant_kubeconfig_secret_patch.yaml
