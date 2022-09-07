@@ -1,6 +1,6 @@
 loadBalancer:
   creationPollInterval: 30
 namespace: kvcluster
-instacesV2:
+instancesV2:
   enabled: true
   zoneAndRegionEnabled: false
