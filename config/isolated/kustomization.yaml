@@ -1,0 +1,33 @@
+bases: 
+ - ../base
+
+patches:
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --authentication-skip-lookup=true
+  target:
+    kind: Deployment
+
+patchesStrategicMerge:
+- |-
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRole
+  metadata:
+    name: kccm
+  $patch: delete
+- |-
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: kccm
+  $patch: delete
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: cloud-config
+  namespace: default
+  files:
+  - cloud-config
