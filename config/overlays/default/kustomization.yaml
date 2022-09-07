@@ -16,6 +16,9 @@ patchesJson6902:
     kind: RoleBinding
     name: kccm-extension-apiserver-authorization-reader
 
+generatorOptions:
+  disableNameSuffixHash: true
+
 configMapGenerator:
 - name: cloud-config
   namespace: default

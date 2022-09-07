@@ -24,6 +24,9 @@ patchesStrategicMerge:
     name: kccm
   $patch: delete
 
+generatorOptions:
+  disableNameSuffixHash: true
+
 configMapGenerator:
 - name: cloud-config
   namespace: default
