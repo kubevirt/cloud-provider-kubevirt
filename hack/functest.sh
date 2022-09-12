@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# 1 master and two workers
+export KUBEVIRT_NUM_NODES=3
+
 set -ex -o pipefail
 
 echo "Building e2e test suite"
