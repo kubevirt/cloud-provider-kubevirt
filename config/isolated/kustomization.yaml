@@ -8,6 +8,13 @@ patches:
       value: --authentication-skip-lookup=true
   target:
     kind: Deployment
+- patch: |-
+    - op: remove
+      path: /rules/4
+  target:
+    kind: Role
+    name: kccm
+    namespace: default
 
 patchesStrategicMerge:
 - |-
