@@ -181,7 +181,15 @@ function kubevirtci::install_capk_release {
 
 function kubevirtci::sync() {
 
-	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
+	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)"
+	if curl --unix-socket "/run/podman/podman.sock" http://d/v3.0.0/libpod/info >/dev/null 2>&1; then
+		cat <<EOF >> /etc/containers/registries.conf
+[[registry]]
+location = "$REGISTRY"
+insecure = true
+EOF
+	fi
+	REGISTRY=$REGISTRY make image push
 	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
 	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
 	${_kubectl} kustomize config/overlays/kubevirtci | ${_kubectl} apply -f -
