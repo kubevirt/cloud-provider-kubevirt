@@ -425,6 +425,10 @@ type Devices struct {
 	// Defaults to true.
 	// +optional
 	AutoattachMemBalloon *bool `json:"autoattachMemBalloon,omitempty"`
+	// Whether to attach an Input Device.
+	// Defaults to false.
+	// +optional
+	AutoattachInputDevice *bool `json:"autoattachInputDevice,omitempty"`
 	// Whether to have random number generator from host
 	// +optional
 	Rng *Rng `json:"rng,omitempty"`
@@ -486,13 +490,27 @@ type SoundDevice struct {
 
 type TPMDevice struct{}
 
+type InputBus string
+
+const (
+	InputBusUSB    InputBus = "usb"
+	InputBusVirtio InputBus = "virtio"
+)
+
+type InputType string
+
+const (
+	InputTypeTablet   InputType = "tablet"
+	InputTypeKeyboard InputType = "keyboard"
+)
+
 type Input struct {
 	// Bus indicates the bus of input device to emulate.
 	// Supported values: virtio, usb.
-	Bus string `json:"bus,omitempty"`
+	Bus InputBus `json:"bus,omitempty"`
 	// Type indicated the type of input device.
 	// Supported values: tablet.
-	Type string `json:"type"`
+	Type InputType `json:"type"`
 	// Name is the device name
 	Name string `json:"name"`
 }
@@ -609,11 +627,12 @@ const (
 	DiskBusSCSI   DiskBus = "scsi"
 	DiskBusSATA   DiskBus = "sata"
 	DiskBusVirtio DiskBus = "virtio"
+	DiskBusUSB    DiskBus = "usb"
 )
 
 type DiskTarget struct {
 	// Bus indicates the type of disk device to emulate.
-	// supported values: virtio, sata, scsi.
+	// supported values: virtio, sata, scsi, usb.
 	Bus DiskBus `json:"bus,omitempty"`
 	// ReadOnly.
 	// Defaults to false.
@@ -1205,6 +1224,7 @@ type InterfaceBindingMethod struct {
 	Masquerade *InterfaceMasquerade `json:"masquerade,omitempty"`
 	SRIOV      *InterfaceSRIOV      `json:"sriov,omitempty"`
 	Macvtap    *InterfaceMacvtap    `json:"macvtap,omitempty"`
+	Passt      *InterfacePasst      `json:"passt,omitempty"`
 }
 
 // InterfaceBridge connects to a given network via a linux bridge.
@@ -1221,6 +1241,9 @@ type InterfaceSRIOV struct{}
 
 // InterfaceMacvtap connects to a given network by extending the Kubernetes node's L2 networks via a macvtap interface.
 type InterfaceMacvtap struct{}
+
+// InterfacePasst connects to a given network.
+type InterfacePasst struct{}
 
 // Port represents a port to expose from the virtual machine.
 // Default protocol TCP.

@@ -14,7 +14,7 @@ require (
 	k8s.io/component-base v0.25.2
 	k8s.io/klog/v2 v2.70.1
 	k8s.io/utils v0.0.0-20220728103510-ee6ede2d64ed
-	kubevirt.io/api v0.55.0
+	kubevirt.io/api v0.57.1
 	sigs.k8s.io/controller-runtime v0.12.3
 )
 

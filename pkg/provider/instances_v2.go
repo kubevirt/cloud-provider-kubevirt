@@ -91,7 +91,7 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 	addrs := i.getNodeAddresses(instance.Status.Interfaces)
 
 	instanceType := ""
-	if val, ok := instance.Annotations[kubevirtv1.FlavorAnnotation]; ok {
+	if val, ok := instance.Annotations[kubevirtv1.InstancetypeAnnotation]; ok {
 		instanceType = val
 	}
 
