@@ -25,6 +25,7 @@ func (VirtualMachineInstanceSpec) SwaggerDoc() map[string]string {
 		"affinity":                      "If affinity is specifies, obey all the affinity rules",
 		"schedulerName":                 "If specified, the VMI will be dispatched by specified scheduler.\nIf not specified, the VMI will be dispatched by default scheduler.\n+optional",
 		"tolerations":                   "If toleration is specified, obey all the toleration rules.",
+		"topologySpreadConstraints":     "TopologySpreadConstraints describes how a group of VMIs will be spread across a given topology\ndomains. K8s scheduler will schedule VMI pods in a way which abides by the constraints.\n+optional\n+patchMergeKey=topologyKey\n+patchStrategy=merge\n+listType=map\n+listMapKey=topologyKey\n+listMapKey=whenUnsatisfiable",
 		"evictionStrategy":              "EvictionStrategy can be set to \"LiveMigrate\" if the VirtualMachineInstance should be\nmigrated instead of shut-off in case of a node drain.\n\n+optional",
 		"startStrategy":                 "StartStrategy can be set to \"Paused\" if Virtual Machine should be started in paused state.\n\n+optional",
 		"terminationGracePeriodSeconds": "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
@@ -144,6 +145,7 @@ func (VirtualMachineInstanceNetworkInterface) SwaggerDoc() map[string]string {
 		"ipAddresses":   "List of all IP addresses of a Virtual Machine interface",
 		"interfaceName": "The interface name inside the Virtual Machine",
 		"infoSource":    "Specifies the origin of the interface data collected. values: domain, guest-agent, or both",
+		"queueCount":    "Specifies how many queues are allocated by MultiQueue",
 	}
 }
 
@@ -282,7 +284,7 @@ func (VirtualMachineInstanceMigrationStatus) SwaggerDoc() map[string]string {
 
 func (VirtualMachineInstancePreset) SwaggerDoc() map[string]string {
 	return map[string]string{
-		"":     "VirtualMachineInstancePreset defines a VMI spec.domain to be applied to all VMIs that match the provided label selector\nMore info: https://kubevirt.io/user-guide/virtual_machines/presets/#overrides\n\n+k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object\n+genclient",
+		"":     "Deprecated for removal in v2, please use VirtualMachineInstanceType and VirtualMachinePreference instead.\n\nVirtualMachineInstancePreset defines a VMI spec.domain to be applied to all VMIs that match the provided label selector\nMore info: https://kubevirt.io/user-guide/virtual_machines/presets/#overrides\n\n+k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object\n+genclient",
 		"spec": "VirtualMachineInstance Spec contains the VirtualMachineInstance specification.",
 	}
 }
@@ -319,7 +321,7 @@ func (VirtualMachineSpec) SwaggerDoc() map[string]string {
 		"":                    "VirtualMachineSpec describes how the proper VirtualMachine\nshould look like",
 		"running":             "Running controls whether the associatied VirtualMachineInstance is created or not\nMutually exclusive with RunStrategy",
 		"runStrategy":         "Running state indicates the requested running state of the VirtualMachineInstance\nmutually exclusive with Running",
-		"flavor":              "FlavorMatcher references a flavor that is used to fill fields in Template",
+		"instancetype":        "InstancetypeMatcher references a instancetype that is used to fill fields in Template",
 		"preference":          "PreferenceMatcher references a set of preference that is used to fill fields in Template",
 		"template":            "Template is the direct specification of VirtualMachineInstance",
 		"dataVolumeTemplates": "dataVolumeTemplates is a list of dataVolumes that the VirtualMachineInstance template can reference.\nDataVolumes in this list are dynamically created for the VirtualMachine and are tied to the VirtualMachine's life-cycle.",
@@ -616,10 +618,11 @@ func (VirtualMachineMemoryDumpRequest) SwaggerDoc() map[string]string {
 		"":               "VirtualMachineMemoryDumpRequest represent the memory dump request phase and info",
 		"claimName":      "ClaimName is the name of the pvc that will contain the memory dump",
 		"phase":          "Phase represents the memory dump phase",
-		"startTimestamp": "StartTimestamp represents the time the memory dump started",
-		"endTimestamp":   "EndTimestamp represents the time the memory dump was completed",
-		"fileName":       "FileName represents the name of the output file",
-		"message":        "Message is a detailed message about failure of the memory dump",
+		"remove":         "Remove represents request of dissociating the memory dump pvc\n+optional",
+		"startTimestamp": "StartTimestamp represents the time the memory dump started\n+optional",
+		"endTimestamp":   "EndTimestamp represents the time the memory dump was completed\n+optional",
+		"fileName":       "FileName represents the name of the output file\n+optional",
+		"message":        "Message is a detailed message about failure of the memory dump\n+optional",
 	}
 }
 
@@ -768,12 +771,12 @@ func (ClusterProfilerRequest) SwaggerDoc() map[string]string {
 	return map[string]string{}
 }
 
-func (FlavorMatcher) SwaggerDoc() map[string]string {
+func (InstancetypeMatcher) SwaggerDoc() map[string]string {
 	return map[string]string{
-		"":             "FlavorMatcher references a flavor that is used to fill fields in the VMI template.",
-		"name":         "Name is the name of the VirtualMachineFlavor or VirtualMachineClusterFlavor",
-		"kind":         "Kind specifies which flavor resource is referenced.\nAllowed values are: \"VirtualMachineFlavor\" and \"VirtualMachineClusterFlavor\".\nIf not specified, \"VirtualMachineClusterFlavor\" is used by default.\n\n+optional",
-		"revisionName": "RevisionName specifies a ControllerRevision containing a specific copy of the\nVirtualMachineFlavor or VirtualMachineClusterFlavor to be used. This is initially\ncaptured the first time the flavor is applied to the VirtualMachineInstance.\n\n+optional",
+		"":             "InstancetypeMatcher references a instancetype that is used to fill fields in the VMI template.",
+		"name":         "Name is the name of the VirtualMachineInstancetype or VirtualMachineClusterInstancetype",
+		"kind":         "Kind specifies which instancetype resource is referenced.\nAllowed values are: \"VirtualMachineInstancetype\" and \"VirtualMachineClusterInstancetype\".\nIf not specified, \"VirtualMachineClusterInstancetype\" is used by default.\n\n+optional",
+		"revisionName": "RevisionName specifies a ControllerRevision containing a specific copy of the\nVirtualMachineInstancetype or VirtualMachineClusterInstancetype to be used. This is initially\ncaptured the first time the instancetype is applied to the VirtualMachineInstance.\n\n+optional",
 	}
 }
 
@@ -782,6 +785,6 @@ func (PreferenceMatcher) SwaggerDoc() map[string]string {
 		"":             "PreferenceMatcher references a set of preference that is used to fill fields in the VMI template.",
 		"name":         "Name is the name of the VirtualMachinePreference or VirtualMachineClusterPreference",
 		"kind":         "Kind specifies which preference resource is referenced.\nAllowed values are: \"VirtualMachinePreference\" and \"VirtualMachineClusterPreference\".\nIf not specified, \"VirtualMachineClusterPreference\" is used by default.\n\n+optional",
-		"revisionName": "RevisionName specifies a ControllerRevision containing a specific copy of the\nVirtualMachinePreference or VirtualMachineClusterPreference to be used. This is\ninitially captured the first time the flavor is applied to the VirtualMachineInstance.\n\n+optional",
+		"revisionName": "RevisionName specifies a ControllerRevision containing a specific copy of the\nVirtualMachinePreference or VirtualMachineClusterPreference to be used. This is\ninitially captured the first time the instancetype is applied to the VirtualMachineInstance.\n\n+optional",
 	}
 }
