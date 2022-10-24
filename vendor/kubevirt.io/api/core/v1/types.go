@@ -1255,9 +1255,8 @@ type VirtualMachine struct {
 
 // Return the current runStrategy for the VirtualMachine
 // if vm.spec.running is set, that will be mapped to runStrategy:
-//
-//	false: RunStrategyHalted
-//	true: RunStrategyAlways
+//   false: RunStrategyHalted
+//   true: RunStrategyAlways
 func (vm *VirtualMachine) RunStrategy() (VirtualMachineRunStrategy, error) {
 	if vm.Spec.Running != nil && vm.Spec.RunStrategy != nil {
 		return RunStrategyUnknown, fmt.Errorf("running and runstrategy are mutually exclusive")
@@ -1653,6 +1652,7 @@ const (
 	WorkloadUpdateMethodEvict WorkloadUpdateMethod = "Evict"
 )
 
+//
 // KubeVirtWorkloadUpdateStrategy defines options related to updating a KubeVirt install
 type KubeVirtWorkloadUpdateStrategy struct {
 	// WorkloadUpdateMethods defines the methods that can be used to disrupt workloads
