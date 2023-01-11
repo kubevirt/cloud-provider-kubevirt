@@ -325,7 +325,7 @@ var _ = Describe("LoadBalancer", func() {
 					ctx,
 					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
 				})
 			}
@@ -387,7 +387,7 @@ var _ = Describe("LoadBalancer", func() {
 					ctx,
 					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
 				})
 			}
@@ -449,7 +449,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -500,7 +500,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -550,7 +550,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -663,7 +663,7 @@ var _ = Describe("LoadBalancer", func() {
 					ctx,
 					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
 				}).Return(errors.New("Test error - poll Service"))
 			}
@@ -712,7 +712,7 @@ var _ = Describe("LoadBalancer", func() {
 						ctx,
 						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 						gomock.AssignableToTypeOf(&corev1.Service{}),
-					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 						infraService2.DeepCopyInto(obj.(*corev1.Service))
 					}).Return(errors.New("Test error - poll Service"))
 				} else {
@@ -720,7 +720,7 @@ var _ = Describe("LoadBalancer", func() {
 						ctx,
 						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 						gomock.AssignableToTypeOf(&corev1.Service{}),
-					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 						infraService2.DeepCopyInto(obj.(*corev1.Service))
 					})
 				}
@@ -804,7 +804,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -855,7 +855,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -960,7 +960,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 			})
 
@@ -1054,7 +1054,7 @@ var _ = Describe("LoadBalancer", func() {
 				ctx,
 				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object) {
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				if getSvcErr == nil {
 					infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
 				}
