@@ -9,5 +9,4 @@ approvers:
   - rhrazdil
   - qinqon
 
-component: "Cloud Compute"
-subcomponent: "Cloud Controller Manager"
+component: "Cloud Compute / Cloud Controller Manager"
