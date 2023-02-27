@@ -133,6 +133,7 @@ func generateInfraService(tenantSvc *corev1.Service, ports []corev1.ServicePort)
 			Labels: map[string]string{
 				"cluster.x-k8s.io/tenant-service-name":      tenantSvc.Name,
 				"cluster.x-k8s.io/tenant-service-namespace": tenantSvc.Namespace,
+				"cluster.x-k8s.io/cluster-name":             clusterName,
 			},
 			Annotations: tenantSvc.Annotations,
 		},

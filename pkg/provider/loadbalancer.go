@@ -21,9 +21,10 @@ const (
 )
 
 type loadbalancer struct {
-	namespace string
-	client    client.Client
-	config    LoadBalancerConfig
+	namespace   string
+	client      client.Client
+	config      LoadBalancerConfig
+	infraLabels map[string]string
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -75,7 +76,17 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		"cluster.x-k8s.io/cluster-name": clusterName,
 	}
 
-	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, ports)
+	lbLabels := map[string]string{
+		"cluster.x-k8s.io/tenant-service-name":      service.Name,
+		"cluster.x-k8s.io/tenant-service-namespace": service.Namespace,
+		"cluster.x-k8s.io/cluster-name":             clusterName,
+	}
+
+	for key, val := range lb.infraLabels {
+		lbLabels[key] = val
+	}
+
+	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, lbLabels, ports)
 	if err != nil {
 		klog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
@@ -174,16 +185,13 @@ func (lb *loadbalancer) getLoadBalancerService(ctx context.Context, lbName strin
 	return &service, nil
 }
 
-func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName string, service *corev1.Service, vmiLabels map[string]string, ports []corev1.ServicePort) (*corev1.Service, error) {
+func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName string, service *corev1.Service, vmiLabels map[string]string, lbLabels map[string]string, ports []corev1.ServicePort) (*corev1.Service, error) {
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        lbName,
 			Namespace:   lb.namespace,
 			Annotations: service.Annotations,
-			Labels: map[string]string{
-				"cluster.x-k8s.io/tenant-service-name":      service.Name,
-				"cluster.x-k8s.io/tenant-service-namespace": service.Namespace,
-			},
+			Labels:      lbLabels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:                 ports,
