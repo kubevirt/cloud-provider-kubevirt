@@ -7,9 +7,9 @@ require (
 	github.com/onsi/ginkgo/v2 v2.9.1
 	github.com/onsi/gomega v1.27.3
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/api v0.26.2
-	k8s.io/apimachinery v0.26.2
-	k8s.io/client-go v0.26.2
+	k8s.io/api v0.26.3
+	k8s.io/apimachinery v0.26.3
+	k8s.io/client-go v0.26.3
 	k8s.io/cloud-provider v0.26.2
 	k8s.io/component-base v0.26.2
 	k8s.io/klog/v2 v2.90.1
