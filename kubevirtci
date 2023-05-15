@@ -13,7 +13,7 @@ export KUBEVIRT_MEMORY_SIZE=${KUBEVIRT_MEMORY_SIZE:-15360M}
 export KUBEVIRT_DEPLOY_CDI="true"
 export KUBEVIRT_STORAGE="rook-ceph-default"
 export METALLB_VERSION="v0.12.1"
-export CAPK_RELEASE_VERSION="v0.1.0-rc.0"
+export CAPK_RELEASE_VERSION="v0.1.7"
 export CLUSTERCTL_VERSION="v1.0.0"
 export CALICO_VERSION="v3.21"
 
@@ -181,16 +181,24 @@ function kubevirtci::install_capk_release {
 
 function kubevirtci::sync() {
 
-	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)" make image push
-	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/kubevirtci/infra-kubeconfig
-	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/kubevirtci/kubeconfig
-	${_kubectl} kustomize config/kubevirtci | ${_kubectl} apply -f -
+	REGISTRY="127.0.0.1:$(cluster-up/cluster-up/cli.sh ports registry)"
+	if curl --unix-socket "/run/podman/podman.sock" http://d/v3.0.0/libpod/info >/dev/null 2>&1; then
+		cat <<EOF >> /etc/containers/registries.conf
+[[registry]]
+location = "$REGISTRY"
+insecure = true
+EOF
+	fi
+	REGISTRY=$REGISTRY make image push
+	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
+	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
+	${_kubectl} kustomize config/overlays/kubevirtci | ${_kubectl} apply -f -
     ${_kubectl} delete pod -n kvcluster -l k8s-app=kubevirt-cloud-controller-manager
     ${_kubectl} rollout status -w -n ${TENANT_CLUSTER_NAMESPACE} deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {
-	${_kubectl} kustomize config/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
+	${_kubectl} kustomize config/overlays/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
 }
 
 function kubevirtci::install_calico {

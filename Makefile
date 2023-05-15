@@ -8,7 +8,7 @@ CERT_DIR := dev/
 
 export BIN_DIR := bin
 
-GOLANGCI_LINT_VERSION ?= v1.46.2
+GOLANGCI_LINT_VERSION ?= v1.52.2
 
 .PHONY: all
 all: clean test build
