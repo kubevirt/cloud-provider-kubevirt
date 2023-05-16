@@ -141,7 +141,7 @@ var _ = Describe("Instances V2", func() {
 						Name:      vmiName,
 						Namespace: namespace,
 						Annotations: map[string]string{
-							kubevirtv1.FlavorAnnotation: "highPerformance",
+							kubevirtv1.InstancetypeAnnotation: "highPerformance",
 						},
 					},
 					Status: kubevirtv1.VirtualMachineInstanceStatus{
@@ -226,7 +226,7 @@ var _ = Describe("Instances V2", func() {
 						Name:      vmiName,
 						Namespace: namespace,
 						Annotations: map[string]string{
-							kubevirtv1.FlavorAnnotation: "highPerformance",
+							kubevirtv1.InstancetypeAnnotation: "highPerformance",
 						},
 					},
 					Status: kubevirtv1.VirtualMachineInstanceStatus{

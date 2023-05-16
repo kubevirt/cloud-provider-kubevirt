@@ -42,6 +42,12 @@ spec:
       - configMap:
           name: cloud-config
         name: cloud-config
+      - secret:
+          secretName: kubeconfig
+          items:
+            - key: kubeconfig
+              path: value
+        name: kubeconfig
       nodeSelector:
         node-role.kubernetes.io/master: ""
       tolerations:

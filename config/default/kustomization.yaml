@@ -1,9 +1,5 @@
-namespace: default
 bases: 
  - ../base
-
-patchesStrategicMerge:
-  - manager_tenant_kubeconfig_secret_patch.yaml
 
 patchesJson6902:
 - patch: |-
@@ -19,15 +15,11 @@ patchesJson6902:
     kind: RoleBinding
     name: kccm-extension-apiserver-authorization-reader
 
+generatorOptions:
+  disableNameSuffixHash: true
+
 configMapGenerator:
 - name: cloud-config
   namespace: default
   files:
   - cloud-config
-
-secretGenerator:
-- name: kubeconfig
-  namespace: default
-  files:
-  - kubeconfig
-

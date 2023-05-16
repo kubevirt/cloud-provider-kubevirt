@@ -45,6 +45,7 @@ type CloudConfig struct {
 	LoadBalancer LoadBalancerConfig `yaml:"loadBalancer"`
 	InstancesV2  InstancesV2Config  `yaml:"instancesV2"`
 	Namespace    string             `yaml:"namespace"`
+	InfraLabels  map[string]string  `yaml:"infraLabels"`
 }
 
 type LoadBalancerConfig struct {
@@ -153,9 +154,10 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 		return nil, false
 	}
 	return &loadbalancer{
-		namespace: c.namespace,
-		client:    c.client,
-		config:    c.config.LoadBalancer,
+		namespace:   c.namespace,
+		client:      c.client,
+		config:      c.config.LoadBalancer,
+		infraLabels: c.config.InfraLabels,
 	}, true
 }
 
