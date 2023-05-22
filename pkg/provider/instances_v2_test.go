@@ -513,6 +513,61 @@ var _ = Describe("Instances V2", func() {
 			})
 
 		})
+
+		Context("With runStrategy set", func() {
+
+			DescribeTable("With VMI in finalized state", func(runStrategy kubevirtv1.VirtualMachineRunStrategy, expectedExists bool) {
+				vm := kubevirtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test",
+						Namespace: "cluster-test",
+					},
+					Spec: kubevirtv1.VirtualMachineSpec{
+						RunStrategy: &runStrategy,
+					},
+				}
+				vmi := kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vm.Name,
+						Namespace: vm.Namespace,
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Phase: kubevirtv1.Succeeded,
+					},
+				}
+				node := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vmi.Name,
+					},
+					Spec: corev1.NodeSpec{
+						ProviderID: getProviderID(vmi.Name),
+					},
+				}
+
+				gomock.InOrder(
+					mockClient.EXPECT().
+						Get(ctx, types.NamespacedName{Name: vmi.Name, Namespace: vmi.Namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+						SetArg(2, vmi).
+						Times(1),
+					mockClient.EXPECT().
+						Get(ctx, types.NamespacedName{Name: vm.Name, Namespace: vm.Namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachine{})).
+						SetArg(2, vm).
+						Times(1),
+				)
+
+				i := instancesV2{namespace: vmi.Namespace, client: mockClient}
+				exists, err := i.InstanceExists(ctx, &node)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(exists).To(Equal(expectedExists))
+			},
+				Entry(fmt.Sprintf("Should return false with %q run strategy", kubevirtv1.RunStrategyOnce), kubevirtv1.RunStrategyOnce, false),
+				Entry(fmt.Sprintf("Should return true with %q run strategy", kubevirtv1.RunStrategyManual), kubevirtv1.RunStrategyManual, true),
+				Entry(fmt.Sprintf("Should return true with %q run strategy", kubevirtv1.RunStrategyAlways), kubevirtv1.RunStrategyAlways, true),
+				Entry(fmt.Sprintf("Should return true with %q run strategy", kubevirtv1.RunStrategyRerunOnFailure), kubevirtv1.RunStrategyRerunOnFailure, true),
+				Entry(fmt.Sprintf("Should return true with %q run strategy", kubevirtv1.RunStrategyUnknown), kubevirtv1.RunStrategyUnknown, true),
+			)
+
+		})
 	})
 
 	Describe("Checking instance status", func() {
@@ -552,9 +607,9 @@ var _ = Describe("Instances V2", func() {
 					Expect(err).ToNot(HaveOccurred())
 				}
 			},
-				Entry(fmt.Sprintf("Should return true with '%s' status phase", kubevirtv1.Succeeded), kubevirtv1.Succeeded, true),
-				Entry(fmt.Sprintf("Should return true with '%s' status phase", kubevirtv1.Failed), kubevirtv1.Failed, true),
-				Entry(fmt.Sprintf("Should return true with '%s' status phase", kubevirtv1.Unknown), kubevirtv1.Unknown, true),
+				Entry(fmt.Sprintf("Should return true with %q status phase", kubevirtv1.Succeeded), kubevirtv1.Succeeded, true),
+				Entry(fmt.Sprintf("Should return true with %q status phase", kubevirtv1.Failed), kubevirtv1.Failed, true),
+				Entry(fmt.Sprintf("Should return true with %q status phase", kubevirtv1.Unknown), kubevirtv1.Unknown, true),
 				Entry("Should return false with any different phase", kubevirtv1.VirtualMachineInstancePhase(""), false),
 			)
 

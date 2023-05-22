@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
 	v1helper "k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog/v2"
@@ -36,13 +37,22 @@ func (i *instancesV2) InstanceExists(ctx context.Context, node *corev1.Node) (bo
 		return false, err
 	}
 
-	_, err = InstanceByVMIName(instanceID).Get(ctx, i.client, i.namespace)
+	instance, err := InstanceByVMIName(instanceID).Get(ctx, i.client, i.namespace)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			klog.Infof("Unable to find virtual machine instance %s", instanceID)
 			return false, nil
 		}
 		return false, err
+	}
+
+	switch instance.Status.Phase {
+	case kubevirtv1.Succeeded, kubevirtv1.Failed:
+		recoverable, err := i.isInstanceRecoverable(ctx, instance)
+		if err != nil {
+			return false, err
+		}
+		return recoverable, nil
 	}
 
 	return true, nil
@@ -68,7 +78,7 @@ func (i *instancesV2) InstanceShutdown(ctx context.Context, node *corev1.Node) (
 		klog.Infof("instance %s is shut down.", instance.Name)
 		return true, nil
 	case kubevirtv1.Unknown:
-		return true, fmt.Errorf("Instance is in unkown state (propably host down)")
+		return true, fmt.Errorf("instance is in unkown state (propably host down)")
 	default:
 		return false, nil
 	}
@@ -130,6 +140,26 @@ func (i *instancesV2) findInstance(ctx context.Context, fetchers ...InstanceGett
 	}
 
 	return instance, nil
+}
+
+// isInstanceRecoverable checks if VM is in a finalized phase and should remain stopped.
+// If the VM should remain stopped we must allow the corresponding node object to be deleted as it cannot leave the NotReady state anymore.
+// The CCM does not clean up left VMs, it is up to the user or dedicated controller to do so.
+func (i *instancesV2) isInstanceRecoverable(ctx context.Context, instance *kubevirtv1.VirtualMachineInstance) (bool, error) {
+	vm := kubevirtv1.VirtualMachine{}
+
+	err := i.client.Get(ctx, types.NamespacedName{Namespace: i.namespace, Name: instance.Name}, &vm)
+	if err != nil {
+		return false, err
+	}
+
+	if vm.Spec.RunStrategy != nil && *vm.Spec.RunStrategy == kubevirtv1.RunStrategyOnce {
+		klog.Infof("Found VMI in %q phase with %q run strategy - reporting instance %q as not found",
+			instance.Status.Phase, kubevirtv1.RunStrategyOnce, instance.Name)
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNetworkInterface) []corev1.NodeAddress {
