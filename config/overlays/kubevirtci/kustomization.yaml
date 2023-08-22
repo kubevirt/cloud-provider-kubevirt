@@ -5,3 +5,11 @@ bases:
 
 patchesStrategicMerge:
 - manager_image_patch.yaml
+
+patches:
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --cluster-name=$TENANT_CLUSTER_NAME
+  target:
+    kind: Deployment
