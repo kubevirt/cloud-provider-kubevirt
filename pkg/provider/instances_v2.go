@@ -88,7 +88,7 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 	if err != nil {
 		return nil, err
 	}
-	addrs := i.getNodeAddresses(instance.Status.Interfaces)
+	addrs := i.getNodeAddresses(instance.Status.Interfaces, node.Status.Addresses)
 
 	instanceType := ""
 	if val, ok := instance.Annotations[kubevirtv1.InstancetypeAnnotation]; ok {
@@ -132,17 +132,33 @@ func (i *instancesV2) findInstance(ctx context.Context, fetchers ...InstanceGett
 	return instance, nil
 }
 
-func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNetworkInterface) []corev1.NodeAddress {
+func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNetworkInterface, prevAddrs []corev1.NodeAddress) []corev1.NodeAddress {
 	var addrs []corev1.NodeAddress
 
+	foundInternalIP := false
 	// TODO: detect type of all addresses, right now pick only the default
 	for _, i := range ifs {
-		if i.Name == "default" {
+		// Only change the IP if it is known, not if it is empty
+		if i.Name == "default" && i.IP != "" {
 			v1helper.AddToNodeAddresses(&addrs, corev1.NodeAddress{
 				Type:    corev1.NodeInternalIP,
 				Address: i.IP,
 			})
+			foundInternalIP = true
 			break
+		}
+	}
+
+	// fall back to the previously known internal IP on the node
+	// if the default IP on the vmi.status.interfaces is not present.
+	// This smooths over issues where the vmi.status.interfaces field is
+	// not reporting results due to an internal reboot or other issues when
+	// contacting the qemu guest agent.
+	if !foundInternalIP {
+		for _, prevAddr := range prevAddrs {
+			if prevAddr.Type == corev1.NodeInternalIP {
+				v1helper.AddToNodeAddresses(&addrs, prevAddr)
+			}
 		}
 	}
 
