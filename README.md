@@ -42,7 +42,8 @@ Output:
 ```yaml
 kubeconfig: <infraKubeConfigPath>
 loadBalancer:
-  creationPollInterval: 30
+  creationPollInterval: 5
+  creationPollTimeout: 60
 ```
 
 ## How to build a Docker image

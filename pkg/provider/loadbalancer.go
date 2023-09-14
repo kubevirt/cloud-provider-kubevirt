@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	// Default interval in seconds between polling the service after creation
-	defaultLoadBalancerCreatePollInterval = 5
+	// Default interval between polling the service after creation
+	defaultLoadBalancerCreatePollInterval = 5 * time.Second
+
+	// Default timeout between polling the service after creation
+	defaultLoadBalancerCreatePollTimeout = 5 * time.Minute
 )
 
 type loadbalancer struct {
@@ -92,7 +95,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, err
 	}
 
-	err = wait.PollUntil(lb.getLoadBalancerCreatePollInterval()*time.Second, func() (bool, error) {
+	err = wait.PollWithContext(ctx, lb.getLoadBalancerCreatePollInterval(), lb.getLoadBalancerCreatePollTimeout(), func(ctx context.Context) (bool, error) {
 		if len(lbService.Status.LoadBalancer.Ingress) != 0 {
 			return true, nil
 		}
@@ -107,7 +110,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			return true, nil
 		}
 		return false, nil
-	}, ctx.Done())
+	})
 	if err != nil {
 		klog.Errorf("Failed to poll LoadBalancer service: %v", err)
 		return nil, err
@@ -232,9 +235,22 @@ func (lb *loadbalancer) createLoadBalancerServicePorts(service *corev1.Service) 
 }
 
 func (lb *loadbalancer) getLoadBalancerCreatePollInterval() time.Duration {
-	if lb.config.CreationPollInterval > 0 {
-		return time.Duration(lb.config.CreationPollInterval)
+	return convertLoadBalancerCreatePollConfig(lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval, "interval")
+}
+
+func (lb *loadbalancer) getLoadBalancerCreatePollTimeout() time.Duration {
+	return convertLoadBalancerCreatePollConfig(lb.config.CreationPollTimeout, defaultLoadBalancerCreatePollTimeout, "timeout")
+}
+
+func convertLoadBalancerCreatePollConfig(configValue *int, defaultValue time.Duration, name string) time.Duration {
+	if configValue == nil {
+		klog.Infof("Setting creation poll %s to default value '%d'", name, defaultValue)
+		return defaultValue
 	}
-	klog.Infof("Creation poll interval '%d' must be > 0. Setting to '%d'", lb.config.CreationPollInterval, defaultLoadBalancerCreatePollInterval)
-	return defaultLoadBalancerCreatePollInterval
+	if *configValue <= 0 {
+		klog.Infof("Creation poll %s %d' must be > 0. Setting to '%d'", name, *configValue, defaultValue)
+		return defaultValue
+	}
+	return time.Duration(*configValue) * time.Second
+
 }

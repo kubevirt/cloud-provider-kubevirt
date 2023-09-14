@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -251,7 +252,8 @@ var _ = Describe("LoadBalancer", func() {
 				namespace: "test",
 				client:    c,
 				config: LoadBalancerConfig{
-					CreationPollInterval: 1,
+					CreationPollInterval: pointer.Int(1),
+					CreationPollTimeout:  pointer.Int(5),
 				},
 			}
 
@@ -673,9 +675,9 @@ var _ = Describe("LoadBalancer", func() {
 			Expect(err).Should(Equal(expectedError))
 		})
 
-		It("Should return an error if polling LoadBalancer service 20-time fails", func() {
+		It("Should return an error if polling LoadBalancer service fails but success before timeout", func() {
 			expectedError := errors.New("Test error - poll Service")
-			getCount := 20
+			getCount := *lb.config.CreationPollTimeout / *lb.config.CreationPollInterval
 			port := 30001
 			infraServiceExist := generateInfraService(
 				tenantService,
@@ -735,6 +737,39 @@ var _ = Describe("LoadBalancer", func() {
 			ctrl.Finish()
 		})
 
+		It("Should return an error if polling LoadBalancer returns no IPs after some time", func() {
+			expectedError := errors.New("timed out waiting for the condition")
+
+			c.EXPECT().
+				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Return(notFoundErr)
+
+			infraService1 := generateInfraService(
+				tenantService,
+				[]corev1.ServicePort{
+					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
+				},
+			)
+
+			c.EXPECT().Create(ctx, infraService1)
+
+			infraService2 := infraService1.DeepCopy()
+			c.EXPECT().Get(
+				ctx,
+				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				gomock.AssignableToTypeOf(&corev1.Service{}),
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
+				infraService2.DeepCopyInto(obj.(*corev1.Service))
+			}).AnyTimes()
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).Should(MatchError(expectedError))
+		})
+
+		AfterAll(func() {
+			ctrl.Finish()
+		})
+
 	})
 
 	Context("With updating loadbalancer", Ordered, func() {
@@ -757,7 +792,7 @@ var _ = Describe("LoadBalancer", func() {
 				namespace: "test",
 				client:    c,
 				config: LoadBalancerConfig{
-					CreationPollInterval: 1,
+					CreationPollInterval: pointer.Int(1),
 				},
 			}
 
@@ -1011,7 +1046,7 @@ var _ = Describe("LoadBalancer", func() {
 				namespace: "test",
 				client:    c,
 				config: LoadBalancerConfig{
-					CreationPollInterval: 1,
+					CreationPollInterval: pointer.Int(1),
 				},
 			}
 

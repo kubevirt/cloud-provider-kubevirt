@@ -14,7 +14,7 @@ var (
 	ns                  = "aNamespace"
 	infraKubeConfigPath = "infraKubeConfig"
 	minimalConf         = fmt.Sprintf("kubeconfig: %s", infraKubeConfigPath)
-	loadbalancerConf    = fmt.Sprintf("kubeconfig: %s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d", infraKubeConfigPath, false, 3)
+	loadbalancerConf    = fmt.Sprintf("kubeconfig: %s\nloadBalancer:\n  enabled: %t\n  creationPollInterval: %d\n  creationPollTimeout: %d", infraKubeConfigPath, false, 3, 100)
 	instancesConf       = fmt.Sprintf("kubeconfig: %s\ninstancesV2:\n  enabled: %t\n  enableInstanceTypes: %t", infraKubeConfigPath, false, true)
 	zoneAndRegionConf   = fmt.Sprintf("kubeconfig: %s\ninstancesV2:\n  zoneAndRegionEnabled: %t\n  enableInstanceTypes: %t", infraKubeConfigPath, false, true)
 	namespaceConf       = fmt.Sprintf("kubeconfig: %s\nnamespace: %s", infraKubeConfigPath, ns)
@@ -22,12 +22,13 @@ var (
 	invalidKubeconf     = "bla"
 )
 
-func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, zoneAndRegionEnabled bool, lbCreationPollInterval int) CloudConfig {
+func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, zoneAndRegionEnabled bool, lbCreationPollInterval int, lbCreationPollTimeout int) CloudConfig {
 	return CloudConfig{
 		Kubeconfig: kubeconfig,
 		LoadBalancer: LoadBalancerConfig{
 			Enabled:              loadbalancerEnabled,
-			CreationPollInterval: lbCreationPollInterval,
+			CreationPollInterval: &lbCreationPollInterval,
+			CreationPollTimeout:  &lbCreationPollTimeout,
 		},
 		InstancesV2: InstancesV2Config{
 			Enabled:              instancesEnabled,
@@ -44,12 +45,12 @@ var _ = Describe("Cloud config", func() {
 		Expect(config).To(Equal(expectedCloudConfig))
 		Expect(err).To(BeNil())
 	},
-		Entry("With minimal configuration", minimalConf, makeCloudConfig(infraKubeConfigPath, "", true, true, true, 5), nil),
-		Entry("With loadBalancer configuration", loadbalancerConf, makeCloudConfig(infraKubeConfigPath, "", false, true, true, 3), nil),
-		Entry("With instance configuration", instancesConf, makeCloudConfig(infraKubeConfigPath, "", true, false, true, 5), nil),
-		Entry("With zone and region configuration", zoneAndRegionConf, makeCloudConfig(infraKubeConfigPath, "", true, true, false, 5), nil),
-		Entry("With namespace configuration", namespaceConf, makeCloudConfig(infraKubeConfigPath, ns, true, true, true, 5), nil),
-		Entry("With full configuration", allConf, makeCloudConfig(infraKubeConfigPath, ns, false, false, true, 5), nil),
+		Entry("With minimal configuration", minimalConf, makeCloudConfig(infraKubeConfigPath, "", true, true, true, 5, 300), nil),
+		Entry("With loadBalancer configuration", loadbalancerConf, makeCloudConfig(infraKubeConfigPath, "", false, true, true, 3, 100), nil),
+		Entry("With instance configuration", instancesConf, makeCloudConfig(infraKubeConfigPath, "", true, false, true, 5, 300), nil),
+		Entry("With zone and region configuration", zoneAndRegionConf, makeCloudConfig(infraKubeConfigPath, "", true, true, false, 5, 300), nil),
+		Entry("With namespace configuration", namespaceConf, makeCloudConfig(infraKubeConfigPath, ns, true, true, true, 5, 300), nil),
+		Entry("With full configuration", allConf, makeCloudConfig(infraKubeConfigPath, ns, false, false, true, 5, 300), nil),
 	)
 
 	Describe("KubeVirt Cloud Factory", func() {
