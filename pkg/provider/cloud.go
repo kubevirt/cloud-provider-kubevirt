@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -51,8 +52,12 @@ type CloudConfig struct {
 type LoadBalancerConfig struct {
 	// Enabled activates the load balancer interface of the CCM
 	Enabled bool `yaml:"enabled"`
-	// CreationPollInterval determines how many seconds to wait for the load balancer creation
-	CreationPollInterval int `yaml:"creationPollInterval"`
+
+	// CreationPollInterval determines how many seconds to wait for the load balancer creation between retries
+	CreationPollInterval *int `yaml:"creationPollInterval,omitempty"`
+
+	// CreationPollTimeout determines how many seconds to wait for the load balancer creation
+	CreationPollTimeout *int `yaml:"creationPollTimeout,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -68,7 +73,8 @@ func createDefaultCloudConfig() CloudConfig {
 	return CloudConfig{
 		LoadBalancer: LoadBalancerConfig{
 			Enabled:              true,
-			CreationPollInterval: defaultLoadBalancerCreatePollInterval,
+			CreationPollInterval: pointer.Int(int(defaultLoadBalancerCreatePollInterval.Seconds())),
+			CreationPollTimeout:  pointer.Int(int(defaultLoadBalancerCreatePollTimeout.Seconds())),
 		},
 		InstancesV2: InstancesV2Config{
 			Enabled:              true,
