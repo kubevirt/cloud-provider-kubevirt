@@ -21,7 +21,6 @@ spec:
         - --cloud-provider=kubevirt
         - --cloud-config=/etc/cloud/cloud-config
         - --kubeconfig=/etc/kubernetes/kubeconfig/value
-        - --cluster-name=kvcluster
         command:
         - /bin/kubevirt-cloud-controller-manager
         image: quay.io/kubevirt/kubevirt-cloud-controller-manager:main

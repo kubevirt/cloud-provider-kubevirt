@@ -1,5 +1,6 @@
 loadBalancer:
-  creationPollInterval: 30
+  creationPollInterval: 5
+  creationPollTimeout: 60
 namespace: kvcluster
 instancesV2:
   enabled: true

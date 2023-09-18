@@ -192,13 +192,13 @@ EOF
 	REGISTRY=$REGISTRY make image push
 	$_ssh_infra node01  -- sudo cat  /etc/kubernetes/admin.conf > config/secret/infra-kubeconfig
 	$CLUSTERCTL_PATH get kubeconfig ${TENANT_CLUSTER_NAME} -n ${TENANT_CLUSTER_NAMESPACE} > config/secret/kubeconfig
-	${_kubectl} kustomize config/overlays/kubevirtci | ${_kubectl} apply -f -
+	${_kubectl} kustomize config/overlays/kubevirtci | envsubst | ${_kubectl} apply -f -
     ${_kubectl} delete pod -n kvcluster -l k8s-app=kubevirt-cloud-controller-manager
     ${_kubectl} rollout status -w -n ${TENANT_CLUSTER_NAMESPACE} deployment/kubevirt-cloud-controller-manager
 }
 
 function kubevirtci::delete() {
-	${_kubectl} kustomize config/overlays/kubevirtci | ${_kubectl} delete --ignore-not-found -f -
+	${_kubectl} kustomize config/overlays/kubevirtci | envsubst | ${_kubectl} delete --ignore-not-found -f -
 }
 
 function kubevirtci::install_calico {
