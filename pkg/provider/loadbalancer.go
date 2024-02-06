@@ -198,10 +198,12 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:                 ports,
-			Selector:              vmiLabels,
 			Type:                  corev1.ServiceTypeLoadBalancer,
 			ExternalTrafficPolicy: service.Spec.ExternalTrafficPolicy,
 		},
+	}
+	if lb.config.Selectorless == nil || !*lb.config.Selectorless {
+		lbService.Spec.Selector = vmiLabels
 	}
 	if len(service.Spec.ExternalIPs) > 0 {
 		lbService.Spec.ExternalIPs = service.Spec.ExternalIPs
