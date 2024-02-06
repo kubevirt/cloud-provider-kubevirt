@@ -58,6 +58,10 @@ type LoadBalancerConfig struct {
 
 	// CreationPollTimeout determines how many seconds to wait for the load balancer creation
 	CreationPollTimeout *int `yaml:"creationPollTimeout,omitempty"`
+
+	// Selectorless delegate endpointslices creation on third party by
+	// skipping service selector creation
+	Selectorless *bool `yaml:"selectorless,omitempty"`
 }
 
 type InstancesV2Config struct {
