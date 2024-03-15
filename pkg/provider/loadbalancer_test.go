@@ -127,7 +127,7 @@ func cmpLoadBalancerStatuses(a, b *corev1.LoadBalancerStatus) bool {
 }
 
 func generateInfraService(tenantSvc *corev1.Service, ports []corev1.ServicePort) *corev1.Service {
-	return &corev1.Service{
+	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lbServiceName,
 			Namespace: lbServiceNamespace,
@@ -142,12 +142,15 @@ func generateInfraService(tenantSvc *corev1.Service, ports []corev1.ServicePort)
 			Type:                  corev1.ServiceTypeLoadBalancer,
 			Ports:                 ports,
 			ExternalTrafficPolicy: tenantSvc.Spec.ExternalTrafficPolicy,
-			Selector: map[string]string{
-				"cluster.x-k8s.io/role":         "worker",
-				"cluster.x-k8s.io/cluster-name": clusterName,
-			},
 		},
 	}
+	if tenantSvc.Spec.ExternalTrafficPolicy != corev1.ServiceExternalTrafficPolicyLocal {
+		svc.Spec.Selector = map[string]string{
+			TenantNodeRoleLabelKey:    "worker",
+			TenantClusterNameLabelKey: clusterName,
+		}
+	}
+	return svc
 }
 
 var _ = Describe("LoadBalancer", func() {
@@ -276,6 +279,56 @@ var _ = Describe("LoadBalancer", func() {
 			nodes = []*corev1.Node{}
 			loadBalancerIP = "123.456.7.8"
 
+		})
+
+		It("Should create a loadbalancer without selectors when ExternalTrafficPolicy is local and eps controller is enabled", func() {
+			checkSvcExistErr := notFoundErr
+			getCount := 3
+
+			tenantService.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeLocal
+			lb.config.EnableEPSController = pointer.Bool(true)
+			lb.config.Selectorless = pointer.Bool(true)
+
+			c.EXPECT().
+				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Return(checkSvcExistErr)
+
+			infraService1 := generateInfraService(
+				tenantService,
+				[]corev1.ServicePort{
+					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
+				},
+			)
+			infraService1.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeLocal
+
+			c.EXPECT().Create(ctx, infraService1)
+
+			for i := 0; i < getCount; i++ {
+				infraService2 := infraService1.DeepCopy()
+				if i == getCount-1 {
+					infraService2.Status = corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{
+								{
+									IP: loadBalancerIP,
+								},
+							},
+						},
+					}
+				}
+				c.EXPECT().Get(
+					ctx,
+					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					gomock.AssignableToTypeOf(&corev1.Service{}),
+				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
+					infraService2.DeepCopyInto(obj.(*corev1.Service))
+				})
+			}
+
+			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+			Expect(len(lbStatus.Ingress)).Should(Equal(1))
+			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
 		})
 
 		It("Should create new Service and poll LoadBalancer service 1 time", func() {
