@@ -22,7 +22,7 @@ var (
 	invalidKubeconf     = "bla"
 )
 
-func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled bool, zoneAndRegionEnabled bool, lbCreationPollInterval int, lbCreationPollTimeout int) CloudConfig {
+func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instancesEnabled, zoneAndRegionEnabled bool, lbCreationPollInterval int, lbCreationPollTimeout int) CloudConfig {
 	return CloudConfig{
 		Kubeconfig: kubeconfig,
 		LoadBalancer: LoadBalancerConfig{
