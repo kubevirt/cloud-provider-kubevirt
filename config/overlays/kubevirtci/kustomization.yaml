@@ -1,10 +1,5 @@
 namespace: kvcluster
-bases: 
-- ../../secret
-- ../../isolated
 
-patchesStrategicMerge:
-- manager_image_patch.yaml
 
 patches:
 - patch: |-
@@ -13,3 +8,9 @@ patches:
       value: --cluster-name=$TENANT_CLUSTER_NAME
   target:
     kind: Deployment
+- path: manager_image_patch.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../secret
+- ../../isolated
