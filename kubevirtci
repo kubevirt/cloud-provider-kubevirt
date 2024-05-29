@@ -2,9 +2,10 @@
 
 set -e
 
-export KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER:-k8s-1.23}
-export CAPK_GUEST_K8S_VERSION=${CAPK_GUEST_K8S_VERSION:-v1.21.0}
-export KUBEVIRTCI_TAG=${KUBEVIRTCI_TAG:-2205231118-f12b50e}
+export KUBEVIRT_PROVIDER=${KUBEVIRT_PROVIDER:-k8s-1.30}
+export CAPK_GUEST_K8S_VERSION=${CAPK_GUEST_K8S_VERSION:-v1.30.1}
+export CAPK_GUEST_K8S_REPO=${CAPK_GUEST_K8S_REPO:-quay.io/capk/ubuntu-2204-container-disk}
+export KUBEVIRTCI_TAG=${KUBEVIRTCI_TAG:-2405151527-09bcd71}
 export KUBECONFIG=$(cluster-up/cluster-up/kubeconfig.sh)
 export KUBEVIRT_DEPLOY_PROMETHEUS=false
 export KUBEVIRT_DEPLOY_CDI=false
@@ -12,10 +13,10 @@ export KUBEVIRT_NUM_NODES=${KUBEVIRT_NUM_NODES:-1}
 export KUBEVIRT_MEMORY_SIZE=${KUBEVIRT_MEMORY_SIZE:-15360M}
 export KUBEVIRT_DEPLOY_CDI="true"
 export KUBEVIRT_STORAGE="rook-ceph-default"
-export METALLB_VERSION="v0.12.1"
+export METALLB_VERSION="v0.14.5"
 export CAPK_RELEASE_VERSION="v0.1.7"
 export CLUSTERCTL_VERSION="v1.0.0"
-export CALICO_VERSION="v3.21"
+export CALICO_VERSION="v3.28.0"
 
 _default_bin_path=./hack/tools/bin
 _default_tmp_path=./hack/tools/bin/tmp
@@ -150,7 +151,7 @@ function kubevirtci::destroy_cluster() {
 }
 
 function kubevirtci::create_cluster() {
-	export NODE_VM_IMAGE_TEMPLATE=quay.io/capk/ubuntu-container-disk:20.04
+	export NODE_VM_IMAGE_TEMPLATE="${CAPK_GUEST_K8S_REPO}:${CAPK_GUEST_K8S_VERSION}"
 	export IMAGE_REPO=k8s.gcr.io
 	export CRI_PATH="/var/run/containerd/containerd.sock"
 	template="https://github.com/kubernetes-sigs/cluster-api-provider-kubevirt/blob/main/templates/cluster-template.yaml"
@@ -202,39 +203,39 @@ function kubevirtci::delete() {
 }
 
 function kubevirtci::install_calico {
-	kubevirtci::kubectl_tenant apply -f https://docs.projectcalico.org/${CALICO_VERSION}/manifests/calico.yaml
+	kubevirtci::kubectl_tenant apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/calico.yaml"
 	kubevirtci::kubectl_tenant wait node --for=condition=Ready --all --timeout=5m
 }
 
 function kubevirtci::install_metallb {
-	${_kubectl} apply -f https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/manifests/namespace.yaml
-	${_kubectl} apply -f https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/manifests/metallb.yaml
+	${_kubectl} apply -f https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/config/manifests/metallb-native.yaml
+
 
 	echo "waiting for metallb to come online"
 	${_kubectl} -n metallb-system wait deployment controller --for condition=Available --timeout=5m
 
-	mkdir -p ${_default_tmp_path}
-	local metal_config=${_default_tmp_path}/metallb-config.yaml
-
-	cat << EOF > $metal_config
----
-apiVersion: v1
-kind: ConfigMap
+	${_kubectl} apply -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
 metadata:
+  name: metallb
   namespace: metallb-system
-  name: config
-data:
-  config: |
-    address-pools:
-    - name: default
-      protocol: layer2
-      addresses:
-      - 192.168.66.201-192.168.66.250
+spec:
+  addresses:
+  - 192.168.111.30-192.168.111.50
 EOF
 
-	${_kubectl} apply -f ${metal_config}
+	${_kubectl} create -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+   - metallb
+EOF
 
-	rm $metal_config
 	echo "metallb installed!"
 }
 
