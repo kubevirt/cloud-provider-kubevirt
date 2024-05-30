@@ -1,5 +1,3 @@
-bases: 
- - ../base
 
 patches:
 - patch: |-
@@ -15,33 +13,36 @@ patches:
     kind: Role
     name: kccm
     namespace: default
+- patch: |-
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: kccm
+    $patch: delete
+- patch: |-
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: kccm
+    $patch: delete
+- patch: |-
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: kccm
+      namespace: kube-system
+    $patch: delete
 
-patchesStrategicMerge:
-- |-
-  apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRole
-  metadata:
-    name: kccm
-  $patch: delete
-- |-
-  apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRoleBinding
-  metadata:
-    name: kccm
-  $patch: delete
-- |-
-  apiVersion: rbac.authorization.k8s.io/v1
-  kind: RoleBinding
-  metadata:
-    name: kccm
-    namespace: kube-system
-  $patch: delete
 
 generatorOptions:
   disableNameSuffixHash: true
 
 configMapGenerator:
-- name: cloud-config
-  namespace: default
-  files:
+- files:
   - cloud-config
+  name: cloud-config
+  namespace: default
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base

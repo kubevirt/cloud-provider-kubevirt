@@ -1,7 +1,18 @@
-bases: 
- - ../base
 
-patchesJson6902:
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- files:
+  - cloud-config
+  name: cloud-config
+  namespace: default
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
+patches:
 - patch: |-
     - op: add
       path: /metadata/namespace
@@ -11,15 +22,6 @@ patchesJson6902:
       value: default
   target:
     group: rbac.authorization.k8s.io
-    version: v1
     kind: RoleBinding
     name: kccm-extension-apiserver-authorization-reader
-
-generatorOptions:
-  disableNameSuffixHash: true
-
-configMapGenerator:
-- name: cloud-config
-  namespace: default
-  files:
-  - cloud-config
+    version: v1

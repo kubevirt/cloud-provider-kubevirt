@@ -4,3 +4,5 @@ resources:
 - kccm_cluster_role_binding.yaml
 - kccm_role.yaml
 - kccm_role_binding.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
