@@ -45,14 +45,13 @@ func main() {
 
 	fss := cliflag.NamedFlagSets{}
 	controllerInitializers := app.DefaultInitFuncConstructors
-	controllerAliases := map[string]string{"kubevirt-eps": kubevirteps.ControllerName.String()}
 
 	// add kubevirt-cloud-controller to the list of controllers
 	controllerInitializers[kubevirteps.ControllerName.String()] = app.ControllerInitFuncConstructor{
 		Constructor: StartKubevirtCloudControllerWrapper,
 	}
 
-	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, controllerAliases, fss, wait.NeverStop)
+	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
 }

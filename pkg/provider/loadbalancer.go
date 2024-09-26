@@ -208,9 +208,11 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		},
 	}
 	// Give controller privilege above selectorless
-	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeCluster {
-		lbService.Spec.Selector = vmiLabels
-	} else if lb.config.Selectorless == nil || !*lb.config.Selectorless {
+	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		lbService.Spec.Selector = nil
+	} else if lb.config.Selectorless != nil && *lb.config.Selectorless {
+		lbService.Spec.Selector = nil
+	} else {
 		lbService.Spec.Selector = vmiLabels
 	}
 	if len(service.Spec.ExternalIPs) > 0 {

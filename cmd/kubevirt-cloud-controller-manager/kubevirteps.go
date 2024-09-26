@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/cloud-provider/app"
@@ -37,7 +39,7 @@ func startKubevirtCloudController(
 		return nil, false, err
 	}
 
-	if !*kubevirtCloud.GetCloudConfig().LoadBalancer.EnableEPSController {
+	if kubevirtCloud.GetCloudConfig().LoadBalancer.EnableEPSController == nil || !*kubevirtCloud.GetCloudConfig().LoadBalancer.EnableEPSController {
 		klog.Infof(fmt.Sprintf("%s is not enabled.", kubevirteps.ControllerName))
 		return nil, false, nil
 	}
@@ -54,37 +56,46 @@ func startKubevirtCloudController(
 	klog.Infof("Setting up infra client.")
 
 	// This is the kubeconfig for the infra cluster
-	infraKubeConfig, err := kubevirtCloud.GetInfraKubeconfig()
-	if err != nil {
-		klog.Errorf("Failed to get infra kubeconfig: %v", err)
-		return nil, false, err
-	}
+	var restConfig *rest.Config
 
-	var infraClientConfig clientcmd.ClientConfig
-	infraClientConfig, err = clientcmd.NewClientConfigFromBytes([]byte(infraKubeConfig))
-	if err != nil {
-		klog.Errorf("Failed to create client config for infra cluster: %v", err)
-		return nil, false, err
-	}
-
-	infraConfig, err := infraClientConfig.ClientConfig()
-	if err != nil {
-		klog.Errorf("Failed to create client config for infra cluster: %v", err)
-		return nil, false, err
+	if kubevirtCloud.GetCloudConfig().Kubeconfig == "" {
+		restConfig, err = rest.InClusterConfig()
+		if err != nil {
+			klog.Errorf("Failed to get in-cluster config: %v", err)
+			return nil, false, err
+		}
+	} else {
+		var infraKubeConfig string
+		infraKubeConfig, err = kubevirtCloud.GetInfraKubeconfig()
+		if err != nil {
+			klog.Errorf("Failed to get infra kubeconfig: %v", err)
+			return nil, false, err
+		}
+		var clientConfig clientcmd.ClientConfig
+		clientConfig, err = clientcmd.NewClientConfigFromBytes([]byte(infraKubeConfig))
+		if err != nil {
+			klog.Errorf("Failed to create client config from infra kubeconfig: %v", err)
+			return nil, false, err
+		}
+		restConfig, err = clientConfig.ClientConfig()
+		if err != nil {
+			klog.Errorf("Failed to create rest config for infra cluster: %v", err)
+			return nil, false, err
+		}
 	}
 
 	var infraClient kubernetes.Interface
 
 	// create new client for the infra cluster
-	infraClient, err = kubernetes.NewForConfig(infraConfig)
+	infraClient, err = kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		klog.Errorf("Failed to create client for infra cluster: %v", err)
+		klog.Errorf("Failed to create infra cluster client: %v", err)
 		return nil, false, err
 	}
 
 	var infraDynamic dynamic.Interface
 
-	infraDynamic, err = dynamic.NewForConfig(infraConfig)
+	infraDynamic, err = dynamic.NewForConfig(restConfig)
 	if err != nil {
 		klog.Errorf("Failed to create dynamic client for infra cluster: %v", err)
 		return nil, false, err

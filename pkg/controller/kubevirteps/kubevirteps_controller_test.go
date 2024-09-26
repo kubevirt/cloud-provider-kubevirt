@@ -2,6 +2,7 @@ package kubevirteps
 
 import (
 	"context"
+
 	g "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -34,6 +35,14 @@ type testKubevirtEPSController struct {
 }
 
 func createInfraServiceLB(name, tenantServiceName, clusterName string, servicePort v1.ServicePort, externalTrafficPolicy v1.ServiceExternalTrafficPolicy) *v1.Service {
+	var selector map[string]string
+	if externalTrafficPolicy == v1.ServiceExternalTrafficPolicyCluster {
+		selector = map[string]string{
+			"cluster.x-k8s.io/role":         "worker",
+			"cluster.x-k8s.io/cluster-name": clusterName,
+		}
+	}
+
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -50,6 +59,7 @@ func createInfraServiceLB(name, tenantServiceName, clusterName string, servicePo
 			},
 			Type:                  v1.ServiceTypeLoadBalancer,
 			ExternalTrafficPolicy: externalTrafficPolicy,
+			Selector:              selector,
 			IPFamilies: []v1.IPFamily{
 				v1.IPv4Protocol,
 			},

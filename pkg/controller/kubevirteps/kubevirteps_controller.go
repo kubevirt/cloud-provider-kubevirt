@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -25,8 +28,6 @@ import (
 	"k8s.io/klog/v2"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	kubevirt "kubevirt.io/cloud-provider-kubevirt/pkg/provider"
-	"strings"
-	"time"
 )
 
 const (
@@ -312,7 +313,7 @@ func (c *Controller) getInfraEPSFromInfraService(ctx context.Context, svc *v1.Se
 
 func (c *Controller) reconcile(ctx context.Context, r *Request) error {
 	service, ok := r.Obj.(*v1.Service)
-	if !ok {
+	if !ok || service == nil {
 		return errors.New("could not cast object to service")
 	}
 
@@ -350,8 +351,8 @@ func (c *Controller) reconcile(ctx context.Context, r *Request) error {
 	// If the services switched to a different address type, we need to delete the old ones, because it's immutable.
 	// If the services switched to a different externalTrafficPolicy, we need to delete the old ones.
 	for _, eps := range infraExistingEpSlices {
-		if service.Spec.ExternalTrafficPolicy != v1.ServiceExternalTrafficPolicyTypeLocal || serviceDeleted {
-			klog.Infof("Added for deletion EndpointSlice %s in namespace %s because it has an externalTrafficPolicy different from Local", eps.Name, eps.Namespace)
+		if service.Spec.Selector != nil || serviceDeleted {
+			klog.Infof("Added for deletion EndpointSlice %s in namespace %s because it has a selector", eps.Name, eps.Namespace)
 			// to be sure we don't delete any slice that is not managed by us
 			if c.managedByController(eps) {
 				slicesToDelete = append(slicesToDelete, eps)
@@ -595,7 +596,7 @@ func (c *Controller) newSlice(service *v1.Service, desiredPorts []discovery.Endp
 
 func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*discovery.EndpointSlice) []*discovery.Endpoint {
 	var desiredEndpoints []*discovery.Endpoint
-	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
+	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal || service.Spec.Selector == nil {
 		// Extract the desired endpoints from the tenant EndpointSlices
 		// for extracting the nodes it does not matter what type of address we are dealing with
 		// all nodes with an endpoint for a corresponding slice will be selected.
