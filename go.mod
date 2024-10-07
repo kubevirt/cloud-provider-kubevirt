@@ -12,9 +12,7 @@ require (
 	k8s.io/client-go v0.28.14
 	k8s.io/cloud-provider v0.28.14
 	k8s.io/component-base v0.28.14
-	k8s.io/controller-manager v0.28.14
-	k8s.io/endpointslice v0.28.14
-	k8s.io/klog/v2 v2.120.1
+	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2
 	kubevirt.io/api v0.59.0
 	sigs.k8s.io/controller-runtime v0.14.5
@@ -113,6 +111,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.26.1 // indirect
 	k8s.io/apiserver v0.28.14 // indirect
 	k8s.io/component-helpers v0.28.14 // indirect
+	k8s.io/controller-manager v0.28.14 // indirect
 	k8s.io/kms v0.28.14 // indirect
 	k8s.io/kube-openapi v0.0.0-20230717233707-2695361300d9 // indirect
 	kubevirt.io/containerized-data-importer-api v1.55.0 // indirect
