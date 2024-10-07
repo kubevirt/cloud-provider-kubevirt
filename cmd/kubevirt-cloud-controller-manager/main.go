@@ -46,7 +46,7 @@ func main() {
 	fss := cliflag.NamedFlagSets{}
 	controllerInitializers := app.DefaultInitFuncConstructors
 
-	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, fss, wait.NeverStop)
+	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, map[string]string{}, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
 }
