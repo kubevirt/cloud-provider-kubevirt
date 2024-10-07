@@ -20,13 +20,11 @@ import (
 
 func StartKubevirtCloudControllerWrapper(initContext app.ControllerInitContext, completedConfig *config.CompletedConfig, cloud cloudprovider.Interface) app.InitFunc {
 	return func(ctx context.Context, controllerContext genericcontrollermanager.ControllerContext) (controller.Interface, bool, error) {
-		return startKubevirtCloudController(ctx, initContext, controllerContext, completedConfig, cloud)
+		return startKubevirtCloudController(controllerContext, completedConfig, cloud)
 	}
 }
 
 func startKubevirtCloudController(
-	ctx context.Context,
-	initContext app.ControllerInitContext,
 	controllerContext genericcontrollermanager.ControllerContext,
 	ccmConfig *config.CompletedConfig,
 	cloud cloudprovider.Interface) (controller.Interface, bool, error) {

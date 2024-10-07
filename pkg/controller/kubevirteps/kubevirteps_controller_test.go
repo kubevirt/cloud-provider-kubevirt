@@ -1,3 +1,4 @@
+//nolint:unparam
 package kubevirteps
 
 import (
@@ -172,7 +173,7 @@ func createAndAssertInfraServiceLB(name, tenantServiceName, clusterName string, 
 	}).Should(BeTrue(), "")
 }
 
-func setupTestKubevirtEPSController(ctx context.Context) *testKubevirtEPSController {
+func setupTestKubevirtEPSController() *testKubevirtEPSController {
 	var tenantClient *fake.Clientset
 	var infraClient *fake.Clientset
 
@@ -181,7 +182,7 @@ func setupTestKubevirtEPSController(ctx context.Context) *testKubevirtEPSControl
 
 	s := runtime.NewScheme()
 	infraDynamic := dfake.NewSimpleDynamicClientWithCustomListKinds(s, map[schema.GroupVersionResource]string{
-		schema.GroupVersionResource{
+		{
 			Group:    kubevirtv1.GroupVersion.Group,
 			Version:  kubevirtv1.GroupVersion.Version,
 			Resource: "virtualmachineinstances",
@@ -215,7 +216,7 @@ var _ = g.Describe("KubevirtEPSController start", g.Ordered, func() {
 		g.It("Should start the controller", func() {
 			ctx, stop := context.WithCancel(context.Background())
 			defer stop()
-			testVals := setupTestKubevirtEPSController(ctx)
+			testVals = setupTestKubevirtEPSController()
 			testVals.runKubevirtEPSController(ctx)
 		})
 	})
@@ -233,7 +234,7 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 		g.It("Should start the controller", func() {
 			ctx, stop = context.WithCancel(context.Background())
 			defer stop()
-			testVals := setupTestKubevirtEPSController(ctx)
+			testVals = setupTestKubevirtEPSController()
 			testVals.runKubevirtEPSController(ctx)
 
 			cache.WaitForCacheSync(ctx.Done(),
@@ -246,7 +247,7 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 		// Startup and wait for cache sync
 		g.BeforeEach(func() {
 			ctx, stop = context.WithCancel(context.Background())
-			testVals = setupTestKubevirtEPSController(ctx)
+			testVals = setupTestKubevirtEPSController()
 			testVals.runKubevirtEPSController(ctx)
 
 			cache.WaitForCacheSync(ctx.Done(),

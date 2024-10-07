@@ -35,6 +35,8 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugins
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
+
+	_ "kubevirt.io/cloud-provider-kubevirt/pkg/provider"
 )
 
 func main() {
@@ -51,7 +53,7 @@ func main() {
 		Constructor: StartKubevirtCloudControllerWrapper,
 	}
 
-	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, fss, wait.NeverStop)
+	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, map[string]string{}, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
 }

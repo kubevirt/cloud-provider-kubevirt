@@ -150,7 +150,8 @@ func (c *Controller) Init() error {
 			eps := obj.(*discovery.EndpointSlice)
 			if c.tenantEPSTracker.contains(eps) {
 				klog.Infof("get Infra Service for Tenant EndpointSlice: %v/%v", eps.Namespace, eps.Name)
-				infraSvc, err := c.getInfraServiceFromTenantEPS(context.TODO(), eps)
+				var infraSvc *v1.Service
+				infraSvc, err = c.getInfraServiceFromTenantEPS(context.TODO(), eps)
 				if err != nil {
 					klog.Errorf("Failed to get Service in Infra cluster for EndpointSlice %s/%s: %v", eps.Namespace, eps.Name, err)
 					return
@@ -163,7 +164,8 @@ func (c *Controller) Init() error {
 			eps := newObj.(*discovery.EndpointSlice)
 			if c.tenantEPSTracker.contains(eps) {
 				klog.Infof("get Infra Service for Tenant EndpointSlice: %v/%v", eps.Namespace, eps.Name)
-				infraSvc, err := c.getInfraServiceFromTenantEPS(context.TODO(), eps)
+				var infraSvc *v1.Service
+				infraSvc, err = c.getInfraServiceFromTenantEPS(context.TODO(), eps)
 				if err != nil {
 					klog.Errorf("Failed to get Service in Infra cluster for EndpointSlice %s/%s: %v", eps.Namespace, eps.Name, err)
 					return
@@ -177,7 +179,8 @@ func (c *Controller) Init() error {
 			if c.tenantEPSTracker.contains(eps) {
 				c.tenantEPSTracker.remove(eps)
 				klog.Infof("get Infra Service for Tenant EndpointSlice: %v/%v", eps.Namespace, eps.Name)
-				infraSvc, err := c.getInfraServiceFromTenantEPS(context.TODO(), eps)
+				var infraSvc *v1.Service
+				infraSvc, err = c.getInfraServiceFromTenantEPS(context.TODO(), eps)
 				if err != nil {
 					klog.Errorf("Failed to get Service in Infra cluster for EndpointSlice %s/%s: %v", eps.Namespace, eps.Name, err)
 					return

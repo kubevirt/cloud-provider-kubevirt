@@ -1,13 +1,14 @@
 package kubevirteps
 
 import (
+	"sync"
+
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-	"sync"
 )
 
 // source: https://github.com/kubernetes/endpointslice/blob/master/utils.go#L280
