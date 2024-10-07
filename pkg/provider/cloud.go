@@ -35,7 +35,7 @@ func init() {
 	}
 }
 
-type cloud struct {
+type Cloud struct {
 	namespace string
 	client    client.Client
 	config    CloudConfig
@@ -62,6 +62,11 @@ type LoadBalancerConfig struct {
 	// Selectorless delegate endpointslices creation on third party by
 	// skipping service selector creation
 	Selectorless *bool `yaml:"selectorless,omitempty"`
+
+	// EnableEPSController determines if the EPS controller is enabled
+	// This is a temporary flag to enable/disable the EPS controller
+	// When disabled the service selector is used.
+	EnableEPSController *bool `yaml:"enableEPSController,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -119,7 +124,7 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 		}
 	} else {
 		var infraKubeConfig string
-		infraKubeConfig, err = getInfraKubeConfig(cloudConf.Kubeconfig)
+		infraKubeConfig, err = GetInfraKubeConfig(cloudConf.Kubeconfig)
 		if err != nil {
 			return nil, err
 		}
@@ -146,20 +151,20 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 	if err != nil {
 		return nil, err
 	}
-	return &cloud{
+	return &Cloud{
 		namespace: namespace,
 		client:    c,
 		config:    cloudConf,
 	}, nil
 }
 
-// Initialize provides the cloud with a kubernetes client builder and may spawn goroutines
-// to perform housekeeping activities within the cloud provider.
-func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
+// Initialize provides the Cloud with a kubernetes client builder and may spawn goroutines
+// to perform housekeeping activities within the Cloud provider.
+func (c *Cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
 }
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
-func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
+func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	if !c.config.LoadBalancer.Enabled {
 		return nil, false
 	}
@@ -172,11 +177,11 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 }
 
 // Instances returns an instances interface. Also returns true if the interface is supported, false otherwise.
-func (c *cloud) Instances() (cloudprovider.Instances, bool) {
+func (c *Cloud) Instances() (cloudprovider.Instances, bool) {
 	return nil, false
 }
 
-func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
+func (c *Cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 	if !c.config.InstancesV2.Enabled {
 		return nil, false
 	}
@@ -189,31 +194,43 @@ func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 // DEPRECATED: Zones is deprecated in favor of retrieving zone/region information from InstancesV2.
-func (c *cloud) Zones() (cloudprovider.Zones, bool) {
+func (c *Cloud) Zones() (cloudprovider.Zones, bool) {
 	return nil, false
 }
 
 // Clusters returns a clusters interface.  Also returns true if the interface is supported, false otherwise.
-func (c *cloud) Clusters() (cloudprovider.Clusters, bool) {
+func (c *Cloud) Clusters() (cloudprovider.Clusters, bool) {
 	return nil, false
 }
 
 // Routes returns a routes interface along with whether the interface is supported.
-func (c *cloud) Routes() (cloudprovider.Routes, bool) {
+func (c *Cloud) Routes() (cloudprovider.Routes, bool) {
 	return nil, false
 }
 
-// ProviderName returns the cloud provider ID.
-func (c *cloud) ProviderName() string {
+// ProviderName returns the Cloud provider ID.
+func (c *Cloud) ProviderName() string {
 	return ProviderName
 }
 
 // HasClusterID returns true if a ClusterID is required and set
-func (c *cloud) HasClusterID() bool {
+func (c *Cloud) HasClusterID() bool {
 	return true
 }
 
-func getInfraKubeConfig(infraKubeConfigPath string) (string, error) {
+func (c *Cloud) GetInfraKubeconfig() (string, error) {
+	return GetInfraKubeConfig(c.config.Kubeconfig)
+}
+
+func (c *Cloud) Namespace() string {
+	return c.namespace
+}
+
+func (c *Cloud) GetCloudConfig() CloudConfig {
+	return c.config
+}
+
+func GetInfraKubeConfig(infraKubeConfigPath string) (string, error) {
 	config, err := os.Open(infraKubeConfigPath)
 	if err != nil {
 		return "", fmt.Errorf("Couldn't open infra-kubeconfig: %v", err)

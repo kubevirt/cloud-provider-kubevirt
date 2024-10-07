@@ -23,6 +23,8 @@ package main
 import (
 	"os"
 
+	"kubevirt.io/cloud-provider-kubevirt/pkg/controller/kubevirteps"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/cloud-provider/app"
@@ -33,8 +35,6 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugins
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
-
-	_ "kubevirt.io/cloud-provider-kubevirt/pkg/provider"
 )
 
 func main() {
@@ -45,8 +45,14 @@ func main() {
 
 	fss := cliflag.NamedFlagSets{}
 	controllerInitializers := app.DefaultInitFuncConstructors
+	controllerAliases := map[string]string{"kubevirt-eps": kubevirteps.ControllerName.String()}
 
-	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, map[string]string{}, fss, wait.NeverStop)
+	// add kubevirt-cloud-controller to the list of controllers
+	controllerInitializers[kubevirteps.ControllerName.String()] = app.ControllerInitFuncConstructor{
+		Constructor: StartKubevirtCloudControllerWrapper,
+	}
+
+	command := app.NewCloudControllerManagerCommand(ccmOptions, cloudInitializer, controllerInitializers, controllerAliases, fss, wait.NeverStop)
 	code := cli.Run(command)
 	os.Exit(code)
 }
