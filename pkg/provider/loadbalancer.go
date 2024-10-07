@@ -21,6 +21,11 @@ const (
 
 	// Default timeout between polling the service after creation
 	defaultLoadBalancerCreatePollTimeout = 5 * time.Minute
+
+	TenantServiceNameLabelKey      = "cluster.x-k8s.io/tenant-service-name"
+	TenantServiceNamespaceLabelKey = "cluster.x-k8s.io/tenant-service-namespace"
+	TenantClusterNameLabelKey      = "cluster.x-k8s.io/cluster-name"
+	TenantNodeRoleLabelKey         = "cluster.x-k8s.io/role"
 )
 
 type loadbalancer struct {
@@ -75,14 +80,14 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	vmiLabels := map[string]string{
-		"cluster.x-k8s.io/role":         "worker",
-		"cluster.x-k8s.io/cluster-name": clusterName,
+		TenantNodeRoleLabelKey:    "worker",
+		TenantClusterNameLabelKey: clusterName,
 	}
 
 	lbLabels := map[string]string{
-		"cluster.x-k8s.io/tenant-service-name":      service.Name,
-		"cluster.x-k8s.io/tenant-service-namespace": service.Namespace,
-		"cluster.x-k8s.io/cluster-name":             clusterName,
+		TenantServiceNameLabelKey:      service.Name,
+		TenantServiceNamespaceLabelKey: service.Namespace,
+		TenantClusterNameLabelKey:      clusterName,
 	}
 
 	for key, val := range lb.infraLabels {
@@ -202,7 +207,12 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 			ExternalTrafficPolicy: service.Spec.ExternalTrafficPolicy,
 		},
 	}
-	if lb.config.Selectorless == nil || !*lb.config.Selectorless {
+	// Give controller privilege above selectorless
+	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		lbService.Spec.Selector = nil
+	} else if lb.config.Selectorless != nil && *lb.config.Selectorless {
+		lbService.Spec.Selector = nil
+	} else {
 		lbService.Spec.Selector = vmiLabels
 	}
 	if len(service.Spec.ExternalIPs) > 0 {
