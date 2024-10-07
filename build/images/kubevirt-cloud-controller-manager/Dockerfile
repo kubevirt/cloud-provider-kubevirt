@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 golang:1.20.6 AS builder
+FROM --platform=linux/amd64 docker.io/library/golang:1.20.6 AS builder
 
 WORKDIR /go/src/kubevirt.io/cloud-provider-kubevirt
 
