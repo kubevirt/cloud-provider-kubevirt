@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	dfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/testing"
@@ -686,5 +687,87 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 				return false, err
 			}).Should(BeTrue(), "EndpointSlice in infra cluster should be recreated by the controller after deletion")
 		})
+
+		g.It("Should correctly handle multiple unique ports in EndpointSlice", func() {
+			// Create a VMI in the infra cluster
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+
+			// Create an EndpointSlice in the tenant cluster
+			createAndAssertTenantSlice("test-epslice", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
+
+			// Define several unique ports for the Service
+			servicePorts := []v1.ServicePort{
+				{
+					Name:        "client",
+					Protocol:    v1.ProtocolTCP,
+					Port:        10001,
+					TargetPort:  intstr.FromInt(30396),
+					NodePort:    30396,
+					AppProtocol: nil,
+				},
+				{
+					Name:        "dashboard",
+					Protocol:    v1.ProtocolTCP,
+					Port:        8265,
+					TargetPort:  intstr.FromInt(31003),
+					NodePort:    31003,
+					AppProtocol: nil,
+				},
+				{
+					Name:        "metrics",
+					Protocol:    v1.ProtocolTCP,
+					Port:        8080,
+					TargetPort:  intstr.FromInt(30452),
+					NodePort:    30452,
+					AppProtocol: nil,
+				},
+			}
+
+			// Create a Service with the first port
+			createAndAssertInfraServiceLB("infra-multiport-service", "tenant-service-name", "test-cluster",
+				servicePorts[0],
+				v1.ServiceExternalTrafficPolicyLocal)
+
+			// Update the Service by adding the remaining ports
+			svc, err := testVals.infraClient.CoreV1().Services(infraNamespace).Get(context.TODO(), "infra-multiport-service", metav1.GetOptions{})
+			Expect(err).To(BeNil())
+
+			svc.Spec.Ports = servicePorts
+
+			_, err = testVals.infraClient.CoreV1().Services(infraNamespace).Update(context.TODO(), svc, metav1.UpdateOptions{})
+			Expect(err).To(BeNil())
+
+			var epsListMultiPort *discoveryv1.EndpointSliceList
+
+			// Verify that the EndpointSlice is created with correct unique ports
+			Eventually(func() (bool, error) {
+				epsListMultiPort, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if len(epsListMultiPort.Items) != 1 {
+					return false, err
+				}
+
+				createdSlice := epsListMultiPort.Items[0]
+				expectedPortNames := []string{"client", "dashboard", "metrics"}
+				foundPortNames := []string{}
+
+				for _, port := range createdSlice.Ports {
+					if port.Name != nil {
+						foundPortNames = append(foundPortNames, *port.Name)
+					}
+				}
+
+				// Verify that all expected ports are present and without duplicates
+				if len(foundPortNames) != len(expectedPortNames) {
+					return false, err
+				}
+
+				portSet := sets.NewString(foundPortNames...)
+				expectedPortSet := sets.NewString(expectedPortNames...)
+				return portSet.Equal(expectedPortSet), err
+			}).Should(BeTrue(), "EndpointSlice should contain all unique ports from the Service without duplicates")
+		})
+
 	})
 })
