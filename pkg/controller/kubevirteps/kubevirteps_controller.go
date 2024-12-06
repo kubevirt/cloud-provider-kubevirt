@@ -413,10 +413,14 @@ func (c *Controller) reconcileByAddressType(service *v1.Service, tenantSlices []
 	var desiredPorts []discovery.EndpointPort
 
 	for _, port := range service.Spec.Ports {
+		pName := port.Name
+		pProtocol := port.Protocol
+		pVal := port.TargetPort.IntVal
+
 		desiredPorts = append(desiredPorts, discovery.EndpointPort{
-			Port:     &port.TargetPort.IntVal,
-			Protocol: &port.Protocol,
-			Name:     &port.Name,
+			Port:     &pVal,
+			Protocol: &pProtocol,
+			Name:     &pName,
 		})
 	}
 
