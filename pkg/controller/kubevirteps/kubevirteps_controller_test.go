@@ -642,5 +642,49 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 			}).Should(BeTrue(), "Expect call to the infraDynamic.Get to return the VMI")
 
 		})
+
+		g.It("Should reconcile after infra EndpointSlice deletion and restore it", func() {
+			// Create a VMI in the infra cluster
+			// This ensures that when tenant EndpointSlice is created, it can be reconciled properly
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+
+			// Create an EndpointSlice in the tenant cluster representing the desired state
+			createAndAssertTenantSlice("test-epslice-infra", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
+
+			// Create a Service in the infra cluster that should trigger the creation of an EndpointSlice in the infra cluster
+			createAndAssertInfraServiceLB("infra-service-restore", "tenant-service-name", "test-cluster",
+				v1.ServicePort{Name: "web", Port: 80, NodePort: 31900, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{IntVal: 30390}},
+				v1.ServiceExternalTrafficPolicyLocal)
+
+			var epsList *discoveryv1.EndpointSliceList
+			var err error
+
+			// Wait until the infra EndpointSlice is created by the controller
+			Eventually(func() (bool, error) {
+				epsList, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if len(epsList.Items) == 1 {
+					return true, err
+				} else {
+					return false, err
+				}
+			}).Should(BeTrue(), "Infra EndpointSlice should be created by the controller")
+
+			// Now, simulate an external deletion of the EndpointSlice in the infra cluster
+			err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).Delete(context.TODO(), epsList.Items[0].Name, metav1.DeleteOptions{})
+			Expect(err).To(BeNil(), "Deleting infra EndpointSlice should succeed")
+
+			// The controller, now watching infra EndpointSlices, should detect the removal
+			// and trigger a reconcile to restore it.
+			Eventually(func() (bool, error) {
+				epsList, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				// After some time, we expect exactly one EndpointSlice to be recreated.
+				if err == nil && len(epsList.Items) == 1 {
+					return true, nil
+				}
+				return false, err
+			}).Should(BeTrue(), "EndpointSlice in infra cluster should be recreated by the controller after deletion")
+		})
 	})
 })
