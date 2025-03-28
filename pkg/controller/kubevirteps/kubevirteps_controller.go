@@ -382,74 +382,115 @@ func (c *Controller) reconcile(ctx context.Context, r *Request) error {
 		return errors.New("could not cast object to service")
 	}
 
+	/*
+	   Skip if the given Service is not labeled with the keys that indicate
+	   it was created/managed by this controller (i.e., not a LoadBalancer
+	   that we handle).
+	*/
 	if service.Labels[kubevirt.TenantServiceNameLabelKey] == "" ||
 		service.Labels[kubevirt.TenantServiceNamespaceLabelKey] == "" ||
 		service.Labels[kubevirt.TenantClusterNameLabelKey] == "" {
 		klog.Infof("This LoadBalancer Service: %s is not managed by the %s. Skipping.", service.Name, ControllerName)
 		return nil
 	}
+
 	klog.Infof("Reconciling: %v", service.Name)
 
+	/*
+	   1) Check if Service in the infra cluster is actually present.
+	      If it's not found, mark it as 'deleted' so that we don't create new slices.
+	*/
 	serviceDeleted := false
-	svc, err := c.infraFactory.Core().V1().Services().Lister().Services(c.infraNamespace).Get(service.Name)
+	infraSvc, err := c.infraFactory.Core().V1().Services().Lister().Services(c.infraNamespace).Get(service.Name)
 	if err != nil {
-		klog.Infof("Service %s in namespace %s is deleted.", service.Name, service.Namespace)
+		// The Service is not present in the infra lister => treat as deleted
+		klog.Infof("Service %s in namespace %s is deleted (or not found).", service.Name, service.Namespace)
 		serviceDeleted = true
 	} else {
-		service = svc
+		// Use the actual object from the lister, so we have the latest state
+		service = infraSvc
 	}
 
+	/*
+	   2) Get all existing EndpointSlices in the infra cluster that belong to this LB Service.
+	      We'll decide which of them should be updated or deleted.
+	*/
 	infraExistingEpSlices, err := c.getInfraEPSFromInfraService(ctx, service)
 	if err != nil {
 		return err
 	}
 
-	// At this point we have the current state of the 3 main objects we are interested in:
-	// 1. The Service in the infra cluster, the one created by the KubevirtCloudController.
-	// 2. The EndpointSlices in the tenant cluster, created for the tenant cluster's Service.
-	// 3. The EndpointSlices in the infra cluster, managed by this controller.
-
 	slicesToDelete := []*discovery.EndpointSlice{}
 	slicesByAddressType := make(map[discovery.AddressType][]*discovery.EndpointSlice)
 
+	// For example, if the service is single-stack IPv4 => only AddressTypeIPv4
+	// or if dual-stack => IPv4 and IPv6, etc.
 	serviceSupportedAddressesTypes := getAddressTypesForService(service)
-	// If the services switched to a different address type, we need to delete the old ones, because it's immutable.
-	// If the services switched to a different externalTrafficPolicy, we need to delete the old ones.
+
+	/*
+	   3) Determine which slices to delete, and which to pass on to the normal
+	      "reconcileByAddressType" logic.
+
+	      - If 'serviceDeleted' is true OR service.Spec.Selector != nil, we remove them.
+	      - Also, if the slice's address type is unsupported by the Service, we remove it.
+	*/
 	for _, eps := range infraExistingEpSlices {
-		if service.Spec.Selector != nil || serviceDeleted {
-			klog.Infof("Added for deletion EndpointSlice %s in namespace %s because it has a selector", eps.Name, eps.Namespace)
-			// to be sure we don't delete any slice that is not managed by us
+		// If service is deleted or has a non-nil selector => remove slices
+		if serviceDeleted || service.Spec.Selector != nil {
+			/*
+			   Only remove if it is clearly labeled as managed by us:
+			   we do not want to accidentally remove slices that are not
+			   created by this controller.
+			*/
 			if c.managedByController(eps) {
+				klog.Infof("Added for deletion EndpointSlice %s in namespace %s because service is deleted or has a selector",
+					eps.Name, eps.Namespace)
 				slicesToDelete = append(slicesToDelete, eps)
 			}
 			continue
 		}
+
+		// If the Service does not support this slice's AddressType => remove
 		if !serviceSupportedAddressesTypes.Has(eps.AddressType) {
-			klog.Infof("Added for deletion EndpointSlice %s in namespace %s because it has an unsupported address type: %v", eps.Name, eps.Namespace, eps.AddressType)
+			klog.Infof("Added for deletion EndpointSlice %s in namespace %s because it has an unsupported address type: %v",
+				eps.Name, eps.Namespace, eps.AddressType)
 			slicesToDelete = append(slicesToDelete, eps)
 			continue
 		}
+
+		/*
+		   Otherwise, this slice is potentially still valid for the given AddressType,
+		   we'll send it to reconcileByAddressType for final merging and updates.
+		*/
 		slicesByAddressType[eps.AddressType] = append(slicesByAddressType[eps.AddressType], eps)
 	}
 
-	if !serviceDeleted {
-		// Get tenant's endpoint slices for this service
+	/*
+	   4) If the Service was NOT deleted and has NO selector (i.e., it's a "no-selector" LB Service),
+	      we proceed to handle creation and updates. That means:
+	      - Gather Tenant's EndpointSlices
+	      - Reconcile them by each AddressType
+	*/
+	if !serviceDeleted && service.Spec.Selector == nil {
 		tenantEpSlices, err := c.getTenantEPSFromInfraService(ctx, service)
 		if err != nil {
 			return err
 		}
 
-		// Reconcile the EndpointSlices for each address type e.g. ipv4, ipv6
+		// For each addressType (ipv4, ipv6, etc.) reconcile the infra slices
 		for addressType := range serviceSupportedAddressesTypes {
 			existingSlices := slicesByAddressType[addressType]
-			err := c.reconcileByAddressType(service, tenantEpSlices, existingSlices, addressType)
-			if err != nil {
+			if err := c.reconcileByAddressType(service, tenantEpSlices, existingSlices, addressType); err != nil {
 				return err
 			}
 		}
 	}
 
-	// Delete the EndpointSlices that are no longer needed
+	/*
+	   5) Perform the actual deletion of all slices we flagged.
+	      In many cases (serviceDeleted or .Spec.Selector != nil),
+	      we end up with only "delete" actions and no new slice creation.
+	*/
 	for _, eps := range slicesToDelete {
 		err := c.infraClient.DiscoveryV1().EndpointSlices(eps.Namespace).Delete(context.TODO(), eps.Name, metav1.DeleteOptions{})
 		if err != nil {
@@ -588,55 +629,114 @@ func ownedBy(endpointSlice *discovery.EndpointSlice, svc *v1.Service) bool {
 	return false
 }
 
-func (c *Controller) finalize(service *v1.Service, slicesToCreate []*discovery.EndpointSlice, slicesToUpdate []*discovery.EndpointSlice, slicesToDelete []*discovery.EndpointSlice) error {
-	// If there are slices to delete and slices to create, make them as update
-	for i := 0; i < len(slicesToDelete); {
+func (c *Controller) finalize(
+	service *v1.Service,
+	slicesToCreate []*discovery.EndpointSlice,
+	slicesToUpdate []*discovery.EndpointSlice,
+	slicesToDelete []*discovery.EndpointSlice,
+) error {
+	/*
+	   We try to turn a "delete + create" pair into a single "update" operation
+	   if the original slice (slicesToDelete[i]) has the same address type as
+	   the first slice in slicesToCreate, and is owned by the same Service.
+
+	   However, we must re-check the lengths of slicesToDelete and slicesToCreate
+	   within the loop to avoid an out-of-bounds index in slicesToCreate.
+	*/
+
+	i := 0
+	for i < len(slicesToDelete) {
+		// If there is nothing to create, break early
 		if len(slicesToCreate) == 0 {
 			break
 		}
-		if slicesToDelete[i].AddressType == slicesToCreate[0].AddressType && ownedBy(slicesToDelete[i], service) {
-			slicesToCreate[0].Name = slicesToDelete[i].Name
+
+		sd := slicesToDelete[i]
+		sc := slicesToCreate[0] // We can safely do this now, because len(slicesToCreate) > 0
+
+		// If the address type matches, and the slice is owned by the same Service,
+		// then instead of deleting sd and creating sc, we'll transform it into an update:
+		// we rename sc with sd's name, remove sd from the delete list, remove sc from the create list,
+		// and add sc to the update list.
+		if sd.AddressType == sc.AddressType && ownedBy(sd, service) {
+			sliceToUpdate := sc
+			sliceToUpdate.Name = sd.Name
+
+			// Remove the first element from slicesToCreate
 			slicesToCreate = slicesToCreate[1:]
-			slicesToUpdate = append(slicesToUpdate, slicesToCreate[0])
+
+			// Remove the slice from slicesToDelete
 			slicesToDelete = append(slicesToDelete[:i], slicesToDelete[i+1:]...)
+
+			// Now add the renamed slice to the list of slices we want to update
+			slicesToUpdate = append(slicesToUpdate, sliceToUpdate)
+
+			/*
+			   Do not increment i here, because we've just removed an element from
+			   slicesToDelete. The next slice to examine is now at the same index i.
+			*/
 		} else {
+			// If they don't match, move on to the next slice in slicesToDelete.
 			i++
 		}
 	}
 
-	// Create the new slices if service is not marked for deletion
+	/*
+	   If the Service is not being deleted, create all remaining slices in slicesToCreate.
+	   (If the Service has a DeletionTimestamp, it means it is going away, so we do not
+	   want to create new EndpointSlices.)
+	*/
 	if service.DeletionTimestamp == nil {
 		for _, slice := range slicesToCreate {
-			createdSlice, err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Create(context.TODO(), slice, metav1.CreateOptions{})
+			createdSlice, err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Create(
+				context.TODO(),
+				slice,
+				metav1.CreateOptions{},
+			)
 			if err != nil {
-				klog.Errorf("Failed to create EndpointSlice %s in namespace %s: %v", slice.Name, slice.Namespace, err)
+				klog.Errorf("Failed to create EndpointSlice %s in namespace %s: %v",
+					slice.Name, slice.Namespace, err)
+				// If the namespace is terminating, it's safe to ignore the error.
 				if k8serrors.HasStatusCause(err, v1.NamespaceTerminatingCause) {
-					return nil
+					continue
 				}
 				return err
 			}
-			klog.Infof("Created EndpointSlice %s in namespace %s", createdSlice.Name, createdSlice.Namespace)
+			klog.Infof("Created EndpointSlice %s in namespace %s",
+				createdSlice.Name, createdSlice.Namespace)
 		}
 	}
 
-	// Update slices
+	// Update slices that are in the slicesToUpdate list.
 	for _, slice := range slicesToUpdate {
-		_, err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Update(context.TODO(), slice, metav1.UpdateOptions{})
+		_, err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Update(
+			context.TODO(),
+			slice,
+			metav1.UpdateOptions{},
+		)
 		if err != nil {
-			klog.Errorf("Failed to update EndpointSlice %s in namespace %s: %v", slice.Name, slice.Namespace, err)
+			klog.Errorf("Failed to update EndpointSlice %s in namespace %s: %v",
+				slice.Name, slice.Namespace, err)
 			return err
 		}
-		klog.Infof("Updated EndpointSlice %s in namespace %s", slice.Name, slice.Namespace)
+		klog.Infof("Updated EndpointSlice %s in namespace %s",
+			slice.Name, slice.Namespace)
 	}
 
-	// Delete slices
+	// Finally, delete slices that are in slicesToDelete and are no longer needed.
 	for _, slice := range slicesToDelete {
-		err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Delete(context.TODO(), slice.Name, metav1.DeleteOptions{})
+		err := c.infraClient.DiscoveryV1().EndpointSlices(slice.Namespace).Delete(
+			context.TODO(),
+			slice.Name,
+			metav1.DeleteOptions{},
+		)
 		if err != nil {
-			klog.Errorf("Failed to delete EndpointSlice %s in namespace %s: %v", slice.Name, slice.Namespace, err)
+			klog.Errorf("Failed to delete EndpointSlice %s in namespace %s: %v",
+				slice.Name, slice.Namespace, err)
 			return err
 		}
-		klog.Infof("Deleted EndpointSlice %s in namespace %s", slice.Name, slice.Namespace)
+		klog.Infof("Deleted EndpointSlice %s in namespace %s",
+			slice.Name, slice.Namespace)
 	}
 
 	return nil
