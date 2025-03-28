@@ -54,10 +54,10 @@ type Controller struct {
 	infraDynamic dynamic.Interface
 	infraFactory informers.SharedInformerFactory
 
-	infraNamespace string
-	queue          workqueue.RateLimitingInterface
-	maxRetries     int
-
+	infraNamespace       string
+	clusterName          string
+	queue                workqueue.RateLimitingInterface
+	maxRetries           int
 	maxEndPointsPerSlice int
 }
 
@@ -65,8 +65,9 @@ func NewKubevirtEPSController(
 	tenantClient kubernetes.Interface,
 	infraClient kubernetes.Interface,
 	infraDynamic dynamic.Interface,
-	infraNamespace string) *Controller {
-
+	infraNamespace string,
+	clusterName string,
+) *Controller {
 	tenantFactory := informers.NewSharedInformerFactory(tenantClient, 0)
 	infraFactory := informers.NewSharedInformerFactoryWithOptions(infraClient, 0, informers.WithNamespace(infraNamespace))
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
@@ -79,6 +80,7 @@ func NewKubevirtEPSController(
 		infraDynamic:         infraDynamic,
 		infraFactory:         infraFactory,
 		infraNamespace:       infraNamespace,
+		clusterName:          clusterName,
 		queue:                queue,
 		maxRetries:           25,
 		maxEndPointsPerSlice: 100,
@@ -320,22 +322,30 @@ func (c *Controller) processNextItem(ctx context.Context) bool {
 
 // getInfraServiceFromTenantEPS returns the Service in the infra cluster that is associated with the given tenant endpoint slice.
 func (c *Controller) getInfraServiceFromTenantEPS(ctx context.Context, slice *discovery.EndpointSlice) (*v1.Service, error) {
-	infraServices, err := c.infraClient.CoreV1().Services(c.infraNamespace).List(ctx,
-		metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s,%s=%s", kubevirt.TenantServiceNameLabelKey, slice.Labels["kubernetes.io/service-name"],
-			kubevirt.TenantServiceNamespaceLabelKey, slice.Namespace)})
+	tenantServiceName := slice.Labels[discovery.LabelServiceName]
+	tenantServiceNamespace := slice.Namespace
+
+	labelSelector := fmt.Sprintf(
+		"%s=%s,%s=%s,%s=%s",
+		kubevirt.TenantServiceNameLabelKey, tenantServiceName,
+		kubevirt.TenantServiceNamespaceLabelKey, tenantServiceNamespace,
+		kubevirt.TenantClusterNameLabelKey, c.clusterName,
+	)
+
+	svcList, err := c.infraClient.CoreV1().Services(c.infraNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
 	if err != nil {
-		klog.Errorf("Failed to get Service in Infra for EndpointSlice %s in namespace %s: %v", slice.Name, slice.Namespace, err)
+		klog.Errorf("Failed to get Service in Infra for EndpointSlice %s in namespace %s: %v", slice.Name, tenantServiceNamespace, err)
 		return nil, err
 	}
-	if len(infraServices.Items) > 1 {
-		// This should never be possible, only one service should exist for a given tenant endpoint slice
-		klog.Errorf("Multiple services found for tenant endpoint slice %s in namespace %s", slice.Name, slice.Namespace)
+	if len(svcList.Items) > 1 {
+		klog.Errorf("Multiple services found for tenant endpoint slice %s in namespace %s", slice.Name, tenantServiceNamespace)
 		return nil, errors.New("multiple services found for tenant endpoint slice")
 	}
-	if len(infraServices.Items) == 1 {
-		return &infraServices.Items[0], nil
+	if len(svcList.Items) == 1 {
+		return &svcList.Items[0], nil
 	}
-	// No service found, possible if service is deleted.
 	return nil, nil
 }
 
@@ -363,16 +373,27 @@ func (c *Controller) getTenantEPSFromInfraService(ctx context.Context, svc *v1.S
 // getInfraEPSFromInfraService returns the EndpointSlices in the infra cluster that are associated with the given infra service.
 func (c *Controller) getInfraEPSFromInfraService(ctx context.Context, svc *v1.Service) ([]*discovery.EndpointSlice, error) {
 	var infraEPSSlices []*discovery.EndpointSlice
-	klog.Infof("Searching for endpoints on infra cluster for service %s in namespace %s.", svc.Name, svc.Namespace)
-	result, err := c.infraClient.DiscoveryV1().EndpointSlices(svc.Namespace).List(ctx,
-		metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", discovery.LabelServiceName, svc.Name)})
+
+	klog.Infof("Searching for EndpointSlices in infra cluster for service %s/%s", svc.Namespace, svc.Name)
+
+	labelSelector := fmt.Sprintf(
+		"%s=%s,%s=%s",
+		discovery.LabelServiceName, svc.Name,
+		kubevirt.TenantClusterNameLabelKey, c.clusterName,
+	)
+
+	result, err := c.infraClient.DiscoveryV1().EndpointSlices(svc.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
 	if err != nil {
 		klog.Errorf("Failed to get EndpointSlices for Service %s in namespace %s: %v", svc.Name, svc.Namespace, err)
 		return nil, err
 	}
+
 	for _, eps := range result.Items {
 		infraEPSSlices = append(infraEPSSlices, &eps)
 	}
+
 	return infraEPSSlices, nil
 }
 
@@ -382,15 +403,17 @@ func (c *Controller) reconcile(ctx context.Context, r *Request) error {
 		return errors.New("could not cast object to service")
 	}
 
-	/*
-	   Skip if the given Service is not labeled with the keys that indicate
-	   it was created/managed by this controller (i.e., not a LoadBalancer
-	   that we handle).
-	*/
+	// Skip services not managed by this controller (missing required labels)
 	if service.Labels[kubevirt.TenantServiceNameLabelKey] == "" ||
 		service.Labels[kubevirt.TenantServiceNamespaceLabelKey] == "" ||
 		service.Labels[kubevirt.TenantClusterNameLabelKey] == "" {
-		klog.Infof("This LoadBalancer Service: %s is not managed by the %s. Skipping.", service.Name, ControllerName)
+		klog.Infof("Service %s is not managed by this controller. Skipping.", service.Name)
+		return nil
+	}
+
+	// Skip services for other clusters
+	if service.Labels[kubevirt.TenantClusterNameLabelKey] != c.clusterName {
+		klog.Infof("Skipping Service %s: cluster label %q doesn't match our clusterName %q", service.Name, service.Labels[kubevirt.TenantClusterNameLabelKey], c.clusterName)
 		return nil
 	}
 
