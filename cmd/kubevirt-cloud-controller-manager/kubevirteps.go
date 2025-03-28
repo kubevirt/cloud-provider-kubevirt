@@ -101,7 +101,18 @@ func startKubevirtCloudController(
 
 	klog.Infof("Setting up kubevirtEPSController")
 
-	kubevirtEPSController := kubevirteps.NewKubevirtEPSController(tenantClient, infraClient, infraDynamic, kubevirtCloud.Namespace())
+	clusterName := ccmConfig.ComponentConfig.KubeCloudShared.ClusterName
+	if clusterName == "" {
+		klog.Fatalf("Required flag --cluster-name is missing")
+	}
+
+	kubevirtEPSController := kubevirteps.NewKubevirtEPSController(
+		tenantClient,
+		infraClient,
+		infraDynamic,
+		kubevirtCloud.Namespace(),
+		clusterName,
+	)
 
 	klog.Infof("Initializing kubevirtEPSController")
 

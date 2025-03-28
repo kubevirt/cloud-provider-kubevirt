@@ -190,7 +190,7 @@ func setupTestKubevirtEPSController() *testKubevirtEPSController {
 		}: "VirtualMachineInstanceList",
 	})
 
-	controller := NewKubevirtEPSController(tenantClient, infraClient, infraDynamic, "test")
+	controller := NewKubevirtEPSController(tenantClient, infraClient, infraDynamic, "test", "test-cluster")
 
 	err := controller.Init()
 	if err != nil {
@@ -891,5 +891,25 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 				return len(epsList.Items) == 0, nil
 			}).Should(BeTrue(), "All EndpointSlices should be removed after Service acquires a selector (no new slices created)")
 		})
+
+		g.It("Should ignore Services from a different cluster", func() {
+			// Create a Service with cluster label "other-cluster"
+			svc := createInfraServiceLB("infra-service-conflict", "tenant-service-name", "other-cluster",
+				v1.ServicePort{Name: "web", Port: 80, NodePort: 31900, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{IntVal: 30390}},
+				v1.ServiceExternalTrafficPolicyLocal)
+			_, err := testVals.infraClient.CoreV1().Services(infraNamespace).Create(context.TODO(), svc, metav1.CreateOptions{})
+			Expect(err).To(BeNil())
+
+			// The controller should ignore this Service, so no EndpointSlice should be created.
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				// Expect zero slices since cluster label does not match "test-cluster"
+				return len(epsList.Items) == 0, nil
+			}).Should(BeTrue(), "Services with a different cluster label should be ignored")
+		})
+
 	})
 })
