@@ -122,3 +122,9 @@ linters:
   # - testpackage
   # - revive
   # - wsl
+issues:
+  exclude-rules:
+    - filename: "kubevirteps_controller_test.go"
+      linters:
+        - govet
+      text: "declaration of \"err\" shadows"
