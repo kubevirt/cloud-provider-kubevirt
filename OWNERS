@@ -11,6 +11,8 @@ approvers:
   - nirarg
   - rmohr
   - davidvossel
-  - mfranczy
   - rhrazdil
   - qinqon
+emeritus_approvers:
+  - mfranczy
+
