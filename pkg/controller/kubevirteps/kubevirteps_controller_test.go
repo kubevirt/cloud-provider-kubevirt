@@ -190,7 +190,7 @@ func setupTestKubevirtEPSController() *testKubevirtEPSController {
 		}: "VirtualMachineInstanceList",
 	})
 
-	controller := NewKubevirtEPSController(tenantClient, infraClient, infraDynamic, "test")
+	controller := NewKubevirtEPSController(tenantClient, infraClient, infraDynamic, "test", "test-cluster")
 
 	err := controller.Init()
 	if err != nil {
@@ -697,51 +697,43 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 				*createPort("http", 80, v1.ProtocolTCP),
 				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
 
-			// Define several unique ports for the Service
+			// Define multiple ports for the Service
 			servicePorts := []v1.ServicePort{
 				{
-					Name:        "client",
-					Protocol:    v1.ProtocolTCP,
-					Port:        10001,
-					TargetPort:  intstr.FromInt(30396),
-					NodePort:    30396,
-					AppProtocol: nil,
+					Name:       "client",
+					Protocol:   v1.ProtocolTCP,
+					Port:       10001,
+					TargetPort: intstr.FromInt(30396),
+					NodePort:   30396,
 				},
 				{
-					Name:        "dashboard",
-					Protocol:    v1.ProtocolTCP,
-					Port:        8265,
-					TargetPort:  intstr.FromInt(31003),
-					NodePort:    31003,
-					AppProtocol: nil,
+					Name:       "dashboard",
+					Protocol:   v1.ProtocolTCP,
+					Port:       8265,
+					TargetPort: intstr.FromInt(31003),
+					NodePort:   31003,
 				},
 				{
-					Name:        "metrics",
-					Protocol:    v1.ProtocolTCP,
-					Port:        8080,
-					TargetPort:  intstr.FromInt(30452),
-					NodePort:    30452,
-					AppProtocol: nil,
+					Name:       "metrics",
+					Protocol:   v1.ProtocolTCP,
+					Port:       8080,
+					TargetPort: intstr.FromInt(30452),
+					NodePort:   30452,
 				},
 			}
 
-			// Create a Service with the first port
 			createAndAssertInfraServiceLB("infra-multiport-service", "tenant-service-name", "test-cluster",
-				servicePorts[0],
-				v1.ServiceExternalTrafficPolicyLocal)
+				servicePorts[0], v1.ServiceExternalTrafficPolicyLocal)
 
-			// Update the Service by adding the remaining ports
 			svc, err := testVals.infraClient.CoreV1().Services(infraNamespace).Get(context.TODO(), "infra-multiport-service", metav1.GetOptions{})
 			Expect(err).To(BeNil())
 
 			svc.Spec.Ports = servicePorts
-
 			_, err = testVals.infraClient.CoreV1().Services(infraNamespace).Update(context.TODO(), svc, metav1.UpdateOptions{})
 			Expect(err).To(BeNil())
 
 			var epsListMultiPort *discoveryv1.EndpointSliceList
 
-			// Verify that the EndpointSlice is created with correct unique ports
 			Eventually(func() (bool, error) {
 				epsListMultiPort, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
 				if len(epsListMultiPort.Items) != 1 {
@@ -758,7 +750,6 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 					}
 				}
 
-				// Verify that all expected ports are present and without duplicates
 				if len(foundPortNames) != len(expectedPortNames) {
 					return false, err
 				}
@@ -767,6 +758,157 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 				expectedPortSet := sets.NewString(expectedPortNames...)
 				return portSet.Equal(expectedPortSet), err
 			}).Should(BeTrue(), "EndpointSlice should contain all unique ports from the Service without duplicates")
+		})
+
+		g.It("Should not panic when Service changes to have a non-nil selector, causing EndpointSlice deletion with no new slices to create", func() {
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+			createAndAssertTenantSlice("test-epslice", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
+			createAndAssertInfraServiceLB("infra-service-no-selector", "tenant-service-name", "test-cluster",
+				v1.ServicePort{
+					Name:       "web",
+					Port:       80,
+					NodePort:   31900,
+					Protocol:   v1.ProtocolTCP,
+					TargetPort: intstr.IntOrString{IntVal: 30390},
+				},
+				v1.ServiceExternalTrafficPolicyLocal,
+			)
+
+			// Wait for the controller to create an EndpointSlice in the infra cluster.
+			var epsList *discoveryv1.EndpointSliceList
+			var err error
+			Eventually(func() (bool, error) {
+				epsList, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).
+					List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				// Wait exactly 1 slice
+				if len(epsList.Items) == 1 {
+					return true, nil
+				}
+				return false, nil
+			}).Should(BeTrue(), "Controller should create an EndpointSlice in infra cluster for the LB service")
+
+			svcWithSelector, err := testVals.infraClient.CoreV1().Services(infraNamespace).
+				Get(context.TODO(), "infra-service-no-selector", metav1.GetOptions{})
+			Expect(err).To(BeNil())
+
+			// Let's set any selector to run the slice deletion logic
+			svcWithSelector.Spec.Selector = map[string]string{"test": "selector-added"}
+			_, err = testVals.infraClient.CoreV1().Services(infraNamespace).
+				Update(context.TODO(), svcWithSelector, metav1.UpdateOptions{})
+			Expect(err).To(BeNil())
+
+			Eventually(func() (bool, error) {
+				epsList, err = testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).
+					List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				// We expect that after the update service.EndpointSlice will become 0
+				if len(epsList.Items) == 0 {
+					return true, nil
+				}
+				return false, nil
+			}).Should(BeTrue(), "Existing EndpointSlice should be removed because Service now has a selector")
+		})
+
+		g.It("Should remove EndpointSlices and not recreate them when a previously no-selector Service obtains a selector", func() {
+			testVals.infraClient.Fake.PrependReactor("create", "endpointslices", func(action testing.Action) (bool, runtime.Object, error) {
+				createAction := action.(testing.CreateAction)
+				slice := createAction.GetObject().(*discoveryv1.EndpointSlice)
+				if slice.Name == "" && slice.GenerateName != "" {
+					slice.Name = slice.GenerateName + "-fake001"
+				}
+				return false, slice, nil
+			})
+
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+
+			createAndAssertTenantSlice("test-epslice", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{
+					*createEndpoint("123.45.67.89", "worker-0-test", true, true, false),
+				},
+			)
+
+			noSelectorSvcName := "svc-without-selector"
+			svc := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      noSelectorSvcName,
+					Namespace: infraNamespace,
+					Labels: map[string]string{
+						kubevirt.TenantServiceNameLabelKey:      "tenant-service-name",
+						kubevirt.TenantServiceNamespaceLabelKey: tenantNamespace,
+						kubevirt.TenantClusterNameLabelKey:      "test-cluster",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							Name:       "web",
+							Port:       80,
+							NodePort:   31900,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: intstr.IntOrString{IntVal: 30390},
+						},
+					},
+					Type:                  v1.ServiceTypeLoadBalancer,
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+				},
+			}
+
+			_, err := testVals.infraClient.CoreV1().Services(infraNamespace).Create(context.TODO(), svc, metav1.CreateOptions{})
+			Expect(err).To(BeNil())
+
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).
+					List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				return len(epsList.Items) == 1, nil
+			}).Should(BeTrue(), "Controller should create an EndpointSlice in infra cluster for the no-selector LB service")
+
+			svcWithSelector, err := testVals.infraClient.CoreV1().Services(infraNamespace).Get(
+				context.TODO(), noSelectorSvcName, metav1.GetOptions{})
+			Expect(err).To(BeNil())
+
+			svcWithSelector.Spec.Selector = map[string]string{"app": "test-value"}
+			_, err = testVals.infraClient.CoreV1().Services(infraNamespace).
+				Update(context.TODO(), svcWithSelector, metav1.UpdateOptions{})
+			Expect(err).To(BeNil())
+
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).
+					List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				return len(epsList.Items) == 0, nil
+			}).Should(BeTrue(), "All EndpointSlices should be removed after Service acquires a selector (no new slices created)")
+		})
+
+		g.It("Should ignore Services from a different cluster", func() {
+			// Create a Service with cluster label "other-cluster"
+			svc := createInfraServiceLB("infra-service-conflict", "tenant-service-name", "other-cluster",
+				v1.ServicePort{Name: "web", Port: 80, NodePort: 31900, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{IntVal: 30390}},
+				v1.ServiceExternalTrafficPolicyLocal)
+			_, err := testVals.infraClient.CoreV1().Services(infraNamespace).Create(context.TODO(), svc, metav1.CreateOptions{})
+			Expect(err).To(BeNil())
+
+			// The controller should ignore this Service, so no EndpointSlice should be created.
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false, err
+				}
+				// Expect zero slices since cluster label does not match "test-cluster"
+				return len(epsList.Items) == 0, nil
+			}).Should(BeTrue(), "Services with a different cluster label should be ignored")
 		})
 
 	})
