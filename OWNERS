@@ -6,6 +6,7 @@ reviewers:
   - mfranczy
   - rhrazdil
   - qinqon
+  - kvaps
 approvers:
   - gonzolino
   - nirarg
@@ -13,6 +14,7 @@ approvers:
   - davidvossel
   - rhrazdil
   - qinqon
+  - kvaps
 emeritus_approvers:
   - mfranczy
 
