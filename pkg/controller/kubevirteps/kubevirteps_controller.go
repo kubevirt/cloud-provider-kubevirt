@@ -12,7 +12,6 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -669,28 +668,39 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 		for _, slice := range tenantSlices {
 			for _, endpoint := range slice.Endpoints {
 				// find all unique nodes that correspond to an endpoint in a tenant slice
+				if endpoint.NodeName == nil {
+					klog.Warningf("Skipping endpoint without NodeName in slice %s/%s", slice.Namespace, slice.Name)
+					continue
+				}
 				nodeSet.Insert(*endpoint.NodeName)
 			}
 		}
 
-		klog.Infof("Desired nodes for service %s in namespace %s: %v", service.Name, service.Namespace, sets.List(nodeSet))
+		klog.Infof("Desired nodes for service %s/%s: %v", service.Namespace, service.Name, sets.List(nodeSet))
 
 		for _, node := range sets.List(nodeSet) {
 			// find vmi for node name
-			obj := &unstructured.Unstructured{}
-			vmi := &kubevirtv1.VirtualMachineInstance{}
-
-			obj, err := c.infraDynamic.Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).Namespace(c.infraNamespace).Get(context.TODO(), node, metav1.GetOptions{})
+			obj, err := c.infraDynamic.
+				Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).
+				Namespace(c.infraNamespace).
+				Get(context.TODO(), node, metav1.GetOptions{})
 			if err != nil {
-				klog.Errorf("Failed to get VirtualMachineInstance %s in namespace %s:%v", node, c.infraNamespace, err)
+				klog.Errorf("Failed to get VMI %q in namespace %q: %v", node, c.infraNamespace, err)
 				continue
 			}
 
+			vmi := &kubevirtv1.VirtualMachineInstance{}
 			err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, vmi)
 			if err != nil {
 				klog.Errorf("Failed to convert Unstructured to VirtualMachineInstance: %v", err)
-				klog.Fatal(err)
+				continue
 			}
+
+			if vmi.Status.NodeName == "" {
+				klog.Warningf("Skipping VMI %s/%s: NodeName is empty", vmi.Namespace, vmi.Name)
+				continue
+			}
+			nodeNamePtr := &vmi.Status.NodeName
 
 			ready := vmi.Status.Phase == kubevirtv1.Running
 			serving := vmi.Status.Phase == kubevirtv1.Running
@@ -698,6 +708,10 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 
 			for _, i := range vmi.Status.Interfaces {
 				if i.Name == "default" {
+					if i.IP == "" {
+						klog.Warningf("VMI %s/%s interface %q has no IP, skipping", vmi.Namespace, vmi.Name, i.Name)
+						continue
+					}
 					desiredEndpoints = append(desiredEndpoints, &discovery.Endpoint{
 						Addresses: []string{i.IP},
 						Conditions: discovery.EndpointConditions{
@@ -705,9 +719,9 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 							Serving:     &serving,
 							Terminating: &terminating,
 						},
-						NodeName: &vmi.Status.NodeName,
+						NodeName: nodeNamePtr,
 					})
-					continue
+					break
 				}
 			}
 		}

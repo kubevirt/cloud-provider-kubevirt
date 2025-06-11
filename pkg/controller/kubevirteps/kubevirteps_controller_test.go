@@ -771,3 +771,55 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 
 	})
 })
+
+var _ = g.Describe("getDesiredEndpoints", func() {
+	g.It("should skip endpoints without NodeName and VMIs without NodeName or IP", func() {
+		// Setup controller
+		ctrl := setupTestKubevirtEPSController().controller
+
+		// Manually inject dynamic client content (1 VMI with missing NodeName)
+		vmi := createUnstructuredVMINode("vmi-without-node", "", "10.0.0.1") // empty NodeName
+		_, err := ctrl.infraDynamic.
+			Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).
+			Namespace(infraNamespace).
+			Create(context.TODO(), vmi, metav1.CreateOptions{})
+		Expect(err).To(BeNil())
+
+		// Create service
+		svc := createInfraServiceLB("test-svc", "test-svc", "test-cluster",
+			v1.ServicePort{
+				Name:       "http",
+				Port:       80,
+				TargetPort: intstr.FromInt(8080),
+				Protocol:   v1.ProtocolTCP,
+			},
+			v1.ServiceExternalTrafficPolicyLocal,
+		)
+
+		// One endpoint has nil NodeName, another is valid
+		nodeName := "vmi-without-node"
+		tenantSlice := &discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "slice",
+				Namespace: tenantNamespace,
+				Labels: map[string]string{
+					discoveryv1.LabelServiceName: "test-svc",
+				},
+			},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Endpoints: []discoveryv1.Endpoint{
+				{ // should be skipped due to nil NodeName
+					Addresses: []string{"10.1.1.1"},
+					NodeName:  nil,
+				},
+				{ // will hit VMI without NodeName and also be skipped
+					Addresses: []string{"10.1.1.2"},
+					NodeName:  &nodeName,
+				},
+			},
+		}
+
+		endpoints := ctrl.getDesiredEndpoints(svc, []*discoveryv1.EndpointSlice{tenantSlice})
+		Expect(endpoints).To(HaveLen(0), "Expected no endpoints due to missing NodeName or IP")
+	})
+})
