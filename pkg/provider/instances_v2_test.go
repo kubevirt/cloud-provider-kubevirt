@@ -197,9 +197,10 @@ var _ = Describe("Instances V2", func() {
 							"Type":    Equal(corev1.NodeInternalIP),
 						}),
 					}),
-					"InstanceType": Equal("highPerformance"),
-					"Region":       Equal("region-a"),
-					"Zone":         Equal("zone-1"),
+					"InstanceType":     Equal("highPerformance"),
+					"Region":           Equal("region-a"),
+					"Zone":             Equal("zone-1"),
+					"AdditionalLabels": Equal(map[string]string{}),
 				}))
 			})
 
@@ -290,9 +291,10 @@ var _ = Describe("Instances V2", func() {
 							"Type":    Equal(corev1.NodeInternalIP),
 						}),
 					}),
-					"InstanceType": Equal("highPerformance"),
-					"Region":       Equal("region-a"),
-					"Zone":         Equal("zone-1"),
+					"InstanceType":     Equal("highPerformance"),
+					"Region":           Equal("region-a"),
+					"Zone":             Equal("zone-1"),
+					"AdditionalLabels": Equal(map[string]string{}),
 				}))
 			})
 
@@ -371,9 +373,10 @@ var _ = Describe("Instances V2", func() {
 							"Type":    Equal(corev1.NodeInternalIP),
 						}),
 					}),
-					"InstanceType": Equal("highPerformance"),
-					"Region":       Equal(""),
-					"Zone":         Equal(""),
+					"InstanceType":     Equal("highPerformance"),
+					"Region":           Equal(""),
+					"Zone":             Equal(""),
+					"AdditionalLabels": Equal(map[string]string{}),
 				}))
 			})
 

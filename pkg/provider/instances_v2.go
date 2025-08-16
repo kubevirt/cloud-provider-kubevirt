@@ -101,11 +101,12 @@ func (i *instancesV2) InstanceMetadata(ctx context.Context, node *corev1.Node) (
 	}
 
 	return &cloudprovider.InstanceMetadata{
-		ProviderID:    getProviderID(instance.Name),
-		NodeAddresses: addrs,
-		InstanceType:  instanceType,
-		Region:        region,
-		Zone:          zone,
+		ProviderID:       getProviderID(instance.Name),
+		NodeAddresses:    addrs,
+		InstanceType:     instanceType,
+		Region:           region,
+		Zone:             zone,
+		AdditionalLabels: map[string]string{},
 	}, nil
 }
 

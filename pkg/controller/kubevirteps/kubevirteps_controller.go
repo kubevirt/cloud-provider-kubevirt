@@ -268,8 +268,8 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}, controllerManag
 	defer cancelFn()
 	defer c.queue.ShutDown()
 
-	klog.Infof(fmt.Sprintf("Starting %s", ControllerName))
-	defer klog.Infof(fmt.Sprintf("Shutting down %s", ControllerName))
+	klog.Infof("Starting %s", ControllerName)
+	defer klog.Infof("Shutting down %s", ControllerName)
 	controllerManagerMetrics.ControllerStarted(ControllerName.String())
 	defer controllerManagerMetrics.ControllerStopped(ControllerName.String())
 
