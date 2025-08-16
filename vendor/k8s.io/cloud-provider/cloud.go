@@ -290,6 +290,7 @@ type Zones interface {
 }
 
 // PVLabeler is an abstract, pluggable interface for fetching labels for volumes
+// DEPRECATED: PVLabeler is deprecated in favor of CSI topology feature.
 type PVLabeler interface {
 	GetLabelsForVolume(ctx context.Context, pv *v1.PersistentVolume) (map[string]string, error)
 }
@@ -326,4 +327,9 @@ type InstanceMetadata struct {
 	//   * topology.kubernetes.io/region=<region>
 	//   * failure-domain.beta.kubernetes.io/region=<region> (DEPRECATED)
 	Region string
+
+	// AdditionalLabels is a map of additional labels provided by the cloud provider.
+	// When provided, they will be applied to the node and enable cloud providers
+	// to labels nodes with information that may be valuable to that provider.
+	AdditionalLabels map[string]string
 }
