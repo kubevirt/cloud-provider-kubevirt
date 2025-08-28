@@ -27,8 +27,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/gogo/protobuf/proto"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/crypto/cryptobyte"
+	"google.golang.org/protobuf/proto"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -39,12 +40,11 @@ import (
 	aestransformer "k8s.io/apiserver/pkg/storage/value/encrypt/aes"
 	kmstypes "k8s.io/apiserver/pkg/storage/value/encrypt/envelope/kmsv2/v2"
 	"k8s.io/apiserver/pkg/storage/value/encrypt/envelope/metrics"
+	"k8s.io/component-base/tracing"
 	"k8s.io/klog/v2"
 	kmsservice "k8s.io/kms/pkg/service"
 	"k8s.io/utils/clock"
 )
-
-// TODO integration test with old AES GCM data recorded and new KDF data recorded
 
 func init() {
 	value.RegisterMetrics()
@@ -52,8 +52,10 @@ func init() {
 }
 
 const (
-	// KMSAPIVersion is the version of the KMS API.
-	KMSAPIVersion = "v2beta1"
+	// KMSAPIVersionv2 is a version of the KMS API.
+	KMSAPIVersionv2 = "v2"
+	// KMSAPIVersionv2beta1 is a version of the KMS API.
+	KMSAPIVersionv2beta1 = "v2beta1"
 	// annotationsMaxSize is the maximum size of the annotations.
 	annotationsMaxSize = 32 * 1024 // 32 kB
 	// KeyIDMaxSize is the maximum size of the keyID.
@@ -88,7 +90,10 @@ type ErrCodeKeyID string
 type State struct {
 	Transformer value.Transformer
 
-	EncryptedObject kmstypes.EncryptedObject
+	EncryptedObjectKeyID                  string
+	EncryptedObjectEncryptedDEKSource     []byte
+	EncryptedObjectAnnotations            map[string][]byte
+	EncryptedObjectEncryptedDEKSourceType kmstypes.EncryptedDEKSourceType
 
 	UID string
 
@@ -101,7 +106,7 @@ type State struct {
 func (s *State) ValidateEncryptCapability() error {
 	if now := NowFunc(); now.After(s.ExpirationTimestamp) {
 		return fmt.Errorf("encryptedDEKSource with keyID hash %q expired at %s (current time is %s)",
-			GetHashIfNotEmpty(s.EncryptedObject.KeyID), s.ExpirationTimestamp.Format(time.RFC3339), now.Format(time.RFC3339))
+			GetHashIfNotEmpty(s.EncryptedObjectKeyID), s.ExpirationTimestamp.Format(time.RFC3339), now.Format(time.RFC3339))
 	}
 	return nil
 }
@@ -112,32 +117,51 @@ type envelopeTransformer struct {
 	stateFunc       StateFunc
 
 	// cache is a thread-safe expiring lru cache which caches decrypted DEKs indexed by their encrypted form.
-	cache *simpleCache
+	cache       *simpleCache
+	apiServerID string
 }
 
 // NewEnvelopeTransformer returns a transformer which implements a KEK-DEK based envelope encryption scheme.
 // It uses envelopeService to encrypt and decrypt DEKs. Respective DEKs (in encrypted form) are prepended to
 // the data items they encrypt.
-func NewEnvelopeTransformer(envelopeService kmsservice.Service, providerName string, stateFunc StateFunc) value.Transformer {
-	return newEnvelopeTransformerWithClock(envelopeService, providerName, stateFunc, cacheTTL, clock.RealClock{})
+func NewEnvelopeTransformer(envelopeService kmsservice.Service, providerName string, stateFunc StateFunc, apiServerID string) value.Transformer {
+	return newEnvelopeTransformerWithClock(envelopeService, providerName, stateFunc, apiServerID, cacheTTL, clock.RealClock{})
 }
 
-func newEnvelopeTransformerWithClock(envelopeService kmsservice.Service, providerName string, stateFunc StateFunc, cacheTTL time.Duration, clock clock.Clock) value.Transformer {
+func newEnvelopeTransformerWithClock(envelopeService kmsservice.Service, providerName string, stateFunc StateFunc, apiServerID string, cacheTTL time.Duration, clock clock.Clock) value.Transformer {
 	return &envelopeTransformer{
 		envelopeService: envelopeService,
 		providerName:    providerName,
 		stateFunc:       stateFunc,
-		cache:           newSimpleCache(clock, cacheTTL),
+		cache:           newSimpleCache(clock, cacheTTL, providerName),
+		apiServerID:     apiServerID,
 	}
 }
 
 // TransformFromStorage decrypts data encrypted by this transformer using envelope encryption.
 func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []byte, dataCtx value.Context) ([]byte, bool, error) {
+	ctx, span := tracing.Start(ctx, "TransformFromStorage with envelopeTransformer",
+		attribute.String("transformer.provider.name", t.providerName),
+		// The service.instance_id of the apiserver is already available in the trace
+		/*
+			{
+			"key": "service.instance.id",
+			"type": "string",
+			"value": "apiserver-zsteyir5lyrtdcmqqmd5kzze6m"
+			}
+		*/
+	)
+	defer span.End(500 * time.Millisecond)
+
+	span.AddEvent("About to decode encrypted object")
 	// Deserialize the EncryptedObject from the data.
 	encryptedObject, err := t.doDecode(data)
 	if err != nil {
+		span.AddEvent("Decoding encrypted object failed")
+		span.RecordError(err)
 		return nil, false, err
 	}
+	span.AddEvent("Decoded encrypted object")
 
 	useSeed := encryptedObject.EncryptedDEKSourceType == kmstypes.EncryptedDEKSourceType_HKDF_SHA256_XNONCE_AES_GCM_SEED
 
@@ -158,6 +182,7 @@ func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []b
 
 	// fallback to the envelope service if we do not have the transformer locally
 	if transformer == nil {
+		span.AddEvent("About to decrypt DEK using remote service")
 		value.RecordCacheMiss()
 
 		requestInfo := getRequestInfoFromContext(ctx)
@@ -172,31 +197,51 @@ func (t *envelopeTransformer) TransformFromStorage(ctx context.Context, data []b
 			Annotations: encryptedObject.Annotations,
 		})
 		if err != nil {
+			span.AddEvent("DEK decryption failed")
+			span.RecordError(err)
 			return nil, false, fmt.Errorf("failed to decrypt DEK, error: %w", err)
 		}
+		span.AddEvent("DEK decryption succeeded")
 
 		transformer, err = t.addTransformerForDecryption(encryptedObjectCacheKey, key, useSeed)
 		if err != nil {
 			return nil, false, err
 		}
 	}
-	metrics.RecordKeyID(metrics.FromStorageLabel, t.providerName, encryptedObject.KeyID)
+	metrics.RecordKeyID(metrics.FromStorageLabel, t.providerName, encryptedObject.KeyID, t.apiServerID)
 
+	span.AddEvent("About to decrypt data using DEK")
 	out, stale, err := transformer.TransformFromStorage(ctx, encryptedObject.EncryptedData, dataCtx)
 	if err != nil {
+		span.AddEvent("Data decryption failed")
+		span.RecordError(err)
 		return nil, false, err
 	}
 
+	span.AddEvent("Data decryption succeeded")
 	// data is considered stale if the key ID does not match our current write transformer
 	return out,
 		stale ||
-			encryptedObject.KeyID != state.EncryptedObject.KeyID ||
-			encryptedObject.EncryptedDEKSourceType != state.EncryptedObject.EncryptedDEKSourceType,
+			encryptedObject.KeyID != state.EncryptedObjectKeyID ||
+			encryptedObject.EncryptedDEKSourceType != state.EncryptedObjectEncryptedDEKSourceType,
 		nil
 }
 
 // TransformToStorage encrypts data to be written to disk using envelope encryption.
 func (t *envelopeTransformer) TransformToStorage(ctx context.Context, data []byte, dataCtx value.Context) ([]byte, error) {
+	ctx, span := tracing.Start(ctx, "TransformToStorage with envelopeTransformer",
+		attribute.String("transformer.provider.name", t.providerName),
+		// The service.instance_id of the apiserver is already available in the trace
+		/*
+			{
+			"key": "service.instance.id",
+			"type": "string",
+			"value": "apiserver-zsteyir5lyrtdcmqqmd5kzze6m"
+			}
+		*/
+	)
+	defer span.End(500 * time.Millisecond)
+
 	state, err := t.stateFunc()
 	if err != nil {
 		return nil, err
@@ -208,7 +253,6 @@ func (t *envelopeTransformer) TransformToStorage(ctx context.Context, data []byt
 	// this prevents a cache miss every time the DEK rotates
 	// this has the side benefit of causing the cache to perform a GC
 	// TODO see if we can do this inside the stateFunc control loop
-	// TODO(aramase): Add metrics for cache size.
 	t.cache.set(state.CacheKey, state.Transformer)
 
 	requestInfo := getRequestInfoFromContext(ctx)
@@ -216,18 +260,36 @@ func (t *envelopeTransformer) TransformToStorage(ctx context.Context, data []byt
 		"group", requestInfo.APIGroup, "version", requestInfo.APIVersion, "resource", requestInfo.Resource, "subresource", requestInfo.Subresource,
 		"verb", requestInfo.Verb, "namespace", requestInfo.Namespace, "name", requestInfo.Name)
 
+	span.AddEvent("About to encrypt data using DEK")
 	result, err := state.Transformer.TransformToStorage(ctx, data, dataCtx)
 	if err != nil {
+		span.AddEvent("Data encryption failed")
+		span.RecordError(err)
 		return nil, err
 	}
+	span.AddEvent("Data encryption succeeded")
 
-	metrics.RecordKeyID(metrics.ToStorageLabel, t.providerName, state.EncryptedObject.KeyID)
+	metrics.RecordKeyID(metrics.ToStorageLabel, t.providerName, state.EncryptedObjectKeyID, t.apiServerID)
 
-	encObjectCopy := state.EncryptedObject
-	encObjectCopy.EncryptedData = result
+	encObjectCopy := &kmstypes.EncryptedObject{
+		KeyID:                  state.EncryptedObjectKeyID,
+		EncryptedDEKSource:     state.EncryptedObjectEncryptedDEKSource,
+		Annotations:            state.EncryptedObjectAnnotations,
+		EncryptedDEKSourceType: state.EncryptedObjectEncryptedDEKSourceType,
+		EncryptedData:          result,
+	}
 
+	span.AddEvent("About to encode encrypted object")
 	// Serialize the EncryptedObject to a byte array.
-	return t.doEncode(&encObjectCopy)
+	out, err := t.doEncode(encObjectCopy)
+	if err != nil {
+		span.AddEvent("Encoding encrypted object failed")
+		span.RecordError(err)
+		return nil, err
+	}
+	span.AddEvent("Encoded encrypted object")
+
+	return out, nil
 }
 
 // addTransformerForDecryption inserts a new transformer to the Envelope cache of DEKs for future reads.
@@ -250,7 +312,6 @@ func (t *envelopeTransformer) addTransformerForDecryption(cacheKey []byte, key [
 	if err != nil {
 		return nil, err
 	}
-	// TODO(aramase): Add metrics for cache size.
 	t.cache.set(cacheKey, transformer)
 	return transformer, nil
 }
