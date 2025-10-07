@@ -21,6 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // NewDryRunClient wraps an existing client and enforces DryRun mode
@@ -46,6 +47,16 @@ func (c *dryRunClient) RESTMapper() meta.RESTMapper {
 	return c.client.RESTMapper()
 }
 
+// GroupVersionKindFor returns the GroupVersionKind for the given object.
+func (c *dryRunClient) GroupVersionKindFor(obj runtime.Object) (schema.GroupVersionKind, error) {
+	return c.client.GroupVersionKindFor(obj)
+}
+
+// IsObjectNamespaced returns true if the GroupVersionKind of the object is namespaced.
+func (c *dryRunClient) IsObjectNamespaced(obj runtime.Object) (bool, error) {
+	return c.client.IsObjectNamespaced(obj)
+}
+
 // Create implements client.Client.
 func (c *dryRunClient) Create(ctx context.Context, obj Object, opts ...CreateOption) error {
 	return c.client.Create(ctx, obj, append(opts, DryRunAll)...)
@@ -69,6 +80,10 @@ func (c *dryRunClient) DeleteAllOf(ctx context.Context, obj Object, opts ...Dele
 // Patch implements client.Client.
 func (c *dryRunClient) Patch(ctx context.Context, obj Object, patch Patch, opts ...PatchOption) error {
 	return c.client.Patch(ctx, obj, patch, append(opts, DryRunAll)...)
+}
+
+func (c *dryRunClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...ApplyOption) error {
+	return c.client.Apply(ctx, obj, append(opts, DryRunAll)...)
 }
 
 // Get implements client.Client.
