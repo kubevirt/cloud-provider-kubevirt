@@ -665,15 +665,24 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 		// for extracting the nodes it does not matter what type of address we are dealing with
 		// all nodes with an endpoint for a corresponding slice will be selected.
 		nodeSet := sets.Set[string]{}
+		hasEndpointsWithoutNodeName := false
 		for _, slice := range tenantSlices {
 			for _, endpoint := range slice.Endpoints {
 				// find all unique nodes that correspond to an endpoint in a tenant slice
 				if endpoint.NodeName == nil {
 					klog.Warningf("Skipping endpoint without NodeName in slice %s/%s", slice.Namespace, slice.Name)
+					hasEndpointsWithoutNodeName = true
 					continue
 				}
 				nodeSet.Insert(*endpoint.NodeName)
 			}
+		}
+
+		// Fallback: if no endpoints with NodeName were found, but there are endpoints without NodeName,
+		// distribute traffic to all VMIs (similar to ExternalTrafficPolicy=Cluster behavior)
+		if nodeSet.Len() == 0 && hasEndpointsWithoutNodeName {
+			klog.Infof("No endpoints with NodeName found for service %s/%s, falling back to all VMIs", service.Namespace, service.Name)
+			return c.getAllVMIEndpoints()
 		}
 
 		klog.Infof("Desired nodes for service %s/%s: %v", service.Namespace, service.Name, sets.List(nodeSet))
@@ -728,6 +737,64 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 	}
 
 	return desiredEndpoints
+}
+
+// getAllVMIEndpoints returns endpoints for all VMIs in the infra namespace.
+// This is used as a fallback when tenant endpoints don't have NodeName specified,
+// similar to ExternalTrafficPolicy=Cluster behavior where traffic is distributed to all nodes.
+func (c *Controller) getAllVMIEndpoints() []*discovery.Endpoint {
+	var endpoints []*discovery.Endpoint
+
+	// List all VMIs in the infra namespace
+	vmiList, err := c.infraDynamic.
+		Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).
+		Namespace(c.infraNamespace).
+		List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		klog.Errorf("Failed to list VMIs in namespace %q: %v", c.infraNamespace, err)
+		return endpoints
+	}
+
+	for _, obj := range vmiList.Items {
+		vmi := &kubevirtv1.VirtualMachineInstance{}
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, vmi)
+		if err != nil {
+			klog.Errorf("Failed to convert Unstructured to VirtualMachineInstance: %v", err)
+			continue
+		}
+
+		if vmi.Status.NodeName == "" {
+			klog.Warningf("Skipping VMI %s/%s: NodeName is empty", vmi.Namespace, vmi.Name)
+			continue
+		}
+		nodeNamePtr := &vmi.Status.NodeName
+
+		ready := vmi.Status.Phase == kubevirtv1.Running
+		serving := vmi.Status.Phase == kubevirtv1.Running
+		terminating := vmi.Status.Phase == kubevirtv1.Failed || vmi.Status.Phase == kubevirtv1.Succeeded
+
+		for _, i := range vmi.Status.Interfaces {
+			if i.Name == "default" {
+				if i.IP == "" {
+					klog.Warningf("VMI %s/%s interface %q has no IP, skipping", vmi.Namespace, vmi.Name, i.Name)
+					continue
+				}
+				endpoints = append(endpoints, &discovery.Endpoint{
+					Addresses: []string{i.IP},
+					Conditions: discovery.EndpointConditions{
+						Ready:       &ready,
+						Serving:     &serving,
+						Terminating: &terminating,
+					},
+					NodeName: nodeNamePtr,
+				})
+				break
+			}
+		}
+	}
+
+	klog.Infof("Fallback: created %d endpoints from all VMIs in namespace %s", len(endpoints), c.infraNamespace)
+	return endpoints
 }
 
 func (c *Controller) ensureEndpointSliceLabels(slice *discovery.EndpointSlice, svc *v1.Service) (map[string]string, bool) {
