@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -16,9 +19,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -50,16 +53,39 @@ type Controller struct {
 	tenantFactory    informers.SharedInformerFactory
 	tenantEPSTracker tenantEPSTracker
 
-	infraClient  kubernetes.Interface
-	infraDynamic dynamic.Interface
-	infraFactory informers.SharedInformerFactory
+	infraClient        kubernetes.Interface
+	infraDynamic       dynamic.Interface
+	infraFactory       informers.SharedInformerFactory
+	infraDynamicFactory dynamicinformer.DynamicSharedInformerFactory
 
 	infraNamespace string
 	queue          workqueue.RateLimitingInterface
 	maxRetries     int
 
 	maxEndPointsPerSlice int
+
+	// serviceVMITracker tracks which services depend on which VMIs
+	serviceVMITracker *serviceVMITracker
+
+	// vmiCache stores VMI data to detect state changes
+	vmiCacheMu sync.RWMutex
+	vmiCache   map[string]*vmiCacheEntry
+
+	// periodicResyncInterval is the interval for periodic full reconciliation
+	periodicResyncInterval time.Duration
 }
+
+// vmiCacheEntry stores cached VMI state to detect changes
+type vmiCacheEntry struct {
+	Phase      kubevirtv1.VirtualMachineInstancePhase
+	NodeName   string
+	Interfaces []kubevirtv1.VirtualMachineInstanceNetworkInterface
+	// MigrationState tracks if VMI is being migrated
+	MigrationState *kubevirtv1.VirtualMachineInstanceMigrationState
+}
+
+// DefaultPeriodicResyncInterval is the default interval for periodic full reconciliation
+const DefaultPeriodicResyncInterval = 30 * time.Second
 
 func NewKubevirtEPSController(
 	tenantClient kubernetes.Interface,
@@ -69,19 +95,26 @@ func NewKubevirtEPSController(
 
 	tenantFactory := informers.NewSharedInformerFactory(tenantClient, 0)
 	infraFactory := informers.NewSharedInformerFactoryWithOptions(infraClient, 0, informers.WithNamespace(infraNamespace))
+	// Create dynamic informer factory for VMI watching
+	infraDynamicFactory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(
+		infraDynamic, 0, infraNamespace, nil)
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
 	return &Controller{
-		tenantClient:         tenantClient,
-		tenantFactory:        tenantFactory,
-		tenantEPSTracker:     tenantEPSTracker{},
-		infraClient:          infraClient,
-		infraDynamic:         infraDynamic,
-		infraFactory:         infraFactory,
-		infraNamespace:       infraNamespace,
-		queue:                queue,
-		maxRetries:           25,
-		maxEndPointsPerSlice: 100,
+		tenantClient:           tenantClient,
+		tenantFactory:          tenantFactory,
+		tenantEPSTracker:       tenantEPSTracker{},
+		infraClient:            infraClient,
+		infraDynamic:           infraDynamic,
+		infraFactory:           infraFactory,
+		infraDynamicFactory:    infraDynamicFactory,
+		infraNamespace:         infraNamespace,
+		queue:                  queue,
+		maxRetries:             25,
+		maxEndPointsPerSlice:   100,
+		serviceVMITracker:      newServiceVMITracker(),
+		vmiCache:               make(map[string]*vmiCacheEntry),
+		periodicResyncInterval: DefaultPeriodicResyncInterval,
 	}
 }
 
@@ -235,7 +268,182 @@ func (c *Controller) Init() error {
 		return err
 	}
 
+	// Add a dynamic informer for VirtualMachineInstances in the infra cluster
+	// This is the KEY FIX: watch VMI changes to trigger reconciliation on live migration,
+	// start, stop, restart, and other state changes
+	vmiGVR := schema.GroupVersionResource{
+		Group:    "kubevirt.io",
+		Version:  "v1",
+		Resource: "virtualmachineinstances",
+	}
+	_, err = c.infraDynamicFactory.ForResource(vmiGVR).Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			c.handleVMIEvent(obj, nil)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			c.handleVMIEvent(newObj, oldObj)
+		},
+		DeleteFunc: func(obj interface{}) {
+			c.handleVMIEvent(nil, obj)
+		},
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// handleVMIEvent processes VMI add/update/delete events and triggers reconciliation
+// for affected services when relevant VMI state changes occur.
+func (c *Controller) handleVMIEvent(newObj, oldObj interface{}) {
+	var vmi *kubevirtv1.VirtualMachineInstance
+	var oldVMI *kubevirtv1.VirtualMachineInstance
+	var vmiName string
+
+	// Handle delete case
+	if newObj == nil && oldObj != nil {
+		oldUnstructured, ok := oldObj.(*unstructured.Unstructured)
+		if !ok {
+			// Handle DeletedFinalStateUnknown
+			if deletedState, ok := oldObj.(cache.DeletedFinalStateUnknown); ok {
+				oldUnstructured, ok = deletedState.Obj.(*unstructured.Unstructured)
+				if !ok {
+					klog.Errorf("Failed to cast deleted VMI object")
+					return
+				}
+			} else {
+				klog.Errorf("Failed to cast old VMI object")
+				return
+			}
+		}
+		vmiName = oldUnstructured.GetName()
+		klog.Infof("VMI deleted: %s, triggering reconciliation for affected services", vmiName)
+
+		// Remove from cache
+		c.vmiCacheMu.Lock()
+		delete(c.vmiCache, vmiName)
+		c.vmiCacheMu.Unlock()
+
+		// Queue all services that depended on this VMI
+		c.queueServicesForVMI(vmiName)
+		return
+	}
+
+	// Handle add/update case
+	newUnstructured, ok := newObj.(*unstructured.Unstructured)
+	if !ok {
+		klog.Errorf("Failed to cast new VMI object")
+		return
+	}
+
+	vmi = &kubevirtv1.VirtualMachineInstance{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(newUnstructured.Object, vmi); err != nil {
+		klog.Errorf("Failed to convert Unstructured to VirtualMachineInstance: %v", err)
+		return
+	}
+	vmiName = vmi.Name
+
+	// Convert old object if present (update case)
+	if oldObj != nil {
+		oldUnstructured, ok := oldObj.(*unstructured.Unstructured)
+		if ok {
+			oldVMI = &kubevirtv1.VirtualMachineInstance{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(oldUnstructured.Object, oldVMI); err != nil {
+				klog.V(4).Infof("Failed to convert old Unstructured to VirtualMachineInstance: %v", err)
+				oldVMI = nil
+			}
+		}
+	}
+
+	// Check if this is a relevant state change
+	if c.isRelevantVMIChange(vmi, oldVMI) {
+		klog.Infof("VMI %s state changed (phase=%s, node=%s, migrating=%v), triggering reconciliation",
+			vmiName, vmi.Status.Phase, vmi.Status.NodeName, c.isVMIMigrating(vmi))
+
+		// Update cache
+		c.updateVMICache(vmiName, vmi)
+
+		// Queue all services that depend on this VMI
+		c.queueServicesForVMI(vmiName)
+	}
+}
+
+// isRelevantVMIChange checks if the VMI change is relevant for endpoint reconciliation.
+// Relevant changes include: Phase, NodeName, Interfaces, MigrationState
+func (c *Controller) isRelevantVMIChange(newVMI, oldVMI *kubevirtv1.VirtualMachineInstance) bool {
+	// Always process if there's no old VMI (new VMI added)
+	if oldVMI == nil {
+		return true
+	}
+
+	// Check phase change
+	if newVMI.Status.Phase != oldVMI.Status.Phase {
+		klog.V(4).Infof("VMI %s phase changed: %s -> %s", newVMI.Name, oldVMI.Status.Phase, newVMI.Status.Phase)
+		return true
+	}
+
+	// Check node name change (migration completed)
+	if newVMI.Status.NodeName != oldVMI.Status.NodeName {
+		klog.V(4).Infof("VMI %s node changed: %s -> %s", newVMI.Name, oldVMI.Status.NodeName, newVMI.Status.NodeName)
+		return true
+	}
+
+	// Check migration state change
+	oldMigrating := oldVMI.Status.MigrationState != nil
+	newMigrating := newVMI.Status.MigrationState != nil
+	if oldMigrating != newMigrating {
+		klog.V(4).Infof("VMI %s migration state changed: migrating=%v -> %v", newVMI.Name, oldMigrating, newMigrating)
+		return true
+	}
+
+	// Check if migration completed or failed
+	if newMigrating && oldMigrating {
+		if !reflect.DeepEqual(newVMI.Status.MigrationState, oldVMI.Status.MigrationState) {
+			klog.V(4).Infof("VMI %s migration state details changed", newVMI.Name)
+			return true
+		}
+	}
+
+	// Check interface IP changes
+	if !reflect.DeepEqual(newVMI.Status.Interfaces, oldVMI.Status.Interfaces) {
+		klog.V(4).Infof("VMI %s interfaces changed", newVMI.Name)
+		return true
+	}
+
+	return false
+}
+
+// updateVMICache updates the VMI cache with the current state
+func (c *Controller) updateVMICache(vmiName string, vmi *kubevirtv1.VirtualMachineInstance) {
+	c.vmiCacheMu.Lock()
+	defer c.vmiCacheMu.Unlock()
+
+	c.vmiCache[vmiName] = &vmiCacheEntry{
+		Phase:          vmi.Status.Phase,
+		NodeName:       vmi.Status.NodeName,
+		Interfaces:     vmi.Status.Interfaces,
+		MigrationState: vmi.Status.MigrationState,
+	}
+}
+
+// queueServicesForVMI queues all services that depend on the given VMI for reconciliation
+func (c *Controller) queueServicesForVMI(vmiName string) {
+	services := c.serviceVMITracker.getServicesForVMI(vmiName)
+	if len(services) == 0 {
+		klog.V(4).Infof("No services found for VMI %s", vmiName)
+		return
+	}
+
+	for _, svcName := range services {
+		svc, err := c.infraFactory.Core().V1().Services().Lister().Services(c.infraNamespace).Get(svcName)
+		if err != nil {
+			klog.V(4).Infof("Failed to get service %s for VMI %s: %v", svcName, vmiName, err)
+			continue
+		}
+		klog.Infof("Queuing service %s for reconciliation due to VMI %s change", svcName, vmiName)
+		c.queue.Add(newRequest(UpdateReq, svc, nil))
+	}
 }
 
 // getInfraServiceForEPS returns the Service in the infra cluster associated with the given EndpointSlice.
@@ -275,18 +483,64 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}, controllerManag
 
 	c.tenantFactory.Start(stopCh)
 	c.infraFactory.Start(stopCh)
+	c.infraDynamicFactory.Start(stopCh)
+
+	// Get the VMI GVR for cache sync check
+	vmiGVR := schema.GroupVersionResource{
+		Group:    "kubevirt.io",
+		Version:  "v1",
+		Resource: "virtualmachineinstances",
+	}
 
 	if !cache.WaitForNamedCacheSync(ControllerName.String(), stopCh,
 		c.infraFactory.Core().V1().Services().Informer().HasSynced,
-		c.tenantFactory.Discovery().V1().EndpointSlices().Informer().HasSynced) {
+		c.tenantFactory.Discovery().V1().EndpointSlices().Informer().HasSynced,
+		c.infraDynamicFactory.ForResource(vmiGVR).Informer().HasSynced) {
 		return
 	}
+
+	klog.Infof("All informers synced, starting workers and periodic resync")
 
 	for i := 0; i < numWorkers; i++ {
 		go wait.UntilWithContext(ctx, c.runWorker, time.Second)
 	}
 
+	// Start periodic full reconciliation as a safety net
+	go c.runPeriodicResync(ctx, stopCh)
+
 	<-stopCh
+}
+
+// runPeriodicResync periodically triggers a full reconciliation of all tracked services.
+// This acts as a safety net to catch any missed events or state inconsistencies.
+func (c *Controller) runPeriodicResync(ctx context.Context, stopCh <-chan struct{}) {
+	ticker := time.NewTicker(c.periodicResyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			c.triggerFullResync()
+		}
+	}
+}
+
+// triggerFullResync queues all tracked services for reconciliation
+func (c *Controller) triggerFullResync() {
+	klog.V(4).Infof("Triggering periodic full resync of all tracked services")
+
+	services := c.serviceVMITracker.getAllServices()
+	for _, svcName := range services {
+		svc, err := c.infraFactory.Core().V1().Services().Lister().Services(c.infraNamespace).Get(svcName)
+		if err != nil {
+			klog.V(4).Infof("Failed to get service %s during periodic resync: %v", svcName, err)
+			continue
+		}
+		// Use a lower priority for periodic resyncs by checking if already queued
+		c.queue.Add(newRequest(UpdateReq, svc, nil))
+	}
 }
 
 // worker pattern adapted from https://github.com/kubernetes/client-go/blob/master/examples/workqueue/main.go
@@ -395,6 +649,8 @@ func (c *Controller) reconcile(ctx context.Context, r *Request) error {
 	if err != nil {
 		klog.Infof("Service %s in namespace %s is deleted.", service.Name, service.Namespace)
 		serviceDeleted = true
+		// Clean up service-VMI mappings for deleted service
+		c.serviceVMITracker.removeService(service.Name)
 	} else {
 		service = svc
 	}
@@ -661,21 +917,45 @@ func (c *Controller) newSlice(service *v1.Service, desiredPorts []discovery.Endp
 
 func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*discovery.EndpointSlice) []*discovery.Endpoint {
 	var desiredEndpoints []*discovery.Endpoint
+	var vmiNames []string // Track VMIs this service depends on
+
+	// When service has a selector (Cluster traffic policy), this controller doesn't manage endpoints.
+	// Clear any stale VMI mappings for this service.
+	if service.Spec.Selector != nil {
+		c.serviceVMITracker.removeService(service.Name)
+		return desiredEndpoints
+	}
+
 	if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal || service.Spec.Selector == nil {
-		// Extract the desired endpoints from the tenant EndpointSlices
-		// for extracting the nodes it does not matter what type of address we are dealing with
-		// all nodes with an endpoint for a corresponding slice will be selected.
-		nodeSet := sets.Set[string]{}
+		// Extract the desired endpoints from the tenant EndpointSlices.
+		// Track per-node readiness: a node is considered ready if at least one
+		// tenant endpoint on it is ready. This ensures that when a node reboots
+		// (guest OS restart inside a KubeVirt VM), the infra endpoint is marked
+		// not-ready even though the VMI stays Running.
+		nodeReady := map[string]bool{}
 		for _, slice := range tenantSlices {
 			for _, endpoint := range slice.Endpoints {
-				// find all unique nodes that correspond to an endpoint in a tenant slice
-				nodeSet.Insert(*endpoint.NodeName)
+				if endpoint.NodeName == nil {
+					continue
+				}
+				node := *endpoint.NodeName
+				epReady := endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready
+				if epReady {
+					nodeReady[node] = true
+				} else if _, exists := nodeReady[node]; !exists {
+					nodeReady[node] = false
+				}
 			}
 		}
 
-		klog.Infof("Desired nodes for service %s in namespace %s: %v", service.Name, service.Namespace, sets.List(nodeSet))
+		nodeNames := make([]string, 0, len(nodeReady))
+		for n := range nodeReady {
+			nodeNames = append(nodeNames, n)
+		}
+		sort.Strings(nodeNames)
+		klog.Infof("Desired nodes for service %s in namespace %s: %v", service.Name, service.Namespace, nodeNames)
 
-		for _, node := range sets.List(nodeSet) {
+		for _, node := range nodeNames {
 			// find vmi for node name
 			obj := &unstructured.Unstructured{}
 			vmi := &kubevirtv1.VirtualMachineInstance{}
@@ -692,28 +972,94 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 				klog.Fatal(err)
 			}
 
-			ready := vmi.Status.Phase == kubevirtv1.Running
-			serving := vmi.Status.Phase == kubevirtv1.Running
+			// Track this VMI for service-VMI mapping
+			vmiNames = append(vmiNames, vmi.Name)
+
+			// Update VMI cache
+			c.updateVMICache(vmi.Name, vmi)
+
+			// Handle transient migration state
+			// During migration, mark endpoint as not ready to prevent traffic to potentially stale IP
+			isMigrating := c.isVMIMigrating(vmi)
+			if isMigrating {
+				klog.Infof("VMI %s is currently migrating, marking endpoint as not ready", vmi.Name)
+			}
+
+			// Combine VMI readiness with tenant endpoint readiness.
+			// When a node reboots inside a KubeVirt VM, the VMI stays Running
+			// but the tenant endpoint controller marks pods on that node as not-ready.
+			// We must respect that signal to avoid routing traffic to a dead node.
+			tenantReady := nodeReady[node]
+			if !tenantReady {
+				klog.Infof("Node %s has no ready tenant endpoints, marking infra endpoint as not ready", node)
+			}
+
+			ready := vmi.Status.Phase == kubevirtv1.Running && !isMigrating && tenantReady
+			serving := vmi.Status.Phase == kubevirtv1.Running && !isMigrating && tenantReady
 			terminating := vmi.Status.Phase == kubevirtv1.Failed || vmi.Status.Phase == kubevirtv1.Succeeded
 
-			for _, i := range vmi.Status.Interfaces {
-				if i.Name == "default" {
-					desiredEndpoints = append(desiredEndpoints, &discovery.Endpoint{
-						Addresses: []string{i.IP},
-						Conditions: discovery.EndpointConditions{
-							Ready:       &ready,
-							Serving:     &serving,
-							Terminating: &terminating,
-						},
-						NodeName: &vmi.Status.NodeName,
-					})
-					continue
+			// choose "pod" if present, else "default"
+			var chosen *kubevirtv1.VirtualMachineInstanceNetworkInterface
+			for idx := range vmi.Status.Interfaces {
+				if vmi.Status.Interfaces[idx].Name == "pod" {
+					chosen = &vmi.Status.Interfaces[idx]
+					break
+				}
+				if vmi.Status.Interfaces[idx].Name == "default" && chosen == nil {
+					chosen = &vmi.Status.Interfaces[idx]
 				}
 			}
+			if chosen == nil {
+				klog.V(4).Infof("VMI %s has no suitable network interface", vmi.Name)
+				continue
+			}
+			ip := chosen.IP
+			if ip == "" && len(chosen.IPs) > 0 {
+				ip = chosen.IPs[0]
+			}
+			if ip == "" {
+				klog.V(4).Infof("VMI %s has no IP address on interface %s", vmi.Name, chosen.Name)
+				continue
+			}
+
+			desiredEndpoints = append(desiredEndpoints, &discovery.Endpoint{
+				Addresses: []string{ip},
+				Conditions: discovery.EndpointConditions{
+					Ready:       &ready,
+					Serving:     &serving,
+					Terminating: &terminating,
+				},
+				NodeName: &vmi.Status.NodeName,
+			})
 		}
 	}
 
+	// Update service-VMI mapping for future VMI event handling
+	c.serviceVMITracker.updateServiceVMIs(service.Name, vmiNames)
+
 	return desiredEndpoints
+}
+
+// isVMIMigrating checks if a VMI is currently in a migration state
+func (c *Controller) isVMIMigrating(vmi *kubevirtv1.VirtualMachineInstance) bool {
+	if vmi.Status.MigrationState == nil {
+		return false
+	}
+
+	// Check if migration is in progress (not completed and not failed)
+	migrationState := vmi.Status.MigrationState
+	if migrationState.Completed || migrationState.Failed {
+		return false
+	}
+
+	// Migration is in progress
+	klog.V(4).Infof("VMI %s migration in progress: startTimestamp=%v, targetNode=%s, sourceNode=%s",
+		vmi.Name,
+		migrationState.StartTimestamp,
+		migrationState.TargetNode,
+		migrationState.SourceNode)
+
+	return true
 }
 
 func (c *Controller) ensureEndpointSliceLabels(slice *discovery.EndpointSlice, svc *v1.Service) (map[string]string, bool) {

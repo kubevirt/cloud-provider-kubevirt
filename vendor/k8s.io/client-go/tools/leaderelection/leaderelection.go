@@ -255,6 +255,7 @@ func (le *LeaderElector) acquire(ctx context.Context) bool {
 	succeeded := false
 	desc := le.config.Lock.Describe()
 	klog.Infof("attempting to acquire leader lease %v...", desc)
+	lastInfoLog := le.clock.Now()
 	wait.JitterUntil(func() {
 		if !le.config.Coordinated {
 			succeeded = le.tryAcquireOrRenew(ctx)
@@ -264,6 +265,12 @@ func (le *LeaderElector) acquire(ctx context.Context) bool {
 		le.maybeReportTransition()
 		if !succeeded {
 			klog.V(4).Infof("failed to acquire lease %v", desc)
+			// Log at info level periodically so operators can confirm the standby is alive
+			if le.clock.Since(lastInfoLog) >= 5*time.Minute {
+				holder := le.getObservedRecord().HolderIdentity
+				klog.Infof("still waiting to acquire lease %v (current holder: %q)", desc, holder)
+				lastInfoLog = le.clock.Now()
+			}
 			return
 		}
 		le.config.Lock.RecordEvent("became leader")

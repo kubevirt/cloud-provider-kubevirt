@@ -97,3 +97,93 @@ func (t *tenantEPSTracker) contains(eps *discovery.EndpointSlice) bool {
 	}
 	return false
 }
+
+// serviceVMITracker tracks the mapping between services and VMIs they depend on.
+// This allows us to trigger service reconciliation when a VMI changes.
+type serviceVMITracker struct {
+	sync.RWMutex
+	// vmiToServices maps VMI name to set of service names that depend on it
+	vmiToServices map[string]sets.Set[string]
+	// serviceToVMIs maps service name to set of VMI names it depends on
+	serviceToVMIs map[string]sets.Set[string]
+}
+
+func newServiceVMITracker() *serviceVMITracker {
+	return &serviceVMITracker{
+		vmiToServices: make(map[string]sets.Set[string]),
+		serviceToVMIs: make(map[string]sets.Set[string]),
+	}
+}
+
+// updateServiceVMIs updates the VMIs that a service depends on.
+// Call this after reconciliation to keep track of service-VMI relationships.
+func (t *serviceVMITracker) updateServiceVMIs(serviceName string, vmiNames []string) {
+	t.Lock()
+	defer t.Unlock()
+
+	// First, remove old mappings for this service
+	if oldVMIs, exists := t.serviceToVMIs[serviceName]; exists {
+		for vmi := range oldVMIs {
+			if services, ok := t.vmiToServices[vmi]; ok {
+				services.Delete(serviceName)
+				if services.Len() == 0 {
+					delete(t.vmiToServices, vmi)
+				}
+			}
+		}
+	}
+
+	// Now add new mappings
+	newVMIs := sets.New[string](vmiNames...)
+	t.serviceToVMIs[serviceName] = newVMIs
+
+	for _, vmi := range vmiNames {
+		if _, exists := t.vmiToServices[vmi]; !exists {
+			t.vmiToServices[vmi] = sets.New[string]()
+		}
+		t.vmiToServices[vmi].Insert(serviceName)
+	}
+
+	klog.V(4).Infof("Updated service-VMI mapping: service %s depends on VMIs %v", serviceName, vmiNames)
+}
+
+// getServicesForVMI returns the services that depend on a given VMI.
+func (t *serviceVMITracker) getServicesForVMI(vmiName string) []string {
+	t.RLock()
+	defer t.RUnlock()
+
+	if services, exists := t.vmiToServices[vmiName]; exists {
+		return sets.List(services)
+	}
+	return nil
+}
+
+// removeService removes all mappings for a service.
+func (t *serviceVMITracker) removeService(serviceName string) {
+	t.Lock()
+	defer t.Unlock()
+
+	if vmis, exists := t.serviceToVMIs[serviceName]; exists {
+		for vmi := range vmis {
+			if services, ok := t.vmiToServices[vmi]; ok {
+				services.Delete(serviceName)
+				if services.Len() == 0 {
+					delete(t.vmiToServices, vmi)
+				}
+			}
+		}
+		delete(t.serviceToVMIs, serviceName)
+	}
+}
+
+// getAllServices returns all tracked service names.
+func (t *serviceVMITracker) getAllServices() []string {
+	t.RLock()
+	defer t.RUnlock()
+
+	services := make([]string, 0, len(t.serviceToVMIs))
+	for svc := range t.serviceToVMIs {
+		services = append(services, svc)
+	}
+	return services
+}
