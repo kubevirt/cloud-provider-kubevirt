@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/provider/mock/client"
 
@@ -21,7 +20,7 @@ import (
 )
 
 const (
-	lbServiceName      string = "af6ebf1722bb111e9b210d663bd873d9"
+	lbServiceName      string = "kvcluster-service1"
 	lbServiceNamespace string = "test"
 	clusterName        string = "kvcluster"
 )
@@ -29,7 +28,7 @@ const (
 var (
 	svcEmptyStatus = corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a2662ad011e9b210d663bd873d9",
+			Name:      "ns1-svc1",
 			Namespace: "test",
 		},
 		Spec: corev1.ServiceSpec{
@@ -40,7 +39,7 @@ var (
 	}
 	svcHostnameIngress = corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a6582ad011e9b210d663bd873d9",
+			Name:      "cluster2-ns3-svc3",
 			Namespace: "test",
 		},
 		Status: corev1.ServiceStatus{
@@ -54,7 +53,7 @@ var (
 	}
 	svc4 = corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a50e2ad011e9b210d663bd873d9",
+			Name:      "cluster1-ns2-svc2",
 			Namespace: "test",
 		},
 		Spec: corev1.ServiceSpec{
@@ -171,17 +170,21 @@ var _ = Describe("LoadBalancer", func() {
 			lb = &loadbalancer{
 				namespace: "test",
 				client:    c,
+				config: LoadBalancerConfig{
+					NamingStrategy: "semantic",
+				},
 			}
+			notFoundSvc4 := apierrors.NewNotFound(schema.GroupResource{Group: "v1", Resource: "services"}, "cluster2-ns4-svc4")
 			gomock.InOrder(
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a2662ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcEmptyStatus),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a50e2ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svc4),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a6582ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcHostnameIngress),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "adoesnotexistink8s", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).Return(apierrors.NewNotFound(schema.GroupResource{Group: "v1", Resource: "services"}, "adoesnotexistink8s")),
+				c.EXPECT().Get(ctx, client.ObjectKey{Name: "ns1-svc1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcEmptyStatus),
+				c.EXPECT().Get(ctx, client.ObjectKey{Name: "cluster1-ns2-svc2", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svc4),
+				c.EXPECT().Get(ctx, client.ObjectKey{Name: "cluster2-ns3-svc3", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcHostnameIngress),
+				c.EXPECT().Get(ctx, client.ObjectKey{Name: "cluster2-ns4-svc4", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).Return(notFoundSvc4),
 			)
 		})
 
-		DescribeTable("Get loadbalancer", func(serviceUID types.UID, clusterName string, expectedLBStatus *corev1.LoadBalancerStatus, expectedExists bool, expectedError error) {
-			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{UID: serviceUID}}
+		DescribeTable("Get loadbalancer", func(serviceName, serviceNamespace string, serviceUID types.UID, clusterName string, expectedLBStatus *corev1.LoadBalancerStatus, expectedExists bool, expectedError error) {
+			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: serviceNamespace, UID: serviceUID}}
 			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
 			Expect(cmpLoadBalancerStatuses(status, expectedLBStatus)).Should(BeTrue())
 			Expect(exists).Should(Equal(expectedExists))
@@ -192,10 +195,10 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 		},
-			Entry("Should return status with no IPs & hostnames", types.UID("6fa1a266-2ad0-11e9-b210-d663bd873d93"), "", makeLoadBalancerStatus([]string{}, []string{}), true, nil),
-			Entry("Should return status with IPs & no hostnames", types.UID("6fa1a50e-2ad0-11e9-b210-d663bd873d93"), "cluster1", makeLoadBalancerStatus([]string{"192.168.0.35"}, []string{}), true, nil),
-			Entry("Should return status with IPs & hostnames", types.UID("6fa1a658-2ad0-11e9-b210-d663bd873d93"), "cluster2", makeLoadBalancerStatus([]string{"192.168.0.36"}, []string{"lb1.example.com", "lb2.example.com"}), true, nil),
-			Entry("Should return with not-exist-status", types.UID("does-not-exist-in-k8s"), "cluster2", nil, false, nil),
+			Entry("Should return status with no IPs & hostnames", "svc1", "ns1", types.UID("6fa1a266-2ad0-11e9-b210-d663bd873d93"), "", makeLoadBalancerStatus([]string{}, []string{}), true, nil),
+			Entry("Should return status with IPs & no hostnames", "svc2", "ns2", types.UID("6fa1a50e-2ad0-11e9-b210-d663bd873d93"), "cluster1", makeLoadBalancerStatus([]string{"192.168.0.35"}, []string{}), true, nil),
+			Entry("Should return status with IPs & hostnames", "svc3", "ns3", types.UID("6fa1a658-2ad0-11e9-b210-d663bd873d93"), "cluster2", makeLoadBalancerStatus([]string{"192.168.0.36"}, []string{"lb1.example.com", "lb2.example.com"}), true, nil),
+			Entry("Should return with not-exist-status", "svc4", "ns4", types.UID("does-not-exist-in-k8s"), "cluster2", nil, false, nil),
 		)
 
 		AfterAll(func() {
@@ -218,18 +221,65 @@ var _ = Describe("LoadBalancer", func() {
 			lb = &loadbalancer{
 				namespace: "test",
 				client:    c,
+				config: LoadBalancerConfig{
+					NamingStrategy: "semantic",
+				},
 			}
 		})
 
-		DescribeTable("Get loadbalancer name", func(serviceUID types.UID, clusterName string, expectedName string) {
-			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{UID: serviceUID}}
+		DescribeTable("Get loadbalancer name", func(serviceName, serviceNamespace string, clusterName string, expectedName string) {
+			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: serviceNamespace}}
 			name := lb.GetLoadBalancerName(ctx, clusterName, svc)
 			Expect(name).Should(Equal(expectedName))
 		},
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a2662ad011e9b210d663bd873d9"), types.UID("6fa1a266-2ad0-11e9-b210-d663bd873d93"), "", "a6fa1a2662ad011e9b210d663bd873d9"),
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a50e2ad011e9b210d663bd873d9"), types.UID("6fa1a50e-2ad0-11e9-b210-d663bd873d93"), "cluster1", "a6fa1a50e2ad011e9b210d663bd873d9"),
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a6582ad011e9b210d663bd873d9"), types.UID("6fa1a658-2ad0-11e9-b210-d663bd873d93"), "cluster2", "a6fa1a6582ad011e9b210d663bd873d9"),
+			Entry("Should generate name from cluster and service", "nginx", "default", "mycluster", "mycluster-default-nginx"),
+			Entry("Should handle empty cluster name", "nginx", "default", "", "default-nginx"),
+			Entry("Should handle empty namespace", "nginx", "", "mycluster", "mycluster-nginx"),
+			Entry("Should sanitize special characters", "my_svc!", "ns-1", "cluster.1", "cluster-1-ns-1-my-svc"),
 		)
+
+		It("Should use annotation override when set", func() {
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "nginx",
+					Namespace: "default",
+					Annotations: map[string]string{
+						LoadBalancerNameAnnotation: "custom-lb-name",
+					},
+				},
+			}
+			name := lb.GetLoadBalancerName(ctx, "mycluster", svc)
+			Expect(name).Should(Equal("custom-lb-name"))
+		})
+
+		It("Should return legacy UID-based name when namingStrategy is not semantic", func() {
+			legacyLb := &loadbalancer{
+				namespace: "test",
+				client:    c,
+				config:    LoadBalancerConfig{},
+			}
+			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{UID: types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93")}}
+			name := legacyLb.GetLoadBalancerName(ctx, "mycluster", svc)
+			Expect(name).Should(Equal("af6ebf1722bb111e9b210d663bd873d9"))
+		})
+
+		It("Should ignore annotation when namingStrategy is not semantic", func() {
+			legacyLb := &loadbalancer{
+				namespace: "test",
+				client:    c,
+				config:    LoadBalancerConfig{},
+			}
+			svc := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93"),
+					Annotations: map[string]string{
+						LoadBalancerNameAnnotation: "custom-lb-name",
+					},
+				},
+			}
+			name := legacyLb.GetLoadBalancerName(ctx, "mycluster", svc)
+			Expect(name).Should(Equal("af6ebf1722bb111e9b210d663bd873d9"))
+		})
 
 		AfterAll(func() {
 			ctrl.Finish()
@@ -256,6 +306,7 @@ var _ = Describe("LoadBalancer", func() {
 				namespace: "test",
 				client:    c,
 				config: LoadBalancerConfig{
+					NamingStrategy:       "semantic",
 					CreationPollInterval: pointer.Int(1),
 					CreationPollTimeout:  pointer.Int(5),
 				},
@@ -291,7 +342,7 @@ var _ = Describe("LoadBalancer", func() {
 			lb.config.Selectorless = pointer.Bool(true)
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(checkSvcExistErr)
 
 			infraService1 := generateInfraService(
@@ -319,7 +370,7 @@ var _ = Describe("LoadBalancer", func() {
 				}
 				c.EXPECT().Get(
 					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
 				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -353,7 +404,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(checkSvcExistErr)
 
 			infraService1 := generateInfraService(
@@ -380,7 +431,7 @@ var _ = Describe("LoadBalancer", func() {
 				}
 				c.EXPECT().Get(
 					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
 				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -415,7 +466,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(checkSvcExistErr)
 
 			infraService1 := generateInfraService(
@@ -442,7 +493,7 @@ var _ = Describe("LoadBalancer", func() {
 				}
 				c.EXPECT().Get(
 					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
 				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -477,7 +528,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(checkSvcExistErr)
 
 			infraService1 := generateInfraService(
@@ -505,7 +556,7 @@ var _ = Describe("LoadBalancer", func() {
 				}
 				c.EXPECT().Get(
 					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
 				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -538,7 +589,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(errors.New("Test error - check if service already exist"))
 
 			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
@@ -566,7 +617,7 @@ var _ = Describe("LoadBalancer", func() {
 
 			c.EXPECT().Get(
 				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
 			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
@@ -617,7 +668,7 @@ var _ = Describe("LoadBalancer", func() {
 
 			c.EXPECT().Get(
 				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
 			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
@@ -667,7 +718,7 @@ var _ = Describe("LoadBalancer", func() {
 
 			c.EXPECT().Get(
 				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
 			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
@@ -716,7 +767,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(notFoundErr)
 
 			infraService1 := generateInfraService(
@@ -753,7 +804,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(notFoundErr)
 
 			infraService1 := generateInfraService(
@@ -780,7 +831,7 @@ var _ = Describe("LoadBalancer", func() {
 				}
 				c.EXPECT().Get(
 					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 					gomock.AssignableToTypeOf(&corev1.Service{}),
 				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 					infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -812,7 +863,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(notFoundErr)
 
 			infraService1 := generateInfraService(
@@ -829,7 +880,7 @@ var _ = Describe("LoadBalancer", func() {
 				if i == getCount-1 {
 					c.EXPECT().Get(
 						ctx,
-						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+						client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 						gomock.AssignableToTypeOf(&corev1.Service{}),
 					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 						infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -837,7 +888,7 @@ var _ = Describe("LoadBalancer", func() {
 				} else {
 					c.EXPECT().Get(
 						ctx,
-						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+						client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 						gomock.AssignableToTypeOf(&corev1.Service{}),
 					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 						infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -857,7 +908,7 @@ var _ = Describe("LoadBalancer", func() {
 			expectedError := errors.New("timed out waiting for the condition")
 
 			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Get(ctx, client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
 				Return(notFoundErr)
 
 			infraService1 := generateInfraService(
@@ -872,7 +923,7 @@ var _ = Describe("LoadBalancer", func() {
 			infraService2 := infraService1.DeepCopy()
 			c.EXPECT().Get(
 				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
 			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				infraService2.DeepCopyInto(obj.(*corev1.Service))
@@ -1023,6 +1074,7 @@ var _ = Describe("LoadBalancer", func() {
 				namespace: "test",
 				client:    c,
 				config: LoadBalancerConfig{
+					NamingStrategy:       "semantic",
 					CreationPollInterval: pointer.Int(1),
 				},
 			}
@@ -1065,7 +1117,7 @@ var _ = Describe("LoadBalancer", func() {
 			}
 			c.EXPECT().Get(
 				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+				client.ObjectKey{Name: "kvcluster-service1", Namespace: "test"},
 				gomock.AssignableToTypeOf(&corev1.Service{}),
 			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
 				if getSvcErr == nil {
