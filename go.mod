@@ -16,7 +16,7 @@ require (
 	k8s.io/endpointslice v0.34.3
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20260108192941-914a6e750570
-	kubevirt.io/api v1.7.0
+	kubevirt.io/api v1.8.2
 	sigs.k8s.io/controller-runtime v0.22.4
 )
 
