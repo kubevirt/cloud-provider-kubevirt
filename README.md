@@ -30,8 +30,8 @@ infra cluster services created for the tenant cluster is redirected into VM with
 ## How to run `kubevirt-cloud-controller-manager`
 See [Running cloud-controller-manager](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#running-cloud-controller-manager)
 for general information on how to configure your tenant cluster to run `kubevirt-cloud-controller-manager`. You can
-find example manifests for `kubevirt-cloud-controller-manager` in the [manifests directory](cluster/manifests) for
-static Pod, Deployment and DaemonSet configurations.
+find example manifests for `kubevirt-cloud-controller-manager` in the [config directory](config) for
+Kustomize-based Deployment configurations.
 
 To get it to run, you'll need to provide a kubeconfig for the infrastructure cluster to the `kubevirt-cloud-controller-manager` configuration.
 The configuration should contain an `kubeconfig` key, like in the following example:
