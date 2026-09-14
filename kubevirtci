@@ -16,6 +16,7 @@ export KUBEVIRT_STORAGE="rook-ceph-default"
 export METALLB_VERSION="v0.14.5"
 export CAPK_RELEASE_VERSION="v0.1.7"
 export CLUSTERCTL_VERSION="v1.0.0"
+export CAPI_VERSION=${CAPI_VERSION:-v1.10.10}
 export CALICO_VERSION="v3.28.0"
 
 _default_bin_path=./hack/tools/bin
@@ -103,6 +104,18 @@ function kubevirtci::prepare() {
 
 	cat << EOF > ${_default_bin_path}/clusterctl_config.yaml
 ---
+# Pin repository URLs: clusterctl v1.0.0 resolves "latest" before version flags
+# and only searches the first page of GitHub releases for its v1beta1 contract.
+providers:
+  - name: cluster-api
+    url: "https://github.com/kubernetes-sigs/cluster-api/releases/${CAPI_VERSION}/core-components.yaml"
+    type: CoreProvider
+  - name: kubeadm
+    url: "https://github.com/kubernetes-sigs/cluster-api/releases/${CAPI_VERSION}/bootstrap-components.yaml"
+    type: BootstrapProvider
+  - name: kubeadm
+    url: "https://github.com/kubernetes-sigs/cluster-api/releases/${CAPI_VERSION}/control-plane-components.yaml"
+    type: ControlPlaneProvider
 cert-manager:
   url: "https://github.com/cert-manager/cert-manager/releases/latest/cert-manager.yaml"
 EOF
