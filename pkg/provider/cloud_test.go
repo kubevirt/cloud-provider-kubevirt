@@ -2,7 +2,6 @@ package provider
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -71,7 +70,7 @@ var _ = Describe("Cloud config", func() {
 			)
 
 			BeforeEach(func() {
-				infraKubeConfig, err = ioutil.TempFile("", "infraKubeConfig")
+				infraKubeConfig, err = os.CreateTemp("", "infraKubeConfig")
 				Expect(err).NotTo(HaveOccurred())
 				_, err = infraKubeConfig.Write([]byte(invalidKubeconf))
 				Expect(err).ToNot(HaveOccurred())
