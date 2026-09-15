@@ -171,7 +171,21 @@ function kubevirtci::create_cluster() {
 	echo "Using cluster template $template"
 
 	$CLUSTERCTL_PATH generate cluster ${TENANT_CLUSTER_NAME} --target-namespace ${TENANT_CLUSTER_NAMESPACE} --kubernetes-version ${CAPK_GUEST_K8S_VERSION} --control-plane-machine-count=1 --worker-machine-count=1 --from $template | ${_kubectl} apply -f -
-    ${_kubectl} wait cluster -n kvcluster kvcluster --for=condition=Ready --timeout=5m
+    if ! ${_kubectl} wait cluster -n "${TENANT_CLUSTER_NAMESPACE}" "${TENANT_CLUSTER_NAME}" --for=condition=Ready --timeout=5m; then
+        kubevirtci::dump_cluster_diagnostics
+        return 1
+    fi
+}
+
+function kubevirtci::dump_cluster_diagnostics() {
+	${_kubectl} get pods -A -o wide --request-timeout=30s || true
+	${_kubectl} get events -A --sort-by=.metadata.creationTimestamp --request-timeout=30s || true
+	for resource in clusters kubevirtclusters kubeadmcontrolplanes machines kubevirtmachines kubeadmconfigs virtualmachines virtualmachineinstances; do
+		${_kubectl} get "${resource}" -n "${TENANT_CLUSTER_NAMESPACE}" -o yaml --request-timeout=30s || true
+	done
+	for namespace in capi-system capi-kubeadm-bootstrap-system capi-kubeadm-control-plane-system capk-system; do
+		${_kubectl} logs -n "${namespace}" -l control-plane=controller-manager --all-containers=true --prefix=true --tail=200 --request-timeout=30s || true
+	done
 }
 
 function kubevirtci::create_tenant_namespace {
