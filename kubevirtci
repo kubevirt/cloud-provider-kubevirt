@@ -100,6 +100,8 @@ function kubevirtci::prepare() {
 	LATEST=$(curl -L https://storage.googleapis.com/kubevirt-prow/devel/release/kubevirt/kubevirt/stable.txt)
 	${_kubectl} apply -f https://github.com/kubevirt/kubevirt/releases/download/${LATEST}/kubevirt-operator.yaml
 	${_kubectl} apply -f https://github.com/kubevirt/kubevirt/releases/download/${LATEST}/kubevirt-cr.yaml
+	# Kubernetes 1.30 predates image volumes; use the container-disk init-container fallback.
+	${_kubectl} -n kubevirt patch kubevirt kubevirt --type=merge -p '{"spec":{"configuration":{"developerConfiguration":{"disabledFeatureGates":["ImageVolume"]}}}}'
 	echo "installing capi..."
 
 	cat << EOF > ${_default_bin_path}/clusterctl_config.yaml
