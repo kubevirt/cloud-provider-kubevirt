@@ -31,10 +31,20 @@ import (
 // of code conflicts because changes are more likely to be scattered
 // across the file.
 const (
+	// owner: @lukasmetzner
+	// kep:  http://kep.k8s.io/5237
+	// Use watch based route controller reconciliation instead of frequent periodic reconciliation.
+	CloudControllerManagerWatchBasedRoutesReconciliation featuregate.Feature = "CloudControllerManagerWatchBasedRoutesReconciliation"
+
 	// owner: @nckturner
 	// kep:  http://kep.k8s.io/2699
 	// Enable webhook in cloud controller manager
 	CloudControllerManagerWebhook featuregate.Feature = "CloudControllerManagerWebhook"
+
+	// owner: @jefftree, @tchap
+	//
+	// Make kube-controller-manager release leader election lock on exit.
+	ControllerManagerReleaseLeaderElectionLockOnExit featuregate.Feature = "ControllerManagerReleaseLeaderElectionLockOnExit"
 )
 
 func SetupCurrentKubernetesSpecificFeatureGates(featuregates featuregate.MutableVersionedFeatureGate) error {
@@ -44,7 +54,13 @@ func SetupCurrentKubernetesSpecificFeatureGates(featuregates featuregate.Mutable
 // versionedCloudPublicFeatureGates consists of versioned cloud-specific feature keys.
 // To add a new feature, define a key for it above and add it here.
 var versionedCloudPublicFeatureGates = map[featuregate.Feature]featuregate.VersionedSpecs{
+	CloudControllerManagerWatchBasedRoutesReconciliation: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
 	CloudControllerManagerWebhook: {
 		{Version: version.MustParse("1.27"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	ControllerManagerReleaseLeaderElectionLockOnExit: {
+		{Version: version.MustParse("1.36"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
