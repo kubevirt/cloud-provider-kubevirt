@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,15 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+// +k8s:deepcopy-gen=package
+// +k8s:conversion-gen=k8s.io/cloud-provider/controllers/nodelifecycle/config
+// +k8s:conversion-gen=k8s.io/cloud-provider/controllers/nodelifecycle/config/v1alpha1
+// +k8s:openapi-gen=true
+// +k8s:openapi-model-package=io.k8s.cloud-provider.controllers.nodelifecycle.config.v1alpha1
 
-// NodeControllerConfiguration contains elements describing NodeController.
-type NodeControllerConfiguration struct {
-	// ConcurrentNodeSyncs is the number of workers
-	// concurrently synchronizing nodes
-	ConcurrentNodeSyncs int32
-	// ConcurrentNodeStatusUpdates is the number of workers
-	// concurrently updating node statuses.
-	// If unspecified or 0, ConcurrentNodeSyncs is used instead
-	ConcurrentNodeStatusUpdates int32
-}
+package v1alpha1

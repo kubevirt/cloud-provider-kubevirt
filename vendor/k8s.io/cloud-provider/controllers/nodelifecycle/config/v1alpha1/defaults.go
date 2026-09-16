@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors.
+Copyright The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,13 +16,19 @@ limitations under the License.
 
 package v1alpha1
 
-// NodeControllerConfiguration contains elements describing NodeController.
-type NodeControllerConfiguration struct {
-	// ConcurrentNodeSyncs is the number of workers
-	// concurrently synchronizing nodes
-	ConcurrentNodeSyncs int32
-	// ConcurrentNodeStatusUpdates is the number of workers
-	// concurrently updating node statuses.
-	// If unspecified or 0, ConcurrentNodeSyncs is used instead
-	ConcurrentNodeStatusUpdates int32
+import (
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// RecommendedDefaultNodeLifecycleControllerConfiguration sets default values for NodeLifecycleControllerConfiguration.
+func RecommendedDefaultNodeLifecycleControllerConfiguration(obj *NodeLifecycleControllerConfiguration) {
+	zero := metav1.Duration{}
+	if obj.NodeMonitorPeriod == zero {
+		obj.NodeMonitorPeriod = metav1.Duration{Duration: 5 * time.Second}
+	}
+	if obj.ConcurrentNodeLifecycleSyncs == 0 {
+		obj.ConcurrentNodeLifecycleSyncs = 1
+	}
 }
