@@ -282,8 +282,6 @@ func getTransformerOverridesAndKMSPluginProbes(ctx context.Context, config *apis
 
 	// For each entry in the configuration
 	for _, resourceConfig := range config.Resources {
-		resourceConfig := resourceConfig
-
 		transformers, p, used, err := prefixTransformersAndProbes(ctx, resourceConfig, apiServerID)
 		if err != nil {
 			return nil, nil, nil, err
@@ -292,7 +290,6 @@ func getTransformerOverridesAndKMSPluginProbes(ctx context.Context, config *apis
 
 		// For each resource, create a list of providers to use
 		for _, resource := range resourceConfig.Resources {
-			resource := resource
 			gr := schema.ParseGroupResource(resource)
 
 			// check if resource is masked by *.group rule
@@ -317,8 +314,6 @@ func getTransformerOverridesAndKMSPluginProbes(ctx context.Context, config *apis
 
 	transformers := make(map[schema.GroupResource]storagevalue.Transformer, len(resourceToPrefixTransformer))
 	for gr, transList := range resourceToPrefixTransformer {
-		gr := gr
-		transList := transList
 		transformers[gr] = storagevalue.NewPrefixTransformers(fmt.Errorf("no matching prefix found"), transList...)
 	}
 
@@ -395,7 +390,7 @@ func (h *kmsv2PluginProbe) rotateDEKOnKeyIDChange(ctx context.Context, statusKey
 	// allow writes indefinitely as long as there is no error
 	// allow writes for only up to kmsv2PluginWriteDEKSourceMaxTTL from now when there are errors
 	// we start the timer before we make the network call because kmsv2PluginWriteDEKSourceMaxTTL is meant to be the upper bound
-	expirationTimestamp := envelopekmsv2.NowFunc().Add(kmsv2PluginWriteDEKSourceMaxTTL)
+	expirationTimestamp := envelopekmsv2.GetNowFunc(h.name)().Add(kmsv2PluginWriteDEKSourceMaxTTL)
 
 	// dynamically check if we want to use KDF seed to derive DEKs or just a single DEK
 	// this gate can only change during tests, but the check is cheap enough to always make
@@ -431,6 +426,7 @@ func (h *kmsv2PluginProbe) rotateDEKOnKeyIDChange(ctx context.Context, statusKey
 			UID:                                   uid,
 			ExpirationTimestamp:                   expirationTimestamp,
 			CacheKey:                              cacheKey,
+			KMSProviderName:                       h.name,
 		})
 
 		// it should be logically impossible for the new state to be invalid but check just in case
@@ -566,7 +562,6 @@ func prefixTransformersAndProbes(ctx context.Context, config apiserver.ResourceC
 	var kmsUsed kmsState
 
 	for _, provider := range config.Providers {
-		provider := provider
 		var (
 			transformer    storagevalue.PrefixTransformer
 			transformerErr error
@@ -623,7 +618,6 @@ func aesPrefixTransformer(config *apiserver.AESConfiguration, fn blockTransforme
 		return result, fmt.Errorf("aes provider has no valid keys")
 	}
 	for _, key := range config.Keys {
-		key := key
 		if key.Name == "" {
 			return result, fmt.Errorf("key with invalid name provided")
 		}
@@ -635,7 +629,6 @@ func aesPrefixTransformer(config *apiserver.AESConfiguration, fn blockTransforme
 	keyTransformers := []storagevalue.PrefixTransformer{}
 
 	for _, keyData := range config.Keys {
-		keyData := keyData
 		key, err := base64.StdEncoding.DecodeString(keyData.Secret)
 		if err != nil {
 			return result, fmt.Errorf("could not obtain secret for named key %s: %w", keyData.Name, err)
@@ -676,7 +669,6 @@ func secretboxPrefixTransformer(config *apiserver.SecretboxConfiguration) (stora
 		return result, fmt.Errorf("secretbox provider has no valid keys")
 	}
 	for _, key := range config.Keys {
-		key := key
 		if key.Name == "" {
 			return result, fmt.Errorf("key with invalid name provided")
 		}
@@ -688,7 +680,6 @@ func secretboxPrefixTransformer(config *apiserver.SecretboxConfiguration) (stora
 	keyTransformers := []storagevalue.PrefixTransformer{}
 
 	for _, keyData := range config.Keys {
-		keyData := keyData
 		key, err := base64.StdEncoding.DecodeString(keyData.Secret)
 		if err != nil {
 			return result, fmt.Errorf("could not obtain secret for named key %s: %s", keyData.Name, err)
@@ -792,7 +783,9 @@ func kmsPrefixTransformer(ctx context.Context, config *apiserver.KMSConfiguratio
 			apiServerID:  apiServerID,
 		}
 		// initialize state so that Load always works
-		probe.state.Store(&envelopekmsv2.State{})
+		probe.state.Store(&envelopekmsv2.State{
+			KMSProviderName: kmsName,
+		})
 
 		primeAndProbeKMSv2(ctx, probe, kmsName)
 		transformer := storagevalue.PrefixTransformer{

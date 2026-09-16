@@ -25,9 +25,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// ClusterTrustBundles returns a ClusterTrustBundleInformer.
-	ClusterTrustBundles() ClusterTrustBundleInformer
-	// PodCertificateRequests returns a PodCertificateRequestInformer.
-	PodCertificateRequests() PodCertificateRequestInformer
+	ClusterTrustBundles() TypedClusterTrustBundleInformer
 }
 
 type version struct {
@@ -41,12 +39,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// ClusterTrustBundles returns a ClusterTrustBundleInformer.
-func (v *version) ClusterTrustBundles() ClusterTrustBundleInformer {
+// ClusterTrustBundles returns a TypedClusterTrustBundleInformer.
+func (v *version) ClusterTrustBundles() TypedClusterTrustBundleInformer {
 	return &clusterTrustBundleInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
-}
-
-// PodCertificateRequests returns a PodCertificateRequestInformer.
-func (v *version) PodCertificateRequests() PodCertificateRequestInformer {
-	return &podCertificateRequestInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
