@@ -397,9 +397,12 @@ var _ = Describe("LoadBalancer", func() {
 			checkSvcExistErr := notFoundErr
 			getCount := 1
 
+			// Tenant-only annotation that must survive the merge.
+			tenantService.Annotations["tenant-only-key"] = "tenant-only-val"
+
 			lb.infraAnnotations = map[string]string{
-				"annotation-key-1":  "overridden-by-infra",
-				"infra-only-key":    "infra-only-val",
+				"annotation-key-1": "overridden-by-infra",
+				"infra-only-key":   "infra-only-val",
 			}
 
 			c.EXPECT().
@@ -415,6 +418,7 @@ var _ = Describe("LoadBalancer", func() {
 			infraService1.Annotations = map[string]string{
 				"annotation-key-1": "overridden-by-infra",
 				"infra-only-key":   "infra-only-val",
+				"tenant-only-key":  "tenant-only-val",
 			}
 
 			c.EXPECT().Create(ctx, infraService1)
@@ -445,6 +449,10 @@ var _ = Describe("LoadBalancer", func() {
 			Expect(err).To(BeNil())
 			Expect(len(lbStatus.Ingress)).Should(Equal(1))
 			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
+
+			// Tenant-only annotation must survive; infra annotation must override tenant one.
+			Expect(infraService1.Annotations["tenant-only-key"]).Should(Equal("tenant-only-val"))
+			Expect(infraService1.Annotations["annotation-key-1"]).Should(Equal("overridden-by-infra"))
 		})
 
 		It("Should create new Service and poll LoadBalancer service 3 times", func() {
