@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/golang/mock v1.6.0
 	github.com/onsi/ginkgo/v2 v2.27.5
-	github.com/onsi/gomega v1.39.0
+	github.com/onsi/gomega v1.43.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
