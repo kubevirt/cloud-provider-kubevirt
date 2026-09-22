@@ -1446,8 +1446,10 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/third_party/forked/golang/btree
 k8s.io/utils/trace
-# kubevirt.io/api v1.7.0
+# kubevirt.io/api v1.9.0
 ## explicit; go 1.24.0
+kubevirt.io/api/backup
+kubevirt.io/api/backup/v1alpha1
 kubevirt.io/api/core
 kubevirt.io/api/core/v1
 # kubevirt.io/containerized-data-importer-api v1.64.0
