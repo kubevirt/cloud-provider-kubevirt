@@ -771,3 +771,66 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 
 	})
 })
+
+var _ = g.Describe("finalize", func() {
+	var (
+		svc   *v1.Service
+		owner []metav1.OwnerReference
+		old   *discoveryv1.EndpointSlice
+	)
+
+	newSlice := func(name, address string, owners []metav1.OwnerReference) *discoveryv1.EndpointSlice {
+		return &discoveryv1.EndpointSlice{
+			ObjectMeta:  metav1.ObjectMeta{Name: name, Namespace: infraNamespace, OwnerReferences: owners},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}}},
+		}
+	}
+
+	sliceAddresses := func(client *fake.Clientset) map[string]string {
+		list, err := client.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		addresses := map[string]string{}
+		for _, s := range list.Items {
+			addresses[s.Name] = s.Endpoints[0].Addresses[0]
+		}
+		return addresses
+	}
+
+	g.BeforeEach(func() {
+		svc = &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: infraNamespace, UID: "svc-uid"}}
+		owner = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: svc.Name, UID: svc.UID}}
+		old = newSlice("svc-old", "10.0.0.1", owner)
+	})
+
+	g.It("turns one slice to delete and one to create into an update", func() {
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("", "10.0.0.2", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-old": "10.0.0.2"}))
+	})
+
+	g.It("updates the first slice to create and creates the others", func() {
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("", "10.0.0.2", owner), newSlice("svc-second", "10.0.0.3", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-old": "10.0.0.2", "svc-second": "10.0.0.3"}))
+	})
+
+	g.It("deletes a slice the Service does not own instead of reusing it", func() {
+		old.OwnerReferences = nil
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("svc-new", "10.0.0.2", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-new": "10.0.0.2"}))
+	})
+})

@@ -595,9 +595,11 @@ func (c *Controller) finalize(service *v1.Service, slicesToCreate []*discovery.E
 			break
 		}
 		if slicesToDelete[i].AddressType == slicesToCreate[0].AddressType && ownedBy(slicesToDelete[i], service) {
-			slicesToCreate[0].Name = slicesToDelete[i].Name
+			// Take the slice before dropping it from slicesToCreate.
+			reused := slicesToCreate[0]
+			reused.Name = slicesToDelete[i].Name
 			slicesToCreate = slicesToCreate[1:]
-			slicesToUpdate = append(slicesToUpdate, slicesToCreate[0])
+			slicesToUpdate = append(slicesToUpdate, reused)
 			slicesToDelete = append(slicesToDelete[:i], slicesToDelete[i+1:]...)
 		} else {
 			i++
