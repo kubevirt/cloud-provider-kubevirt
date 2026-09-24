@@ -29,10 +29,11 @@ const (
 )
 
 type loadbalancer struct {
-	namespace   string
-	client      client.Client
-	config      LoadBalancerConfig
-	infraLabels map[string]string
+	namespace        string
+	client           client.Client
+	config           LoadBalancerConfig
+	infraLabels      map[string]string
+	infraAnnotations map[string]string
 }
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -94,7 +95,15 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		lbLabels[key] = val
 	}
 
-	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, lbLabels, ports)
+	lbAnnotations := map[string]string{}
+	for key, val := range service.Annotations {
+		lbAnnotations[key] = val
+	}
+	for key, val := range lb.infraAnnotations {
+		lbAnnotations[key] = val
+	}
+
+	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, lbLabels, lbAnnotations, ports)
 	if err != nil {
 		klog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
@@ -193,12 +202,12 @@ func (lb *loadbalancer) getLoadBalancerService(ctx context.Context, lbName strin
 	return &service, nil
 }
 
-func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName string, service *corev1.Service, vmiLabels map[string]string, lbLabels map[string]string, ports []corev1.ServicePort) (*corev1.Service, error) {
+func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName string, service *corev1.Service, vmiLabels map[string]string, lbLabels map[string]string, lbAnnotations map[string]string, ports []corev1.ServicePort) (*corev1.Service, error) {
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        lbName,
 			Namespace:   lb.namespace,
-			Annotations: service.Annotations,
+			Annotations: lbAnnotations,
 			Labels:      lbLabels,
 		},
 		Spec: corev1.ServiceSpec{
