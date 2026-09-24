@@ -46,6 +46,111 @@ loadBalancer:
   creationPollTimeout: 60
 ```
 
+### LoadBalancer Service field handling
+
+When a tenant cluster creates a `Service` of type `LoadBalancer`, the provider
+creates a mirrored `Service` in the infra cluster. Because the infra cluster is
+more privileged than the tenant cluster, the provider only propagates the tenant
+Service fields that are safe to expose across that trust boundary:
+
+- `spec.ports` are mapped to tenant NodePorts. Infra-allocated NodePorts are
+  retained during reconciliation. `spec.externalTrafficPolicy` is copied at creation.
+- `spec.loadBalancerSourceRanges` is propagated (falling back to the legacy
+  `service.beta.kubernetes.io/load-balancer-source-ranges` annotation) so that a
+  tenant's source restriction is forwarded. Invalid ranges cause reconciliation
+  to fail; enforcement depends on the infra load-balancer/network implementation.
+
+The standard Kubernetes service controller skips tenant Services with
+`spec.loadBalancerClass` set. Those Services need a separate controller; setting
+the field does not select a backend for a mirrored infra Service.
+
+The following tenant fields are **not** propagated by default:
+
+- `metadata.annotations`: no tenant annotations are copied unless the infra
+  operator allowlists specific keys via `loadBalancer.allowedAnnotations`.
+  The provider's ownership annotation, `kubectl.kubernetes.io/last-applied-configuration`,
+  and the legacy source-range annotation are never copied, even if allowlisted.
+  Other keys, including provider-specific `service.beta.kubernetes.io/*` keys,
+  may be explicitly allowlisted.
+- `spec.externalIPs`: never copied (avoids CVE-2020-8554-style interception).
+- `spec.healthCheckNodePort`: never copied; the infra Service manages its own
+  node ports.
+- `spec.loadBalancerIP`: ignored unless the infra operator opts in via
+  `loadBalancer.allowTenantLoadBalancerIP`, so a tenant cannot select a specific
+  address from the infra cluster's shared pool.
+
+Ignored `externalIPs` and `loadBalancerIP` requests generate Warning events on
+the tenant Service on creation and reconciliation.
+
+#### Tenant event permissions
+
+The recorder needs `create` and `patch` permissions on core API `events` in
+every tenant namespace containing Services. The current client-go recorder uses
+`create` for new events and `patch` for repeated events.
+
+The identity to authorize depends on the CCM configuration:
+
+- With shared credentials (the packaged Deployment's default), authorize the
+  identity in the tenant `--kubeconfig`. The name passed to the client builder
+  does not select a different identity in this mode.
+- With `--use-service-account-credentials`, authorize the tenant
+  `service-controller` ServiceAccount in the controller client builder's
+  configured namespace (normally `kube-system`).
+
+An event-only ClusterRole and example binding are provided in
+[`config/tenant-rbac/events.yaml`](config/tenant-rbac/events.yaml). Adjust the
+binding subject to the actual tenant identity and apply the file to the
+**tenant** cluster. Existing CCM permissions remain necessary. This file is
+deliberately separate from `config/rbac`, which is installed alongside the
+provider in the infrastructure cluster; granting permissions there does not
+authorize writes to the tenant API.
+
+Check with the same tenant credentials the recorder uses, for example:
+
+```shell
+kubectl --kubeconfig=<tenant-ccm-kubeconfig> auth can-i create events --all-namespaces
+kubectl --kubeconfig=<tenant-ccm-kubeconfig> auth can-i patch events --all-namespaces
+```
+
+Without these permissions, event writes are forbidden even though LoadBalancer
+reconciliation can otherwise succeed.
+
+#### Reconciliation and migration
+
+Ports, source ranges, allowed annotations and the loadBalancerIP policy are
+reconciled on update; existing infra `externalIPs` are cleared. Infra-allocated
+health-check ports and any infra load-balancer class are preserved.
+
+The infra-only `cloud-provider.kubevirt.io/tenant-annotation-keys` annotation
+tracks provider-managed keys so that tenant removal or allowlist revocation
+removes previously copied annotations without deleting other infra annotations.
+
+**Upgrade:** older Services have no annotation ownership record. On first
+reconciliation, only annotations whose keys and values still match the current
+tenant Service are identified for cleanup. Historical annotations no longer
+matching the tenant require an infra-operator audit and manual cleanup; matching
+annotations independently set on both sides cannot be distinguished. Review
+existing infra Services before upgrading. Clearing an IP request does not
+guarantee that the infra controller releases an already allocated address, and
+removing an annotation does not necessarily undo external side effects such as
+DNS records. Audit those resources too. Existing health-check port allocations
+are retained rather than reassigned during upgrade.
+
+Example enabling a restricted annotation allowlist and tenant-requested IPs:
+```yaml
+kubeconfig: <infraKubeConfigPath>
+loadBalancer:
+  allowedAnnotations:
+    - example.com/some-controller-key
+  allowTenantLoadBalancerIP: true
+```
+
+> **Security note:** enabling `allowedAnnotations` (for example load-balancer
+> IPAM keys) or `allowTenantLoadBalancerIP` lets a tenant cluster influence
+> infra-cluster load-balancer behaviour, including selecting a specific address
+> from the infra cluster's shared pool. Only enable these in single-tenant or
+> otherwise trusted setups.
+
 ## How to build a Docker image
 With `make image` you can build a [Docker image](build/images/kubevirt-cloud-controller-manager) containing `kubevirt-cloud-controller-manager`.
 
