@@ -129,14 +129,14 @@ func cmpLoadBalancerStatuses(a, b *corev1.LoadBalancerStatus) bool {
 func generateInfraService(tenantSvc *corev1.Service, ports []corev1.ServicePort) *corev1.Service {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      lbServiceName,
-			Namespace: lbServiceNamespace,
+			Name:        lbServiceName,
+			Namespace:   lbServiceNamespace,
+			Annotations: map[string]string{tenantAnnotationKeys: "[]"},
 			Labels: map[string]string{
 				"cluster.x-k8s.io/tenant-service-name":      tenantSvc.Name,
 				"cluster.x-k8s.io/tenant-service-namespace": tenantSvc.Namespace,
 				"cluster.x-k8s.io/cluster-name":             clusterName,
 			},
-			Annotations: tenantSvc.Annotations,
 		},
 		Spec: corev1.ServiceSpec{
 			Type:                  corev1.ServiceTypeLoadBalancer,
@@ -881,6 +881,122 @@ var _ = Describe("LoadBalancer", func() {
 			Expect(err).Should(MatchError(expectedError))
 		})
 
+		// expectCreatedInfraService returns the infra Service that the provider is
+		// expected to create for the current tenantService, asserting on it and
+		// then satisfying the post-create status poll.
+		expectCreatedInfraService := func(mutate func(svc *corev1.Service)) {
+			c.EXPECT().
+				Get(ctx, client.ObjectKey{Name: lbServiceName, Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Return(notFoundErr)
+
+			expected := generateInfraService(
+				tenantService,
+				[]corev1.ServicePort{
+					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
+				},
+			)
+			if mutate != nil {
+				mutate(expected)
+			}
+			c.EXPECT().Create(ctx, expected)
+
+			created := expected.DeepCopy()
+			created.Status = corev1.ServiceStatus{
+				LoadBalancer: corev1.LoadBalancerStatus{
+					Ingress: []corev1.LoadBalancerIngress{{IP: loadBalancerIP}},
+				},
+			}
+			c.EXPECT().Get(
+				ctx,
+				client.ObjectKey{Name: lbServiceName, Namespace: "test"},
+				gomock.AssignableToTypeOf(&corev1.Service{}),
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
+				created.DeepCopyInto(obj.(*corev1.Service))
+			})
+		}
+
+		It("Should not copy tenant annotations by default", func() {
+			tenantService.Annotations = map[string]string{"example.com/any": "from-tenant"}
+			expectCreatedInfraService(nil)
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should copy only allowlisted tenant annotations", func() {
+			tenantService.Annotations = map[string]string{
+				"example.com/allowed": "yes",
+				"example.com/denied":  "no",
+			}
+			lb.config.AllowedAnnotations = []string{"example.com/allowed"}
+			expectCreatedInfraService(func(svc *corev1.Service) {
+				svc.Annotations = map[string]string{"example.com/allowed": "yes", tenantAnnotationKeys: `["example.com/allowed"]`}
+			})
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should never copy last-applied configuration even if allowlisted", func() {
+			tenantService.Annotations = map[string]string{
+				"kubectl.kubernetes.io/last-applied-configuration": "{}",
+			}
+			lb.config.AllowedAnnotations = []string{"kubectl.kubernetes.io/last-applied-configuration"}
+			expectCreatedInfraService(nil)
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should not copy tenant externalIPs", func() {
+			tenantService.Spec.ExternalIPs = []string{"203.0.113.10"}
+			expectCreatedInfraService(nil)
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should not copy tenant loadBalancerIP by default", func() {
+			tenantService.Spec.LoadBalancerIP = "198.51.100.5"
+			expectCreatedInfraService(nil)
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should copy tenant loadBalancerIP when explicitly allowed", func() {
+			tenantService.Spec.LoadBalancerIP = "198.51.100.5"
+			lb.config.AllowTenantLoadBalancerIP = pointer.Bool(true)
+			expectCreatedInfraService(func(svc *corev1.Service) {
+				svc.Spec.LoadBalancerIP = "198.51.100.5"
+			})
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should copy loadBalancerSourceRanges from the field", func() {
+			tenantService.Spec.LoadBalancerSourceRanges = []string{"203.0.113.0/24"}
+			expectCreatedInfraService(func(svc *corev1.Service) {
+				svc.Spec.LoadBalancerSourceRanges = []string{"203.0.113.0/24"}
+			})
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
+		It("Should copy loadBalancerSourceRanges from the legacy annotation", func() {
+			tenantService.Annotations = map[string]string{
+				"service.beta.kubernetes.io/load-balancer-source-ranges": "203.0.113.0/24, 198.51.100.0/24",
+			}
+			expectCreatedInfraService(func(svc *corev1.Service) {
+				svc.Spec.LoadBalancerSourceRanges = []string{"198.51.100.0/24", "203.0.113.0/24"}
+			})
+
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+		})
+
 		AfterAll(func() {
 			ctrl.Finish()
 		})
@@ -1135,6 +1251,42 @@ var _ = Describe("LoadBalancer", func() {
 
 			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
 			Expect(err).Should(Equal(expectedError))
+		})
+
+		It("Should clean fields copied verbatim by older builds", func() {
+			// Simulate an infra Service created by an older provider build that
+			// copied tenant annotations and externalIPs verbatim.
+			stale := generateInfraService(
+				tenantService,
+				[]corev1.ServicePort{
+					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
+				},
+			)
+			stale.Annotations = map[string]string{"example.com/leaked": "stale"}
+			tenantService.Annotations = map[string]string{"example.com/leaked": "stale"}
+			stale.Spec.ExternalIPs = []string{"203.0.113.10"}
+			stale.Status = corev1.ServiceStatus{
+				LoadBalancer: corev1.LoadBalancerStatus{
+					Ingress: []corev1.LoadBalancerIngress{{IP: loadBalancerIP}},
+				},
+			}
+
+			c.EXPECT().Get(
+				ctx,
+				client.ObjectKey{Name: lbServiceName, Namespace: "test"},
+				gomock.AssignableToTypeOf(&corev1.Service{}),
+			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
+				stale.DeepCopyInto(obj.(*corev1.Service))
+			})
+
+			cleaned := stale.DeepCopy()
+			cleaned.Annotations = map[string]string{tenantAnnotationKeys: "[]"}
+			cleaned.Spec.ExternalIPs = nil
+
+			c.EXPECT().Update(ctx, cleaned)
+
+			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).ShouldNot(HaveOccurred())
 		})
 
 		AfterAll(func() {
