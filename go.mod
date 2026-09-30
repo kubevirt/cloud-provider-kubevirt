@@ -13,7 +13,7 @@ require (
 	k8s.io/cloud-provider v0.37.0
 	k8s.io/component-base v0.37.1
 	k8s.io/controller-manager v0.37.1
-	k8s.io/endpointslice v0.37.0
+	k8s.io/endpointslice v0.37.1
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	kubevirt.io/api v1.9.0
