@@ -1,0 +1,26 @@
+# Apply to the TENANT cluster, not the infrastructure cluster.
+# This is supplemental event RBAC, not a complete CCM role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-cloud-controller-manager-events
+rules:
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-cloud-controller-manager-events
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubevirt-cloud-controller-manager-events
+subjects:
+# Replace this with the identity used by the tenant kubeconfig. When using
+# --use-service-account-credentials, bind the tenant service-controller account
+# in the namespace configured for the controller client builder instead.
+- kind: ServiceAccount
+  name: cloud-controller-manager
+  namespace: kube-system

@@ -9,8 +9,10 @@ import (
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/pointer"
@@ -39,6 +41,7 @@ type Cloud struct {
 	namespace string
 	client    client.Client
 	config    CloudConfig
+	recorder  record.EventRecorder
 }
 
 type CloudConfig struct {
@@ -67,6 +70,21 @@ type LoadBalancerConfig struct {
 	// This is a temporary flag to enable/disable the EPS controller
 	// When disabled the service selector is used.
 	EnableEPSController *bool `yaml:"enableEPSController,omitempty"`
+
+	// AllowedAnnotations is an allowlist of tenant Service annotation keys that
+	// are copied onto the mirrored Service created in the infra cluster.
+	// By default (empty list) no tenant annotations are copied, so that a tenant
+	// cluster administrator cannot influence infra-cluster controllers (for
+	// example load-balancer IPAM or external-dns) that read Service annotations.
+	// The infra operator opts in to specific keys as needed.
+	AllowedAnnotations []string `yaml:"allowedAnnotations,omitempty"`
+
+	// AllowTenantLoadBalancerIP controls whether the tenant Service's
+	// spec.loadBalancerIP is honoured on the infra Service. It is false by
+	// default because a tenant could otherwise select a specific address from
+	// the infra cluster's shared pool. When false and a tenant requests an IP,
+	// the request is ignored and a Warning event is emitted on the tenant Service.
+	AllowTenantLoadBalancerIP *bool `yaml:"allowTenantLoadBalancerIP,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -161,6 +179,21 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 // Initialize provides the Cloud with a kubernetes client builder and may spawn goroutines
 // to perform housekeeping activities within the Cloud provider.
 func (c *Cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
+	if !c.config.LoadBalancer.Enabled {
+		return
+	}
+	// The builder provides a tenant client, unlike c.client which targets infra.
+	// Reuse the service controller identity with per-controller credentials.
+	// Shared-credential builders use the tenant kubeconfig identity instead.
+	// That identity must have create/patch permissions on tenant core Events.
+	tenantClient := clientBuilder.ClientOrDie("service-controller")
+	broadcaster := record.NewBroadcaster()
+	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: tenantClient.CoreV1().Events("")})
+	c.recorder = broadcaster.NewRecorder(scheme, corev1.EventSource{Component: "cloud-provider-kubevirt"})
+	go func() {
+		<-stop
+		broadcaster.Shutdown()
+	}()
 }
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
@@ -173,6 +206,7 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 		client:      c.client,
 		config:      c.config.LoadBalancer,
 		infraLabels: c.config.InfraLabels,
+		recorder:    c.recorder,
 	}, true
 }
 
