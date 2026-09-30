@@ -393,6 +393,68 @@ var _ = Describe("LoadBalancer", func() {
 
 		})
 
+		It("Should merge InfraAnnotations into the infra Service, with InfraAnnotations overriding tenant annotations", func() {
+			checkSvcExistErr := notFoundErr
+			getCount := 1
+
+			// Tenant-only annotation that must survive the merge.
+			tenantService.Annotations["tenant-only-key"] = "tenant-only-val"
+
+			lb.infraAnnotations = map[string]string{
+				"annotation-key-1": "overridden-by-infra",
+				"infra-only-key":   "infra-only-val",
+			}
+
+			c.EXPECT().
+				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
+				Return(checkSvcExistErr)
+
+			infraService1 := generateInfraService(
+				tenantService,
+				[]corev1.ServicePort{
+					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
+				},
+			)
+			infraService1.Annotations = map[string]string{
+				"annotation-key-1": "overridden-by-infra",
+				"infra-only-key":   "infra-only-val",
+				"tenant-only-key":  "tenant-only-val",
+			}
+
+			c.EXPECT().Create(ctx, infraService1)
+
+			for i := 0; i < getCount; i++ {
+				infraService2 := infraService1.DeepCopy()
+				if i == getCount-1 {
+					infraService2.Status = corev1.ServiceStatus{
+						LoadBalancer: corev1.LoadBalancerStatus{
+							Ingress: []corev1.LoadBalancerIngress{
+								{
+									IP: loadBalancerIP,
+								},
+							},
+						},
+					}
+				}
+				c.EXPECT().Get(
+					ctx,
+					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
+					gomock.AssignableToTypeOf(&corev1.Service{}),
+				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
+					infraService2.DeepCopyInto(obj.(*corev1.Service))
+				})
+			}
+
+			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
+			Expect(err).To(BeNil())
+			Expect(len(lbStatus.Ingress)).Should(Equal(1))
+			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
+
+			// Tenant-only annotation must survive; infra annotation must override tenant one.
+			Expect(infraService1.Annotations["tenant-only-key"]).Should(Equal("tenant-only-val"))
+			Expect(infraService1.Annotations["annotation-key-1"]).Should(Equal("overridden-by-infra"))
+		})
+
 		It("Should create new Service and poll LoadBalancer service 3 times", func() {
 			checkSvcExistErr := notFoundErr
 			getCount := 3
