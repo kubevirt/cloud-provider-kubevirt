@@ -57,8 +57,11 @@ Service fields that are safe to expose across that trust boundary:
   retained during reconciliation. `spec.externalTrafficPolicy` is copied at creation.
 - `spec.loadBalancerSourceRanges` is propagated (falling back to the legacy
   `service.beta.kubernetes.io/load-balancer-source-ranges` annotation) so that a
-  tenant's source restriction is forwarded. Invalid ranges cause reconciliation
-  to fail; enforcement depends on the infra load-balancer/network implementation.
+  tenant's source restriction is forwarded. Invalid ranges block creation. On an
+  existing mirror, the provider keeps the current source restrictions and reports
+  the error, but still removes revoked annotations, disallowed or withdrawn IP
+  requests, and legacy `externalIPs`. Enforcement depends on the infra
+  load-balancer/network implementation.
 
 The standard Kubernetes service controller skips tenant Services with
 `spec.loadBalancerClass` set. Those Services need a separate controller; setting
@@ -124,12 +127,18 @@ health-check ports and any infra load-balancer class are preserved.
 The infra-only `cloud-provider.kubevirt.io/tenant-annotation-keys` annotation
 tracks provider-managed keys so that tenant removal or allowlist revocation
 removes previously copied annotations without deleting other infra annotations.
+The record is only trusted when the infra Service also carries the
+`cloud-provider.kubevirt.io/annotation-ownership: v1` label, which the provider
+sets whenever it writes the record. Older builds copied every tenant annotation
+but never tenant labels, so a record without the label is ignored and replaced.
 
 **Upgrade:** older Services have no annotation ownership record. On first
 reconciliation, only annotations whose keys and values still match the current
 tenant Service are identified for cleanup. Historical annotations no longer
 matching the tenant require an infra-operator audit and manual cleanup; matching
-annotations independently set on both sides cannot be distinguished. Review
+annotations independently set on both sides cannot be distinguished. An infra
+Service from an older build that already carries
+`cloud-provider.kubevirt.io/tenant-annotation-keys` got it from the tenant. Review
 existing infra Services before upgrading. Clearing an IP request does not
 guarantee that the infra controller releases an already allocated address, and
 removing an annotation does not necessarily undo external side effects such as

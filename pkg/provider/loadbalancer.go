@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +34,11 @@ const (
 
 	// This infra-only annotation records keys owned by the mirroring provider.
 	tenantAnnotationKeys = "cloud-provider.kubevirt.io/tenant-annotation-keys"
+	// annotationOwnershipLabel marks tenantAnnotationKeys as written by this provider.
+	// Older builds copied every tenant annotation onto the infra Service, so the record
+	// alone may come from the tenant; they never let tenants set infra labels.
+	annotationOwnershipLabel      = "cloud-provider.kubevirt.io/annotation-ownership"
+	annotationOwnershipLabelValue = "v1"
 )
 
 type loadbalancer struct {
@@ -134,25 +138,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	return &lbService.Status.LoadBalancer, nil
 }
 
-// UpdateLoadBalancer reconciles the managed fields in the infra Service.
-// Implementations must treat the *v1.Service and *v1.Node
-// parameters as read-only and not modify them.
-// Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
-	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
-	var lbService corev1.Service
-	if err := lb.client.Get(ctx, client.ObjectKey{Name: lbName, Namespace: lb.namespace}, &lbService); err != nil {
-		if errors.IsNotFound(err) {
-			klog.Errorf("Service %s doesn't exist in namespace %s: %v", lbName, lb.namespace, err)
-			return err
-		}
-		klog.Errorf("Failed to get Service %s in namespace %s: %v", lbName, lb.namespace, err)
-		return err
-	}
-
-	ports := lb.createLoadBalancerServicePorts(service)
-	// LoadBalancer already exists, reconcile the mirrored fields if changed
-	return lb.reconcileLoadBalancerService(ctx, service, &lbService, ports)
+// UpdateLoadBalancer handles node changes. Backend selection does not use this
+// node list, and its Service snapshot can predate a completed EnsureLoadBalancer.
+func (lb *loadbalancer) UpdateLoadBalancer(context.Context, string, *corev1.Service, []*corev1.Node) error {
+	return nil
 }
 
 // reconcileLoadBalancerService updates an existing infra Service so that its
@@ -163,15 +152,18 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 // older builds that copied tenant fields verbatim.
 func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, service, lbService *corev1.Service, ports []corev1.ServicePort) error {
 	lb.warnIgnoredFields(service)
-	desiredSourceRanges, err := tenantLoadBalancerSourceRanges(service)
-	if err != nil {
-		return err
-	}
-	desiredAnnotations, err := lb.reconcileAnnotations(service, lbService.Annotations)
-	if err != nil {
-		return err
-	}
+	desiredSourceRanges, rangeErr := tenantLoadBalancerSourceRanges(service)
+	trusted := lbService.Labels[annotationOwnershipLabel] == annotationOwnershipLabelValue
+	desiredAnnotations := lb.reconcileAnnotations(service, lbService.Annotations, trusted, rangeErr != nil)
 	changed := false
+
+	if !trusted {
+		if lbService.Labels == nil {
+			lbService.Labels = map[string]string{}
+		}
+		lbService.Labels[annotationOwnershipLabel] = annotationOwnershipLabelValue
+		changed = true
+	}
 
 	// NodePorts belong to the infra Service. Preserve API-allocated values for
 	// retained ports rather than resetting them on every reconciliation.
@@ -183,7 +175,7 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 			}
 		}
 	}
-	if !equality.Semantic.DeepEqual(ports, lbService.Spec.Ports) {
+	if rangeErr == nil && !equality.Semantic.DeepEqual(ports, lbService.Spec.Ports) {
 		lbService.Spec.Ports = ports
 		changed = true
 	}
@@ -193,7 +185,7 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 		changed = true
 	}
 
-	if !equality.Semantic.DeepEqual(desiredSourceRanges, lbService.Spec.LoadBalancerSourceRanges) {
+	if rangeErr == nil && !equality.Semantic.DeepEqual(desiredSourceRanges, lbService.Spec.LoadBalancerSourceRanges) {
 		lbService.Spec.LoadBalancerSourceRanges = desiredSourceRanges
 		changed = true
 	}
@@ -201,6 +193,9 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 	desiredLoadBalancerIP := ""
 	if service.Spec.LoadBalancerIP != "" && lb.config.AllowTenantLoadBalancerIP != nil && *lb.config.AllowTenantLoadBalancerIP {
 		desiredLoadBalancerIP = service.Spec.LoadBalancerIP
+		if rangeErr != nil {
+			desiredLoadBalancerIP = lbService.Spec.LoadBalancerIP
+		}
 	}
 	if desiredLoadBalancerIP != lbService.Spec.LoadBalancerIP {
 		lbService.Spec.LoadBalancerIP = desiredLoadBalancerIP
@@ -214,13 +209,13 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 	}
 
 	if !changed {
-		return nil
+		return rangeErr
 	}
 	if err := lb.client.Update(ctx, lbService); err != nil {
 		klog.Errorf("Failed to update LoadBalancer service: %v", err)
 		return err
 	}
-	return nil
+	return rangeErr
 }
 
 // EnsureLoadBalancerDeleted deletes the specified load balancer if it
@@ -266,16 +261,18 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 	if err != nil {
 		return nil, err
 	}
-	annotations, err := lb.reconcileAnnotations(service, nil)
-	if err != nil {
-		return nil, err
+	annotations := lb.reconcileAnnotations(service, nil, false, false)
+	labels := make(map[string]string, len(lbLabels)+1)
+	for key, value := range lbLabels {
+		labels[key] = value
 	}
+	labels[annotationOwnershipLabel] = annotationOwnershipLabelValue
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        lbName,
 			Namespace:   lb.namespace,
 			Annotations: annotations,
-			Labels:      lbLabels,
+			Labels:      labels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:                    ports,
@@ -331,40 +328,55 @@ func (lb *loadbalancer) allowedAnnotations(service *corev1.Service) map[string]s
 }
 
 // reconcileAnnotations preserves infra-owned annotations and replaces only keys
-// previously managed by this provider. Legacy Services have no ownership record:
-// only keys still matching the current tenant value can be identified for cleanup.
-func (lb *loadbalancer) reconcileAnnotations(service *corev1.Service, existing map[string]string) (map[string]string, error) {
+// previously managed by this provider. The ownership record is only trusted when
+// the infra Service carries annotationOwnershipLabel; otherwise (legacy Services,
+// where the record may have been copied from the tenant) only keys still matching
+// the current tenant value can be identified for cleanup. It never fails, so the
+// annotation bookkeeping cannot block the rest of the reconciliation.
+func (lb *loadbalancer) reconcileAnnotations(service *corev1.Service, existing map[string]string, trusted, cleanupOnly bool) map[string]string {
 	result := make(map[string]string, len(existing)+1)
 	for key, value := range existing {
 		result[key] = value
 	}
-	if raw, tracked := existing[tenantAnnotationKeys]; tracked {
-		var keys []string
+	var keys []string
+	if raw, tracked := existing[tenantAnnotationKeys]; trusted && tracked {
 		if err := json.Unmarshal([]byte(raw), &keys); err != nil {
-			return nil, fmt.Errorf("invalid infra annotation %s: %w", tenantAnnotationKeys, err)
-		}
-		for _, key := range keys {
-			delete(result, key)
+			klog.Errorf("Ignoring invalid infra annotation %s: %v", tenantAnnotationKeys, err)
+			trusted = false
 		}
 	} else {
+		trusted = false
+	}
+	if !trusted {
+		keys = nil
 		for key, value := range service.Annotations {
 			if current, present := result[key]; present && current == value {
-				delete(result, key)
+				keys = append(keys, key)
 			}
 		}
 	}
-	keys := []string{}
-	for key, value := range lb.allowedAnnotations(service) {
-		result[key] = value
-		keys = append(keys, key)
+	owned := []string{}
+	allowed := lb.allowedAnnotations(service)
+	for _, key := range keys {
+		// Preserve legacy source restrictions and keep only existing grants.
+		_, stillAllowed := allowed[key]
+		_, exists := result[key]
+		if cleanupOnly && exists && (stillAllowed || key == corev1.AnnotationLoadBalancerSourceRangesKey) {
+			owned = append(owned, key)
+			continue
+		}
+		delete(result, key)
 	}
-	sort.Strings(keys)
-	encoded, err := json.Marshal(keys)
-	if err != nil {
-		return nil, err
+	if !cleanupOnly {
+		for key, value := range allowed {
+			result[key] = value
+			owned = append(owned, key)
+		}
 	}
+	sort.Strings(owned)
+	encoded, _ := json.Marshal(owned) // marshalling []string cannot fail
 	result[tenantAnnotationKeys] = string(encoded)
-	return result, nil
+	return result
 }
 
 func (lb *loadbalancer) warnIgnoredFields(service *corev1.Service) {
