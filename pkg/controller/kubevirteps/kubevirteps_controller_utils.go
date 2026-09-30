@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
 // source: https://github.com/kubernetes/endpointslice/blob/master/utils.go#L280
@@ -96,4 +97,44 @@ func (t *tenantEPSTracker) contains(eps *discovery.EndpointSlice) bool {
 		}
 	}
 	return false
+}
+
+// tenantNodeConditions folds the conditions of every tenant endpoint on one node (one VM).
+type tenantNodeConditions struct {
+	ready              bool // at least one endpoint is ready
+	serving            bool // at least one endpoint is serving
+	terminating        bool // every endpoint is terminating
+	servingTerminating bool // at least one endpoint is serving and terminating
+}
+
+func newTenantNodeConditions() *tenantNodeConditions {
+	return &tenantNodeConditions{terminating: true}
+}
+
+// add folds one tenant endpoint's conditions in. Nil conditions are read as the EndpointSlice
+// API defines them (ready and serving true, terminating false). A terminating endpoint is
+// never counted as ready, even when ready is left unset.
+func (n *tenantNodeConditions) add(c discovery.EndpointConditions) {
+	terminating := c.Terminating != nil && *c.Terminating
+	ready := (c.Ready == nil || *c.Ready) && !terminating
+	serving := c.Serving == nil || *c.Serving
+	n.ready = n.ready || ready
+	n.serving = n.serving || serving
+	n.terminating = n.terminating && terminating
+	n.servingTerminating = n.servingTerminating || (serving && terminating)
+}
+
+// forVMI returns the infra endpoint's conditions: the tenant endpoints' conditions, and only
+// while the VM is running. A stopped VM (Failed or Succeeded) is terminating whatever the
+// tenant still says.
+//
+// The VM is terminating when every tenant endpoint on it is, and also when none is ready but
+// one is serving and terminating: kube-proxy and Cilium fall back to serving and terminating
+// endpoints when no endpoint is ready, so a pod that is still starting must not hide a pod
+// that is draining on the same VM.
+func (n *tenantNodeConditions) forVMI(phase kubevirtv1.VirtualMachineInstancePhase) (ready, serving, terminating bool) {
+	running := phase == kubevirtv1.Running
+	stopped := phase == kubevirtv1.Failed || phase == kubevirtv1.Succeeded
+	terminating = n.terminating || (!n.ready && n.servingTerminating)
+	return running && n.ready, running && n.serving, stopped || terminating
 }
