@@ -60,10 +60,7 @@ func TestAnnotationOwnership(t *testing.T) {
 		corev1.LastAppliedConfigAnnotation: "{}", corev1.AnnotationLoadBalancerSourceRangesKey: "203.0.113.0/24",
 	}}}
 	existing := map[string]string{"metallb.io/ip-allocated-from-pool": "pool", "infra.example/owned": "keep", tenantAnnotationKeys: "[]"}
-	got, err := lb.reconcileAnnotations(tenant, existing)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := lb.reconcileAnnotations(tenant, existing, true)
 	want := map[string]string{
 		allowed: "true", "notkubernetes.io/x": "value", "metallb.io/ip-allocated-from-pool": "pool", "infra.example/owned": "keep",
 		tenantAnnotationKeys: `["notkubernetes.io/x","service.beta.kubernetes.io/aws-load-balancer-internal"]`,
@@ -73,21 +70,21 @@ func TestAnnotationOwnership(t *testing.T) {
 	}
 	// Changing a tenant value and removing another key updates only owned keys.
 	tenant.Annotations = map[string]string{allowed: "false"}
-	got, err = lb.reconcileAnnotations(tenant, got)
-	if err != nil || got[allowed] != "false" || got["notkubernetes.io/x"] != "" || got["infra.example/owned"] != "keep" {
-		t.Fatalf("update failed: %v, %v", got, err)
+	got = lb.reconcileAnnotations(tenant, got, true)
+	if got[allowed] != "false" || got["notkubernetes.io/x"] != "" || got["infra.example/owned"] != "keep" {
+		t.Fatalf("update failed: %v", got)
 	}
 	// Revoking the allowlist removes previously mirrored keys even if the tenant
 	// has already removed them, but retains infra-owned annotations.
 	lb.config.AllowedAnnotations = nil
 	tenant.Annotations = nil
-	got, err = lb.reconcileAnnotations(tenant, got)
-	if err != nil || !reflect.DeepEqual(got, existing) {
-		t.Fatalf("revocation failed: %v, %v", got, err)
+	got = lb.reconcileAnnotations(tenant, got, true)
+	if !reflect.DeepEqual(got, existing) {
+		t.Fatalf("revocation failed: %v", got)
 	}
-	again, err := lb.reconcileAnnotations(tenant, got)
-	if err != nil || !reflect.DeepEqual(again, got) {
-		t.Fatalf("reconciliation is not idempotent: %v, %v", again, err)
+	again := lb.reconcileAnnotations(tenant, got, true)
+	if !reflect.DeepEqual(again, got) {
+		t.Fatalf("reconciliation is not idempotent: %v", again)
 	}
 }
 
@@ -95,13 +92,63 @@ func TestLegacyAnnotationMigration(t *testing.T) {
 	lb := &loadbalancer{}
 	tenant := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"tenant/key": "old", "infra/key": "different"}}}
 	existing := map[string]string{"tenant/key": "old", "infra/key": "operator", "unknown/key": "keep"}
-	got, err := lb.reconcileAnnotations(tenant, existing)
+	got := lb.reconcileAnnotations(tenant, existing, false)
 	want := map[string]string{"infra/key": "operator", "unknown/key": "keep", tenantAnnotationKeys: "[]"}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected legacy migration: %v, %v", got, err)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected legacy migration: %v", got)
 	}
-	if _, err := lb.reconcileAnnotations(tenant, map[string]string{tenantAnnotationKeys: "invalid"}); err == nil {
-		t.Fatal("invalid ownership metadata accepted")
+	// A corrupt record on a labelled Service falls back to the legacy path instead of failing.
+	got = lb.reconcileAnnotations(tenant, map[string]string{tenantAnnotationKeys: "invalid", "tenant/key": "old"}, true)
+	if !reflect.DeepEqual(got, map[string]string{tenantAnnotationKeys: "[]"}) {
+		t.Fatalf("invalid ownership metadata not ignored: %v", got)
+	}
+}
+
+// Older builds copied every tenant annotation onto the infra Service, so a tenant
+// could plant the ownership record. Without the ownership label it must be ignored.
+func TestPlantedOwnershipRecordIgnored(t *testing.T) {
+	for _, planted := range []string{"x", "[]", `["metallb.io/ip-allocated-from-pool"]`} {
+		t.Run(planted, func(t *testing.T) {
+			ctx := context.Background()
+			c := mockclient.NewMockClient(gomock.NewController(t))
+			lb := &loadbalancer{client: c, namespace: "infra"}
+			tenantAnnotations := map[string]string{
+				tenantAnnotationKeys:                  planted,
+				"metallb.universe.tf/loadBalancerIPs": "203.0.113.6",
+			}
+			tenant := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "workload", UID: "1234", Annotations: tenantAnnotations},
+				Spec:       corev1.ServiceSpec{ExternalIPs: []string{"203.0.113.5"}, LoadBalancerIP: "203.0.113.6"},
+			}
+			// Built the way the old createLoadBalancerService did: tenant annotations and IPs copied.
+			infra := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "a1234", Namespace: "infra", Annotations: map[string]string{
+					tenantAnnotationKeys:                  planted,
+					"metallb.universe.tf/loadBalancerIPs": "203.0.113.6",
+					"metallb.io/ip-allocated-from-pool":   "pool",
+				}},
+				Spec: corev1.ServiceSpec{ExternalIPs: []string{"203.0.113.5"}, LoadBalancerIP: "203.0.113.6"},
+			}
+			c.EXPECT().Get(ctx, client.ObjectKey{Name: "a1234", Namespace: "infra"}, gomock.Any()).DoAndReturn(
+				func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					infra.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}).Times(2)
+			c.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+				infra = obj.(*corev1.Service).DeepCopy()
+				return nil
+			}).Times(1)
+			for i := 0; i < 2; i++ {
+				if err := lb.UpdateLoadBalancer(ctx, "cluster", tenant, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := map[string]string{tenantAnnotationKeys: "[]", "metallb.io/ip-allocated-from-pool": "pool"}
+			if !reflect.DeepEqual(infra.Annotations, want) || len(infra.Spec.ExternalIPs) != 0 || infra.Spec.LoadBalancerIP != "" ||
+				infra.Labels[annotationOwnershipLabel] != annotationOwnershipLabelValue {
+				t.Fatalf("planted record not ignored: %+v", infra)
+			}
+		})
 	}
 }
 
@@ -128,7 +175,7 @@ func TestReconcileManagedFields(t *testing.T) {
 			infra := &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{Name: "a1234", Namespace: "infra", Annotations: map[string]string{
 					tenantAnnotationKeys: "[]", "metallb.io/ip-allocated-from-pool": "pool",
-				}},
+				}, Labels: map[string]string{annotationOwnershipLabel: annotationOwnershipLabelValue}},
 				Spec: corev1.ServiceSpec{
 					Ports:       []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(30001), NodePort: 31001}},
 					ExternalIPs: []string{"203.0.113.5"}, LoadBalancerIP: "203.0.113.6",
@@ -187,6 +234,9 @@ func TestCreateManagedFields(t *testing.T) {
 	}}
 	c.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.CreateOption) error {
 		svc := obj.(*corev1.Service)
+		if svc.Labels[annotationOwnershipLabel] != annotationOwnershipLabelValue {
+			t.Fatalf("ownership label missing on create: %v", svc.Labels)
+		}
 		if svc.Spec.HealthCheckNodePort != 0 || len(svc.Spec.ExternalIPs) > 0 || svc.Spec.LoadBalancerIP != "" {
 			t.Fatalf("tenant allocations copied: %+v", svc.Spec)
 		}

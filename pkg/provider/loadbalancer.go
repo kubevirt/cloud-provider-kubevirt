@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +34,11 @@ const (
 
 	// This infra-only annotation records keys owned by the mirroring provider.
 	tenantAnnotationKeys = "cloud-provider.kubevirt.io/tenant-annotation-keys"
+	// annotationOwnershipLabel marks tenantAnnotationKeys as written by this provider.
+	// Older builds copied every tenant annotation onto the infra Service, so the record
+	// alone may come from the tenant; they never let tenants set infra labels.
+	annotationOwnershipLabel      = "cloud-provider.kubevirt.io/annotation-ownership"
+	annotationOwnershipLabelValue = "v1"
 )
 
 type loadbalancer struct {
@@ -167,11 +171,17 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 	if err != nil {
 		return err
 	}
-	desiredAnnotations, err := lb.reconcileAnnotations(service, lbService.Annotations)
-	if err != nil {
-		return err
-	}
+	trusted := lbService.Labels[annotationOwnershipLabel] == annotationOwnershipLabelValue
+	desiredAnnotations := lb.reconcileAnnotations(service, lbService.Annotations, trusted)
 	changed := false
+
+	if !trusted {
+		if lbService.Labels == nil {
+			lbService.Labels = map[string]string{}
+		}
+		lbService.Labels[annotationOwnershipLabel] = annotationOwnershipLabelValue
+		changed = true
+	}
 
 	// NodePorts belong to the infra Service. Preserve API-allocated values for
 	// retained ports rather than resetting them on every reconciliation.
@@ -266,16 +276,18 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 	if err != nil {
 		return nil, err
 	}
-	annotations, err := lb.reconcileAnnotations(service, nil)
-	if err != nil {
-		return nil, err
+	annotations := lb.reconcileAnnotations(service, nil, false)
+	labels := make(map[string]string, len(lbLabels)+1)
+	for key, value := range lbLabels {
+		labels[key] = value
 	}
+	labels[annotationOwnershipLabel] = annotationOwnershipLabelValue
 	lbService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        lbName,
 			Namespace:   lb.namespace,
 			Annotations: annotations,
-			Labels:      lbLabels,
+			Labels:      labels,
 		},
 		Spec: corev1.ServiceSpec{
 			Ports:                    ports,
@@ -331,18 +343,26 @@ func (lb *loadbalancer) allowedAnnotations(service *corev1.Service) map[string]s
 }
 
 // reconcileAnnotations preserves infra-owned annotations and replaces only keys
-// previously managed by this provider. Legacy Services have no ownership record:
-// only keys still matching the current tenant value can be identified for cleanup.
-func (lb *loadbalancer) reconcileAnnotations(service *corev1.Service, existing map[string]string) (map[string]string, error) {
+// previously managed by this provider. The ownership record is only trusted when
+// the infra Service carries annotationOwnershipLabel; otherwise (legacy Services,
+// where the record may have been copied from the tenant) only keys still matching
+// the current tenant value can be identified for cleanup. It never fails, so the
+// annotation bookkeeping cannot block the rest of the reconciliation.
+func (lb *loadbalancer) reconcileAnnotations(service *corev1.Service, existing map[string]string, trusted bool) map[string]string {
 	result := make(map[string]string, len(existing)+1)
 	for key, value := range existing {
 		result[key] = value
 	}
-	if raw, tracked := existing[tenantAnnotationKeys]; tracked {
-		var keys []string
+	var keys []string
+	if raw, tracked := existing[tenantAnnotationKeys]; trusted && tracked {
 		if err := json.Unmarshal([]byte(raw), &keys); err != nil {
-			return nil, fmt.Errorf("invalid infra annotation %s: %w", tenantAnnotationKeys, err)
+			klog.Errorf("Ignoring invalid infra annotation %s: %v", tenantAnnotationKeys, err)
+			trusted = false
 		}
+	} else {
+		trusted = false
+	}
+	if trusted {
 		for _, key := range keys {
 			delete(result, key)
 		}
@@ -353,18 +373,15 @@ func (lb *loadbalancer) reconcileAnnotations(service *corev1.Service, existing m
 			}
 		}
 	}
-	keys := []string{}
+	owned := []string{}
 	for key, value := range lb.allowedAnnotations(service) {
 		result[key] = value
-		keys = append(keys, key)
+		owned = append(owned, key)
 	}
-	sort.Strings(keys)
-	encoded, err := json.Marshal(keys)
-	if err != nil {
-		return nil, err
-	}
+	sort.Strings(owned)
+	encoded, _ := json.Marshal(owned) // marshalling []string cannot fail
 	result[tenantAnnotationKeys] = string(encoded)
-	return result, nil
+	return result
 }
 
 func (lb *loadbalancer) warnIgnoredFields(service *corev1.Service) {
