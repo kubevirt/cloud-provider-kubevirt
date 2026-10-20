@@ -67,6 +67,13 @@ type LoadBalancerConfig struct {
 	// This is a temporary flag to enable/disable the EPS controller
 	// When disabled the service selector is used.
 	EnableEPSController *bool `yaml:"enableEPSController,omitempty"`
+
+	// NamingStrategy controls how infrastructure load balancer services are named.
+	// "semantic" generates predictable names from cluster, namespace, and service name
+	// (e.g. "mycluster-default-nginx"). Can be overridden per-service with the
+	// kubevirt.io/set-loadbalancer-name annotation.
+	// "legacy" (default) uses the deprecated Kubernetes UID-based naming.
+	NamingStrategy string `yaml:"namingStrategy,omitempty"`
 }
 
 type InstancesV2Config struct {
