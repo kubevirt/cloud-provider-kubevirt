@@ -30,10 +30,14 @@ infra cluster services created for the tenant cluster is redirected into VM with
 ## How to run `kubevirt-cloud-controller-manager`
 See [Running cloud-controller-manager](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#running-cloud-controller-manager)
 for general information on how to configure your tenant cluster to run `kubevirt-cloud-controller-manager`. You can
-find example manifests for `kubevirt-cloud-controller-manager` in the [manifests directory](cluster/manifests) for
-static Pod, Deployment and DaemonSet configurations.
+find example [kustomize](https://kustomize.io/) manifests in the [config directory](config). They deploy
+`kubevirt-cloud-controller-manager` into the infrastructure cluster, where it accesses the infrastructure cluster with
+its in-cluster configuration and the tenant cluster with the kubeconfig at `config/secret/kubeconfig`. The
+[default overlay](config/overlays/default) uses cluster-wide RBAC, while the [isolated overlay](config/overlays/isolated)
+only uses namespaced RBAC. The [kubevirtci overlay](config/overlays/kubevirtci), which is used for the e2e tests, shows
+how to deploy it into the namespace of the tenant cluster VMs and how to set the name of the tenant cluster.
 
-To get it to run, you'll need to provide a kubeconfig for the infrastructure cluster to the `kubevirt-cloud-controller-manager` configuration.
+When `kubevirt-cloud-controller-manager` runs outside of the infrastructure cluster, you'll need to provide a kubeconfig for the infrastructure cluster to the `kubevirt-cloud-controller-manager` configuration.
 The configuration should contain an `kubeconfig` key, like in the following example:
 ```shell
 cat /etc/kubernetes/cloud/config
