@@ -21,7 +21,7 @@ const (
 )
 
 // Must match providerIDs built by cloudprovider.GetInstanceProviderID
-var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_-]+)$`)
+var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_.-]+)$`)
 
 type instancesV2 struct {
 	namespace string
