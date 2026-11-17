@@ -291,6 +291,46 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 			Expect(*epsList.Items[0].Endpoints[0].NodeName).To(Equal("ip-10-32-5-13"))
 		})
 
+		g.It("Should update the Endpointslice when the VMI moves to another node (live migration)", func() {
+			// Create VMI in infra cluster
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+
+			// Create Endpoinslices in tenant cluster
+			createAndAssertTenantSlice("test-epslice", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
+
+			// Create service in infra cluster
+			createAndAssertInfraServiceLB("infra-service-name", "tenant-service-name", "test-cluster",
+				v1.ServicePort{Name: "web", Port: 80, NodePort: 31900, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{IntVal: 30390}},
+				v1.ServiceExternalTrafficPolicyLocal)
+
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if err != nil || len(epsList.Items) != 1 || len(epsList.Items[0].Endpoints) != 1 {
+					return false, err
+				}
+				ep := epsList.Items[0].Endpoints[0]
+				return ep.Addresses[0] == "123.45.67.89" && *ep.NodeName == "ip-10-32-5-13", nil
+			}).Should(BeTrue(), "EndpointSlice in infra cluster should point to the VMI on its first node")
+
+			// A live migration gives the VMI a new launcher pod: new address, new node. Nothing
+			// changes in the tenant cluster.
+			vmiRes := testVals.infraDynamic.Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).
+				Namespace(infraNamespace)
+			_, err := vmiRes.Update(context.TODO(), createUnstructuredVMINode("worker-0-test", "ip-10-32-5-14", "123.45.67.90"), metav1.UpdateOptions{})
+			Expect(err).To(BeNil())
+
+			Eventually(func() (bool, error) {
+				epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+				if err != nil || len(epsList.Items) != 1 || len(epsList.Items[0].Endpoints) != 1 {
+					return false, err
+				}
+				ep := epsList.Items[0].Endpoints[0]
+				return ep.Addresses[0] == "123.45.67.90" && *ep.NodeName == "ip-10-32-5-14", nil
+			}).Should(BeTrue(), "EndpointSlice in infra cluster should follow the VMI to its new node and address")
+		})
+
 		g.It("Should update the Endpointslice when a tenant Endpointslice is updated", func() {
 
 			ipAddr1 := "123.45.67.11"
