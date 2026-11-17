@@ -53,9 +53,9 @@ type Controller struct {
 	tenantFactory    informers.SharedInformerFactory
 	tenantEPSTracker tenantEPSTracker
 
-	infraClient        kubernetes.Interface
-	infraDynamic       dynamic.Interface
-	infraFactory       informers.SharedInformerFactory
+	infraClient         kubernetes.Interface
+	infraDynamic        dynamic.Interface
+	infraFactory        informers.SharedInformerFactory
 	infraDynamicFactory dynamicinformer.DynamicSharedInformerFactory
 
 	infraNamespace string
@@ -419,6 +419,9 @@ func (c *Controller) updateVMICache(vmiName string, vmi *kubevirtv1.VirtualMachi
 	c.vmiCacheMu.Lock()
 	defer c.vmiCacheMu.Unlock()
 
+	if c.vmiCache == nil {
+		c.vmiCache = make(map[string]*vmiCacheEntry)
+	}
 	c.vmiCache[vmiName] = &vmiCacheEntry{
 		Phase:          vmi.Status.Phase,
 		NodeName:       vmi.Status.NodeName,

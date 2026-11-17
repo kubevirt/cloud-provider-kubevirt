@@ -159,6 +159,9 @@ func newServiceVMITracker() *serviceVMITracker {
 // updateServiceVMIs updates the VMIs that a service depends on.
 // Call this after reconciliation to keep track of service-VMI relationships.
 func (t *serviceVMITracker) updateServiceVMIs(serviceName string, vmiNames []string) {
+	if t == nil {
+		return
+	}
 	t.Lock()
 	defer t.Unlock()
 
@@ -190,6 +193,9 @@ func (t *serviceVMITracker) updateServiceVMIs(serviceName string, vmiNames []str
 
 // getServicesForVMI returns the services that depend on a given VMI.
 func (t *serviceVMITracker) getServicesForVMI(vmiName string) []string {
+	if t == nil {
+		return nil
+	}
 	t.RLock()
 	defer t.RUnlock()
 
@@ -201,6 +207,9 @@ func (t *serviceVMITracker) getServicesForVMI(vmiName string) []string {
 
 // removeService removes all mappings for a service.
 func (t *serviceVMITracker) removeService(serviceName string) {
+	if t == nil {
+		return
+	}
 	t.Lock()
 	defer t.Unlock()
 
@@ -219,6 +228,9 @@ func (t *serviceVMITracker) removeService(serviceName string) {
 
 // getAllServices returns all tracked service names.
 func (t *serviceVMITracker) getAllServices() []string {
+	if t == nil {
+		return nil
+	}
 	t.RLock()
 	defer t.RUnlock()
 
