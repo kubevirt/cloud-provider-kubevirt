@@ -983,12 +983,9 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 			// ready set while it is still Running.
 			ready, serving, terminating := nodeConditions[node].forVMI(vmi.Status.Phase)
 
-			// During a migration the address of the VMI is about to change: keep new
-			// connections away from it until the migration is done.
-			if c.isVMIMigrating(vmi) {
-				klog.Infof("VMI %s is currently migrating, marking endpoint as not ready", vmi.Name)
-				ready, serving = false, false
-			}
+			// A migrating VMI stays ready: its source keeps serving until the cutover, and the
+			// VMI watch moves the endpoint to the new address right after it. Marking it not
+			// ready would take the VM out of the load balancer for the whole migration.
 
 			// choose "pod" if present, else "default"
 			var chosen *kubevirtv1.VirtualMachineInstanceNetworkInterface

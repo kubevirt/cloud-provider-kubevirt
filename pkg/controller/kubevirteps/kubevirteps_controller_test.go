@@ -331,6 +331,41 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 			}).Should(BeTrue(), "EndpointSlice in infra cluster should follow the VMI to its new node and address")
 		})
 
+		g.It("Should keep the Endpointslice ready while the VMI migrates", func() {
+			createAndAssertVMI("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+			createAndAssertTenantSlice("test-epslice", "tenant-service-name", discoveryv1.AddressTypeIPv4,
+				*createPort("http", 80, v1.ProtocolTCP),
+				[]discoveryv1.Endpoint{*createEndpoint("123.45.67.89", "worker-0-test", true, true, false)})
+			createAndAssertInfraServiceLB("infra-service-name", "tenant-service-name", "test-cluster",
+				v1.ServicePort{Name: "web", Port: 80, NodePort: 31900, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{IntVal: 30390}},
+				v1.ServiceExternalTrafficPolicyLocal)
+
+			readyEndpoint := func(ip string) func() (bool, error) {
+				return func() (bool, error) {
+					epsList, err := testVals.infraClient.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+					if err != nil || len(epsList.Items) != 1 || len(epsList.Items[0].Endpoints) != 1 {
+						return false, err
+					}
+					ep := epsList.Items[0].Endpoints[0]
+					return ep.Addresses[0] == ip && ep.Conditions.Ready != nil && *ep.Conditions.Ready, nil
+				}
+			}
+			Eventually(readyEndpoint("123.45.67.89")).Should(BeTrue(), "EndpointSlice in infra cluster should be ready")
+
+			// A migration in progress: the source still serves until the cutover.
+			vmi := createUnstructuredVMINode("worker-0-test", "ip-10-32-5-13", "123.45.67.89")
+			Expect(unstructured.SetNestedField(vmi.Object, map[string]interface{}{
+				"startTimestamp": "2026-01-01T00:00:00Z",
+				"targetNode":     "ip-10-32-5-14",
+				"sourceNode":     "ip-10-32-5-13",
+			}, "status", "migrationState")).To(Succeed())
+			_, err := testVals.infraDynamic.Resource(kubevirtv1.VirtualMachineInstanceGroupVersionKind.GroupVersion().WithResource("virtualmachineinstances")).
+				Namespace(infraNamespace).Update(context.TODO(), vmi, metav1.UpdateOptions{})
+			Expect(err).To(BeNil())
+
+			Consistently(readyEndpoint("123.45.67.89"), "2s", "200ms").Should(BeTrue(), "EndpointSlice in infra cluster should stay ready during the migration")
+		})
+
 		g.It("Should update the Endpointslice when a tenant Endpointslice is updated", func() {
 
 			ipAddr1 := "123.45.67.11"
