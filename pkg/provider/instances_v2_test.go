@@ -627,6 +627,30 @@ var _ = Describe("Instances V2", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
+			It("Should return true if VMI with dots in its name exists", func() {
+				vmi := &kubevirtv1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{
+					Name:      "test.example.com",
+					Namespace: "cluster-test",
+				}}
+				node := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vmi.Name,
+					},
+					Spec: corev1.NodeSpec{
+						ProviderID: getProviderID(vmi.Name),
+					},
+				}
+
+				mockClient.EXPECT().
+					Get(ctx, types.NamespacedName{Name: vmi.Name, Namespace: vmi.Namespace}, &kubevirtv1.VirtualMachineInstance{}).
+					Times(1)
+
+				i := instancesV2{namespace: vmi.Namespace, client: mockClient}
+				exists, err := i.InstanceExists(ctx, &node)
+				Expect(exists).To(BeTrue())
+				Expect(err).ToNot(HaveOccurred())
+			})
+
 			It("Should not return an error if VMI does not exist", func() {
 				namespace := "cluster-test"
 
