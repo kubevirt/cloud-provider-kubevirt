@@ -771,3 +771,175 @@ var _ = g.Describe("KubevirtEPSController", g.Ordered, func() {
 
 	})
 })
+
+var _ = g.Describe("finalize", func() {
+	var (
+		svc   *v1.Service
+		owner []metav1.OwnerReference
+		old   *discoveryv1.EndpointSlice
+	)
+
+	newSlice := func(name, address string, owners []metav1.OwnerReference) *discoveryv1.EndpointSlice {
+		return &discoveryv1.EndpointSlice{
+			ObjectMeta:  metav1.ObjectMeta{Name: name, Namespace: infraNamespace, OwnerReferences: owners},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}}},
+		}
+	}
+
+	sliceAddresses := func(client *fake.Clientset) map[string]string {
+		list, err := client.DiscoveryV1().EndpointSlices(infraNamespace).List(context.TODO(), metav1.ListOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		addresses := map[string]string{}
+		for _, s := range list.Items {
+			addresses[s.Name] = s.Endpoints[0].Addresses[0]
+		}
+		return addresses
+	}
+
+	g.BeforeEach(func() {
+		svc = &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: infraNamespace, UID: "svc-uid"}}
+		owner = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: svc.Name, UID: svc.UID}}
+		old = newSlice("svc-old", "10.0.0.1", owner)
+	})
+
+	g.It("turns one slice to delete and one to create into an update", func() {
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("", "10.0.0.2", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-old": "10.0.0.2"}))
+	})
+
+	g.It("updates the first slice to create and creates the others", func() {
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("", "10.0.0.2", owner), newSlice("svc-second", "10.0.0.3", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-old": "10.0.0.2", "svc-second": "10.0.0.3"}))
+	})
+
+	g.It("deletes a slice the Service does not own instead of reusing it", func() {
+		old.OwnerReferences = nil
+		client := fake.NewSimpleClientset(old)
+		c := &Controller{infraClient: client, infraNamespace: infraNamespace}
+
+		toCreate := []*discoveryv1.EndpointSlice{newSlice("svc-new", "10.0.0.2", owner)}
+		Expect(c.finalize(svc, toCreate, nil, []*discoveryv1.EndpointSlice{old})).To(Succeed())
+
+		Expect(sliceAddresses(client)).To(Equal(map[string]string{"svc-new": "10.0.0.2"}))
+	})
+})
+
+var _ = g.Describe("getDesiredEndpoints", func() {
+	type infraConditions struct{ ready, serving, terminating bool }
+
+	vmiWithPhase := func(name, ip string, phase kubevirtv1.VirtualMachineInstancePhase) runtime.Object {
+		vmi := createUnstructuredVMINode(name, "infra-"+name, ip)
+		_ = unstructured.SetNestedField(vmi.Object, string(phase), "status", "phase")
+		return vmi
+	}
+
+	tenantEndpoint := func(nodeName *string, conditions discoveryv1.EndpointConditions) discoveryv1.Endpoint {
+		return discoveryv1.Endpoint{Addresses: []string{"10.243.0.9"}, NodeName: nodeName, Conditions: conditions}
+	}
+
+	endpointConditions := func(ready, serving, terminating bool) discoveryv1.EndpointConditions {
+		return discoveryv1.EndpointConditions{Ready: &ready, Serving: &serving, Terminating: &terminating}
+	}
+
+	node := func(name string) *string { return &name }
+
+	// desired runs getDesiredEndpoints for a selector-less infra Service and returns each
+	// infra endpoint's conditions by VM address.
+	desired := func(vmis []runtime.Object, endpoints []discoveryv1.Endpoint) map[string]infraConditions {
+		gvr := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
+		c := &Controller{
+			infraNamespace: infraNamespace,
+			infraDynamic: dfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+				map[schema.GroupVersionResource]string{gvr: "VirtualMachineInstanceList"}, vmis...),
+		}
+		svc := &v1.Service{Spec: v1.ServiceSpec{ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster}}
+		tenantSlices := []*discoveryv1.EndpointSlice{{AddressType: discoveryv1.AddressTypeIPv4, Endpoints: endpoints}}
+		got := map[string]infraConditions{}
+		for _, e := range c.getDesiredEndpoints(svc, tenantSlices) {
+			got[e.Addresses[0]] = infraConditions{*e.Conditions.Ready, *e.Conditions.Serving, *e.Conditions.Terminating}
+		}
+		return got
+	}
+
+	running := func() []runtime.Object {
+		return []runtime.Object{
+			vmiWithPhase("vm-a", "10.244.0.1", kubevirtv1.Running),
+			vmiWithPhase("vm-b", "10.244.0.2", kubevirtv1.Running),
+		}
+	}
+
+	g.DescribeTable("infra endpoint conditions follow the tenant endpoints on the VM",
+		func(vmis []runtime.Object, endpoints []discoveryv1.Endpoint, want map[string]infraConditions) {
+			Expect(desired(vmis, endpoints)).To(Equal(want))
+		},
+		g.Entry("every tenant endpoint on the VM terminating while the VM still runs",
+			running(),
+			[]discoveryv1.Endpoint{
+				tenantEndpoint(node("vm-a"), endpointConditions(false, true, true)),
+				tenantEndpoint(node("vm-a"), endpointConditions(false, true, true)),
+			},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: true, terminating: true}}),
+		g.Entry("one tenant endpoint terminating and another ready on the same VM",
+			running(),
+			[]discoveryv1.Endpoint{
+				tenantEndpoint(node("vm-a"), endpointConditions(false, true, true)),
+				tenantEndpoint(node("vm-a"), endpointConditions(true, true, false)),
+			},
+			map[string]infraConditions{"10.244.0.1": {ready: true, serving: true, terminating: false}}),
+		g.Entry("one tenant endpoint starting and another draining on the same VM: the VM is a serving, terminating fallback",
+			running(),
+			[]discoveryv1.Endpoint{
+				tenantEndpoint(node("vm-a"), endpointConditions(false, false, false)),
+				tenantEndpoint(node("vm-a"), endpointConditions(false, true, true)),
+			},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: true, terminating: true}}),
+		g.Entry("two VMs, one draining: only the draining one leaves the ready set",
+			running(),
+			[]discoveryv1.Endpoint{
+				tenantEndpoint(node("vm-a"), endpointConditions(false, true, true)),
+				tenantEndpoint(node("vm-b"), endpointConditions(true, true, false)),
+			},
+			map[string]infraConditions{
+				"10.244.0.1": {ready: false, serving: true, terminating: true},
+				"10.244.0.2": {ready: true, serving: true, terminating: false},
+			}),
+		g.Entry("a tenant pod not ready yet is not advertised as ready",
+			running(),
+			[]discoveryv1.Endpoint{tenantEndpoint(node("vm-a"), endpointConditions(false, false, false))},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: false, terminating: false}}),
+		g.Entry("nil conditions read as the API defines them: ready and serving, not terminating",
+			running(),
+			[]discoveryv1.Endpoint{tenantEndpoint(node("vm-a"), discoveryv1.EndpointConditions{})},
+			map[string]infraConditions{"10.244.0.1": {ready: true, serving: true, terminating: false}}),
+		g.Entry("terminating with ready unset is not ready",
+			running(),
+			[]discoveryv1.Endpoint{tenantEndpoint(node("vm-a"), discoveryv1.EndpointConditions{Terminating: func() *bool { b := true; return &b }()})},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: true, terminating: true}}),
+		g.Entry("a VM that is not running is never ready, whatever the tenant says",
+			[]runtime.Object{vmiWithPhase("vm-a", "10.244.0.1", kubevirtv1.Scheduled)},
+			[]discoveryv1.Endpoint{tenantEndpoint(node("vm-a"), endpointConditions(true, true, false))},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: false, terminating: false}}),
+		g.Entry("a stopped VM is terminating, whatever the tenant says",
+			[]runtime.Object{vmiWithPhase("vm-a", "10.244.0.1", kubevirtv1.Failed)},
+			[]discoveryv1.Endpoint{tenantEndpoint(node("vm-a"), endpointConditions(true, true, false))},
+			map[string]infraConditions{"10.244.0.1": {ready: false, serving: false, terminating: true}}),
+		g.Entry("a tenant endpoint without a node is skipped",
+			running(),
+			[]discoveryv1.Endpoint{
+				tenantEndpoint(nil, endpointConditions(true, true, false)),
+				tenantEndpoint(node("vm-b"), endpointConditions(true, true, false)),
+			},
+			map[string]infraConditions{"10.244.0.2": {ready: true, serving: true, terminating: false}}),
+	)
+})

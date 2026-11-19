@@ -2,7 +2,6 @@ package provider
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -39,6 +38,16 @@ func makeCloudConfig(kubeconfig, namespace string, loadbalancerEnabled, instance
 }
 
 var _ = Describe("Cloud config", func() {
+	It("Should decode explicit tenant field permissions with restrictive defaults", func() {
+		defaults, err := NewCloudConfigFromBytes([]byte("{}"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(defaults.LoadBalancer.AllowedAnnotations).To(BeEmpty())
+		Expect(defaults.LoadBalancer.AllowTenantLoadBalancerIP).To(BeNil())
+		config, err := NewCloudConfigFromBytes([]byte("loadBalancer:\n  allowedAnnotations: [metallb.io/address-pool]\n  allowTenantLoadBalancerIP: true\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(config.LoadBalancer.AllowedAnnotations).To(Equal([]string{"metallb.io/address-pool"}))
+		Expect(config.LoadBalancer.AllowTenantLoadBalancerIP).To(HaveValue(BeTrue()))
+	})
 
 	DescribeTable("Get CloudConfig from bytes", func(configBytes string, expectedCloudConfig CloudConfig, expectedError error) {
 		config, err := NewCloudConfigFromBytes([]byte(configBytes))
@@ -71,7 +80,7 @@ var _ = Describe("Cloud config", func() {
 			)
 
 			BeforeEach(func() {
-				infraKubeConfig, err = ioutil.TempFile("", "infraKubeConfig")
+				infraKubeConfig, err = os.CreateTemp("", "infraKubeConfig")
 				Expect(err).NotTo(HaveOccurred())
 				_, err = infraKubeConfig.Write([]byte(invalidKubeconf))
 				Expect(err).ToNot(HaveOccurred())

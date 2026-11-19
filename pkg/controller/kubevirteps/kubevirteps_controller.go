@@ -595,9 +595,11 @@ func (c *Controller) finalize(service *v1.Service, slicesToCreate []*discovery.E
 			break
 		}
 		if slicesToDelete[i].AddressType == slicesToCreate[0].AddressType && ownedBy(slicesToDelete[i], service) {
-			slicesToCreate[0].Name = slicesToDelete[i].Name
+			// Take the slice before dropping it from slicesToCreate.
+			reused := slicesToCreate[0]
+			reused.Name = slicesToDelete[i].Name
 			slicesToCreate = slicesToCreate[1:]
-			slicesToUpdate = append(slicesToUpdate, slicesToCreate[0])
+			slicesToUpdate = append(slicesToUpdate, reused)
 			slicesToDelete = append(slicesToDelete[:i], slicesToDelete[i+1:]...)
 		} else {
 			i++
@@ -666,10 +668,21 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 		// for extracting the nodes it does not matter what type of address we are dealing with
 		// all nodes with an endpoint for a corresponding slice will be selected.
 		nodeSet := sets.Set[string]{}
+		nodeConditions := map[string]*tenantNodeConditions{}
 		for _, slice := range tenantSlices {
 			for _, endpoint := range slice.Endpoints {
+				// an endpoint not yet placed on a node has nothing to route to
+				if endpoint.NodeName == nil {
+					continue
+				}
 				// find all unique nodes that correspond to an endpoint in a tenant slice
 				nodeSet.Insert(*endpoint.NodeName)
+				nc := nodeConditions[*endpoint.NodeName]
+				if nc == nil {
+					nc = newTenantNodeConditions()
+					nodeConditions[*endpoint.NodeName] = nc
+				}
+				nc.add(endpoint.Conditions)
 			}
 		}
 
@@ -692,9 +705,10 @@ func (c *Controller) getDesiredEndpoints(service *v1.Service, tenantSlices []*di
 				klog.Fatal(err)
 			}
 
-			ready := vmi.Status.Phase == kubevirtv1.Running
-			serving := vmi.Status.Phase == kubevirtv1.Running
-			terminating := vmi.Status.Phase == kubevirtv1.Failed || vmi.Status.Phase == kubevirtv1.Succeeded
+			// The infra endpoint carries what the tenant says about its endpoints on this VM,
+			// not only whether the VM runs: a VM whose pods are all terminating must leave the
+			// ready set while it is still Running.
+			ready, serving, terminating := nodeConditions[node].forVMI(vmi.Status.Phase)
 
 			for _, i := range vmi.Status.Interfaces {
 				if i.Name == "default" {

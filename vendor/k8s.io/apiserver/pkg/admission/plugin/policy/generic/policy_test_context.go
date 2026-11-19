@@ -45,6 +45,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/initializer"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"k8s.io/apiserver/pkg/util/compatibility"
 )
 
 // Logger allows t.Testing and b.Testing to be passed to PolicyTestContext
@@ -56,10 +57,11 @@ type Logger interface {
 // PolicyTestContext is everything you need to unit test a policy plugin
 type PolicyTestContext[P runtime.Object, B runtime.Object, E Evaluator] struct {
 	context.Context
-	Logger Logger
-	Plugin *Plugin[PolicyHook[P, B, E]]
-	Source Source[PolicyHook[P, B, E]]
-	Start  func() error
+	Logger        Logger
+	Plugin        *Plugin[PolicyHook[P, B, E]]
+	Source        Source[PolicyHook[P, B, E]]
+	Start         func() error
+	DynamicClient dynamic.Interface
 
 	scheme     *runtime.Scheme
 	restMapper *meta.DefaultRESTMapper
@@ -158,27 +160,27 @@ func NewPolicyTestContext[P, B runtime.Object, E Evaluator](
 	// Make an informer for our policies and bindings
 
 	policyInformer := cache.NewSharedIndexInformer(
-		&cache.ListWatch{
+		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				return policiesAndBindingsTracker.List(fakePolicyGVR, fakePolicyGVK, "")
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return policiesAndBindingsTracker.Watch(fakePolicyGVR, "")
+				return policiesAndBindingsTracker.Watch(fakePolicyGVR, "", options)
 			},
-		},
+		}, policiesAndBindingsTracker),
 		Pexample,
 		30*time.Second,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
 	bindingInformer := cache.NewSharedIndexInformer(
-		&cache.ListWatch{
+		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				return policiesAndBindingsTracker.List(fakeBindingGVR, fakeBindingGVK, "")
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
-				return policiesAndBindingsTracker.Watch(fakeBindingGVR, "")
+				return policiesAndBindingsTracker.Watch(fakeBindingGVR, "", options)
 			},
-		},
+		}, policiesAndBindingsTracker),
 		Bexample,
 		30*time.Second,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
@@ -203,6 +205,7 @@ func NewPolicyTestContext[P, B runtime.Object, E Evaluator](
 	plugin.SetEnabled(true)
 
 	featureGate := featuregate.NewFeatureGate()
+	effectiveVersion := compatibility.DefaultBuildEffectiveVersion()
 	testContext, testCancel := context.WithCancel(context.Background())
 	genericInitializer := initializer.New(
 		nativeClient,
@@ -210,6 +213,7 @@ func NewPolicyTestContext[P, B runtime.Object, E Evaluator](
 		fakeInformerFactory,
 		fakeAuthorizer{},
 		featureGate,
+		effectiveVersion,
 		testContext.Done(),
 		fakeRestMapper,
 	)
@@ -222,10 +226,11 @@ func NewPolicyTestContext[P, B runtime.Object, E Evaluator](
 	}
 
 	res := &PolicyTestContext[P, B, E]{
-		Logger:  logger,
-		Context: testContext,
-		Plugin:  plugin,
-		Source:  source,
+		Logger:        logger,
+		Context:       testContext,
+		Plugin:        plugin,
+		Source:        source,
+		DynamicClient: dynamicClient,
 
 		restMapper:              fakeRestMapper,
 		scheme:                  policySourceTestScheme,
@@ -638,4 +643,14 @@ type fakeAuthorizer struct{}
 
 func (f fakeAuthorizer) Authorize(ctx context.Context, a authorizer.Attributes) (authorizer.Decision, string, error) {
 	return authorizer.DecisionAllow, "", nil
+}
+
+// ConditionsAwareAuthorize is not conditions-aware, converts the Authorize decision.
+func (f fakeAuthorizer) ConditionsAwareAuthorize(ctx context.Context, a authorizer.Attributes) authorizer.ConditionsAwareDecision {
+	return authorizer.ConditionsAwareDecisionFromParts(f.Authorize(ctx, a))
+}
+
+// EvaluateConditions is not supported by this authorizer.
+func (fakeAuthorizer) EvaluateConditions(_ context.Context, _ authorizer.ConditionsAwareDecision, _ authorizer.ConditionsData) (authorizer.Decision, string, error) {
+	return authorizer.DecisionDeny, "", authorizer.ErrorConditionEvaluationNotSupported
 }

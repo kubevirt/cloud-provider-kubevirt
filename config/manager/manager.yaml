@@ -26,7 +26,16 @@ spec:
         image: quay.io/kubevirt/kubevirt-cloud-controller-manager:main
         imagePullPolicy: Always
         securityContext:
-          privileged: true
+          privileged: false
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         resources:
           requests:
             cpu: 100m
