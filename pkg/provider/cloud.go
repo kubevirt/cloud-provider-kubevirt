@@ -208,7 +208,7 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 		config:           c.config.LoadBalancer,
 		infraLabels:      c.config.InfraLabels,
 		infraAnnotations: c.config.InfraAnnotations,
-    recorder:         c.recorder,	
+        recorder:         c.recorder,	
 	}, true
 }
 
