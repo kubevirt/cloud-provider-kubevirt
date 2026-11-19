@@ -2,7 +2,10 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +42,17 @@ const (
 	// alone may come from the tenant; they never let tenants set infra labels.
 	annotationOwnershipLabel      = "cloud-provider.kubevirt.io/annotation-ownership"
 	annotationOwnershipLabelValue = "v1"
+
+	// LoadBalancerNameAnnotation allows overriding the generated load balancer name
+	LoadBalancerNameAnnotation = "kubevirt.io/set-loadbalancer-name"
+
+	// maxServiceNameLength is the maximum length for a Kubernetes service name
+	maxServiceNameLength = 63
+)
+
+var (
+	nonDNSCharsRegexp        = regexp.MustCompile(`[^a-z0-9-]`)
+	consecutiveHyphensRegexp = regexp.MustCompile(`-+`)
 )
 
 type loadbalancer struct {
@@ -68,10 +82,42 @@ func (lb *loadbalancer) GetLoadBalancer(ctx context.Context, clusterName string,
 	return status, true, nil
 }
 
-// GetLoadBalancerName is an implementation of LoadBalancer.GetLoadBalancerName.
+// GetLoadBalancerName returns the name to use for the infrastructure load balancer service.
+// When NamingStrategy is "semantic", it generates a predictable name from cluster, namespace,
+// and service name (can be overridden per-service with the kubevirt.io/set-loadbalancer-name
+// annotation). Otherwise it falls back to the legacy UID-based naming.
 func (lb *loadbalancer) GetLoadBalancerName(ctx context.Context, clusterName string, service *corev1.Service) string {
-	// TODO: replace DefaultLoadBalancerName to generate more meaningful loadbalancer names.
-	return cloudprovider.DefaultLoadBalancerName(service)
+	if lb.config.NamingStrategy != "semantic" {
+		return cloudprovider.DefaultLoadBalancerName(service)
+	}
+	if name, ok := service.Annotations[LoadBalancerNameAnnotation]; ok && name != "" {
+		if sanitized := sanitizeDNSName(name); sanitized != "" {
+			return sanitized
+		}
+	}
+	return generateLoadBalancerName(clusterName, service.Namespace, service.Name)
+}
+
+// generateLoadBalancerName creates a deterministic, human-readable name from
+// the cluster name, service namespace, and service name. If the result exceeds
+// 63 characters it is truncated with a hash suffix to preserve uniqueness.
+func generateLoadBalancerName(clusterName, serviceNamespace, serviceName string) string {
+	raw := clusterName + "-" + serviceNamespace + "-" + serviceName
+	name := sanitizeDNSName(raw)
+	if len(name) <= maxServiceNameLength {
+		return name
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))[:8]
+	return name[:maxServiceNameLength-9] + "-" + hash
+}
+
+// sanitizeDNSName converts a string to a valid DNS label.
+func sanitizeDNSName(name string) string {
+	name = strings.ToLower(name)
+	name = nonDNSCharsRegexp.ReplaceAllString(name, "-")
+	name = consecutiveHyphensRegexp.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+	return name
 }
 
 // EnsureLoadBalancer creates a new load balancer 'name', or updates the existing one. Returns the status of the balancer
