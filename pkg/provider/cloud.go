@@ -45,11 +45,12 @@ type Cloud struct {
 }
 
 type CloudConfig struct {
-	Kubeconfig   string             `yaml:"kubeconfig"`
-	LoadBalancer LoadBalancerConfig `yaml:"loadBalancer"`
-	InstancesV2  InstancesV2Config  `yaml:"instancesV2"`
-	Namespace    string             `yaml:"namespace"`
-	InfraLabels  map[string]string  `yaml:"infraLabels"`
+	Kubeconfig       string             `yaml:"kubeconfig"`
+	LoadBalancer     LoadBalancerConfig `yaml:"loadBalancer"`
+	InstancesV2      InstancesV2Config  `yaml:"instancesV2"`
+	Namespace        string             `yaml:"namespace"`
+	InfraLabels      map[string]string  `yaml:"infraLabels"`
+	InfraAnnotations map[string]string  `yaml:"infraAnnotations"`
 }
 
 type LoadBalancerConfig struct {
@@ -202,11 +203,12 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 		return nil, false
 	}
 	return &loadbalancer{
-		namespace:   c.namespace,
-		client:      c.client,
-		config:      c.config.LoadBalancer,
-		infraLabels: c.config.InfraLabels,
-		recorder:    c.recorder,
+		namespace:        c.namespace,
+		client:           c.client,
+		config:           c.config.LoadBalancer,
+		infraLabels:      c.config.InfraLabels,
+		infraAnnotations: c.config.InfraAnnotations,
+        recorder:         c.recorder,	
 	}, true
 }
 

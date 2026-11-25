@@ -108,7 +108,15 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		lbLabels[key] = val
 	}
 
-	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, lbLabels, ports)
+	lbAnnotations := map[string]string{}
+	for key, val := range service.Annotations {
+		lbAnnotations[key] = val
+	}
+	for key, val := range lb.infraAnnotations {
+		lbAnnotations[key] = val
+	}
+
+	lbService, err = lb.createLoadBalancerService(ctx, lbName, service, vmiLabels, lbLabels, lbAnnotations, ports)
 	if err != nil {
 		klog.Errorf("Failed to create LoadBalancer service: %v", err)
 		return nil, err
