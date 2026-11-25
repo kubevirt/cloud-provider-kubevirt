@@ -85,6 +85,13 @@ type LoadBalancerConfig struct {
 	// the infra cluster's shared pool. When false and a tenant requests an IP,
 	// the request is ignored and a Warning event is emitted on the tenant Service.
 	AllowTenantLoadBalancerIP *bool `yaml:"allowTenantLoadBalancerIP,omitempty"`
+
+	// NamingStrategy controls how infrastructure load balancer services are named.
+	// "semantic" generates predictable names from cluster, namespace, and service name
+	// (e.g. "mycluster-default-nginx"). Can be overridden per-service with the
+	// kubevirt.io/set-loadbalancer-name annotation.
+	// "legacy" (default) uses the deprecated Kubernetes UID-based naming.
+	NamingStrategy string `yaml:"namingStrategy,omitempty"`
 }
 
 type InstancesV2Config struct {
