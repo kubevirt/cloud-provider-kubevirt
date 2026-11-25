@@ -20,7 +20,6 @@ rules:
   - get
   - watch
   - list
-  - update
 - apiGroups:
   - ""
   resources:
@@ -36,8 +35,13 @@ rules:
   verbs:
   - "*"
 - apiGroups:
-  - ""
+  - discovery.k8s.io
   resources:
-  - nodes
+  - endpointslices
   verbs:
   - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
