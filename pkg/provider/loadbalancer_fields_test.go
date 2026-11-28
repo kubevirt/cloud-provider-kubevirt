@@ -271,8 +271,163 @@ func TestInvalidSourceRangesStillRevoke(t *testing.T) {
 	want.Spec.LoadBalancerIP = ""
 	c.EXPECT().Update(context.Background(), want)
 	for i := 0; i < 2; i++ {
-		if err := lb.reconcileLoadBalancerService(context.Background(), tenant, infra, []corev1.ServicePort{{Port: 443}}); err == nil {
+		if err := lb.reconcileLoadBalancerService(context.Background(), tenant, infra, nil, []corev1.ServicePort{{Port: 443}}); err == nil {
 			t.Fatal("expected source range error even after cleanup")
 		}
+	}
+}
+
+func TestReconcileExternalTrafficPolicy(t *testing.T) {
+	vmiLabels := map[string]string{TenantNodeRoleLabelKey: "worker", TenantClusterNameLabelKey: "cluster"}
+	for _, tc := range []struct {
+		name         string
+		config       LoadBalancerConfig
+		tenantPolicy corev1.ServiceExternalTrafficPolicy
+		infraPolicy  corev1.ServiceExternalTrafficPolicy
+		infraSel     map[string]string
+		wantPolicy   corev1.ServiceExternalTrafficPolicy
+		wantSel      map[string]string
+		wantUpdate   bool
+		wantWarning  bool
+	}{
+		{
+			name:         "tenant switches Local to Cluster",
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyCluster,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyLocal,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyCluster,
+			wantSel:      vmiLabels,
+			wantUpdate:   true,
+		},
+		{
+			name:         "tenant switches Cluster to Local",
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyCluster,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyLocal,
+			wantSel:      vmiLabels,
+			wantUpdate:   true,
+		},
+		{
+			name:         "unchanged policy is not updated",
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyLocal,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyLocal,
+			wantSel:      vmiLabels,
+		},
+		{
+			name:         "tenant switches to Local with the EPS controller removes the selector",
+			config:       LoadBalancerConfig{EnableEPSController: pointer.Bool(true)},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyCluster,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyLocal,
+			wantUpdate:   true,
+		},
+		{
+			name:         "tenant switches to Cluster with the EPS controller restores the selector",
+			config:       LoadBalancerConfig{EnableEPSController: pointer.Bool(true)},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyCluster,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyLocal,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyCluster,
+			wantSel:      vmiLabels,
+			wantUpdate:   true,
+		},
+		{
+			name:         "operator forces Cluster over a Local tenant",
+			config:       LoadBalancerConfig{ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyCluster},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyLocal,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyCluster,
+			wantSel:      vmiLabels,
+			wantUpdate:   true,
+			wantWarning:  true,
+		},
+		{
+			name:         "operator forced Cluster is stable",
+			config:       LoadBalancerConfig{ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyCluster},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyCluster,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyCluster,
+			wantSel:      vmiLabels,
+			wantWarning:  true,
+		},
+		{
+			name:         "forced Cluster keeps following the tenant policy for the selector",
+			config:       LoadBalancerConfig{ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyCluster, EnableEPSController: pointer.Bool(true)},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyLocal,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyCluster,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyCluster,
+			wantWarning:  true,
+		},
+		{
+			name:         "operator forces Local over a Cluster tenant",
+			config:       LoadBalancerConfig{ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyLocal},
+			tenantPolicy: corev1.ServiceExternalTrafficPolicyCluster,
+			infraPolicy:  corev1.ServiceExternalTrafficPolicyCluster,
+			infraSel:     vmiLabels,
+			wantPolicy:   corev1.ServiceExternalTrafficPolicyLocal,
+			wantSel:      vmiLabels,
+			wantUpdate:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			c := mockclient.NewMockClient(gomock.NewController(t))
+			recorder := record.NewFakeRecorder(10)
+			lb := &loadbalancer{client: c, namespace: "infra", recorder: recorder, config: tc.config}
+			tenant := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "tenant", Namespace: "workload", UID: "1234"},
+				Spec: corev1.ServiceSpec{
+					Ports:                 []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30001}},
+					ExternalTrafficPolicy: tc.tenantPolicy,
+				},
+			}
+			infra := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "a1234", Namespace: "infra",
+					Annotations: map[string]string{tenantAnnotationKeys: "[]"},
+					Labels:      map[string]string{annotationOwnershipLabel: annotationOwnershipLabelValue}},
+				Spec: corev1.ServiceSpec{
+					Ports:                 []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(30001)}},
+					ExternalTrafficPolicy: tc.infraPolicy,
+					Selector:              tc.infraSel,
+				},
+			}
+			c.EXPECT().Get(ctx, client.ObjectKey{Name: "a1234", Namespace: "infra"}, gomock.Any()).DoAndReturn(
+				func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					infra.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				})
+			if tc.wantUpdate {
+				c.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					infra = obj.(*corev1.Service).DeepCopy()
+					return nil
+				})
+			}
+			if _, err := lb.EnsureLoadBalancer(ctx, "cluster", tenant, nil); err != nil {
+				t.Fatal(err)
+			}
+			if infra.Spec.ExternalTrafficPolicy != tc.wantPolicy {
+				t.Fatalf("externalTrafficPolicy = %q, want %q", infra.Spec.ExternalTrafficPolicy, tc.wantPolicy)
+			}
+			if !reflect.DeepEqual(infra.Spec.Selector, tc.wantSel) {
+				t.Fatalf("selector = %v, want %v", infra.Spec.Selector, tc.wantSel)
+			}
+			if tc.wantWarning {
+				select {
+				case event := <-recorder.Events:
+					if !strings.Contains(event, "Warning ExternalTrafficPolicyOverridden") {
+						t.Fatalf("unexpected event: %s", event)
+					}
+				default:
+					t.Fatal("missing tenant warning")
+				}
+			} else if len(recorder.Events) != 0 {
+				t.Fatalf("unexpected event: %s", <-recorder.Events)
+			}
+		})
 	}
 }

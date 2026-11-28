@@ -88,14 +88,14 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	ports := lb.createLoadBalancerServicePorts(service)
-	// LoadBalancer already exists, reconcile the mirrored fields if changed
-	if lbService != nil {
-		return &lbService.Status.LoadBalancer, lb.reconcileLoadBalancerService(ctx, service, lbService, ports)
-	}
-
 	vmiLabels := map[string]string{
 		TenantNodeRoleLabelKey:    "worker",
 		TenantClusterNameLabelKey: clusterName,
+	}
+
+	// LoadBalancer already exists, reconcile the mirrored fields if changed
+	if lbService != nil {
+		return &lbService.Status.LoadBalancer, lb.reconcileLoadBalancerService(ctx, service, lbService, vmiLabels, ports)
 	}
 
 	lbLabels := map[string]string{
@@ -146,11 +146,11 @@ func (lb *loadbalancer) UpdateLoadBalancer(context.Context, string, *corev1.Serv
 
 // reconcileLoadBalancerService updates an existing infra Service so that its
 // ports and the security-relevant mirrored fields (allowlisted annotations,
-// loadBalancerSourceRanges, loadBalancerIP) match what the
+// loadBalancerSourceRanges, loadBalancerIP, externalTrafficPolicy) match what the
 // tenant Service is currently allowed to request. It also strips fields that
 // must never be present (externalIPs), which cleans up infra Services created by
 // older builds that copied tenant fields verbatim.
-func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, service, lbService *corev1.Service, ports []corev1.ServicePort) error {
+func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, service, lbService *corev1.Service, vmiLabels map[string]string, ports []corev1.ServicePort) error {
 	lb.warnIgnoredFields(service)
 	desiredSourceRanges, rangeErr := tenantLoadBalancerSourceRanges(service)
 	trusted := lbService.Labels[annotationOwnershipLabel] == annotationOwnershipLabelValue
@@ -200,6 +200,20 @@ func (lb *loadbalancer) reconcileLoadBalancerService(ctx context.Context, servic
 	if desiredLoadBalancerIP != lbService.Spec.LoadBalancerIP {
 		lbService.Spec.LoadBalancerIP = desiredLoadBalancerIP
 		changed = true
+	}
+
+	if desiredPolicy := lb.externalTrafficPolicy(service); desiredPolicy != "" && desiredPolicy != lbService.Spec.ExternalTrafficPolicy {
+		lbService.Spec.ExternalTrafficPolicy = desiredPolicy
+		changed = true
+	}
+
+	// With the EPS controller, the selector depends on the tenant's policy, so
+	// it has to follow a policy change. Without it the selector is left as is.
+	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController {
+		if desiredSelector := lb.loadBalancerSelector(service, vmiLabels); !equality.Semantic.DeepEqual(desiredSelector, lbService.Spec.Selector) {
+			lbService.Spec.Selector = desiredSelector
+			changed = true
+		}
 	}
 
 	// externalIPs are never propagated; drop any that a previous build copied.
@@ -277,17 +291,10 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		Spec: corev1.ServiceSpec{
 			Ports:                    ports,
 			Type:                     corev1.ServiceTypeLoadBalancer,
-			ExternalTrafficPolicy:    service.Spec.ExternalTrafficPolicy,
+			ExternalTrafficPolicy:    lb.externalTrafficPolicy(service),
 			LoadBalancerSourceRanges: sourceRanges,
+			Selector:                 lb.loadBalancerSelector(service, vmiLabels),
 		},
-	}
-	// Give controller privilege above selectorless
-	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
-		lbService.Spec.Selector = nil
-	} else if lb.config.Selectorless != nil && *lb.config.Selectorless {
-		lbService.Spec.Selector = nil
-	} else {
-		lbService.Spec.Selector = vmiLabels
 	}
 
 	if lb.config.AllowTenantLoadBalancerIP != nil && *lb.config.AllowTenantLoadBalancerIP {
@@ -299,6 +306,28 @@ func (lb *loadbalancer) createLoadBalancerService(ctx context.Context, lbName st
 		return nil, err
 	}
 	return lbService, nil
+}
+
+// externalTrafficPolicy returns the externalTrafficPolicy of the infra Service:
+// the infra operator's override when configured, otherwise the tenant Service's.
+func (lb *loadbalancer) externalTrafficPolicy(service *corev1.Service) corev1.ServiceExternalTrafficPolicy {
+	if lb.config.ExternalTrafficPolicy != "" {
+		return lb.config.ExternalTrafficPolicy
+	}
+	return service.Spec.ExternalTrafficPolicy
+}
+
+// loadBalancerSelector returns the selector of the infra Service. It follows
+// the tenant Service's own externalTrafficPolicy, not the operator's override.
+func (lb *loadbalancer) loadBalancerSelector(service *corev1.Service, vmiLabels map[string]string) map[string]string {
+	// Give controller privilege above selectorless
+	if lb.config.EnableEPSController != nil && *lb.config.EnableEPSController && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		return nil
+	}
+	if lb.config.Selectorless != nil && *lb.config.Selectorless {
+		return nil
+	}
+	return vmiLabels
 }
 
 // allowedAnnotations returns the subset of the tenant Service's annotations that
@@ -385,6 +414,9 @@ func (lb *loadbalancer) warnIgnoredFields(service *corev1.Service) {
 	}
 	if len(service.Spec.ExternalIPs) > 0 {
 		lb.recorder.Event(service, corev1.EventTypeWarning, "ExternalIPsIgnored", "spec.externalIPs is not propagated to the infrastructure Service")
+	}
+	if lb.config.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeCluster && service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyTypeLocal {
+		lb.recorder.Event(service, corev1.EventTypeWarning, "ExternalTrafficPolicyOverridden", "spec.externalTrafficPolicy Local is not applied: the infrastructure operator forces Cluster, so the client source address is not preserved")
 	}
 	if service.Spec.LoadBalancerIP != "" && (lb.config.AllowTenantLoadBalancerIP == nil || !*lb.config.AllowTenantLoadBalancerIP) {
 		lb.recorder.Event(service, corev1.EventTypeWarning, "LoadBalancerIPIgnored", "spec.loadBalancerIP is not propagated: tenant-requested infrastructure addresses are disabled by the infrastructure operator")

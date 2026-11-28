@@ -7,6 +7,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var (
@@ -47,6 +48,17 @@ var _ = Describe("Cloud config", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(config.LoadBalancer.AllowedAnnotations).To(Equal([]string{"metallb.io/address-pool"}))
 		Expect(config.LoadBalancer.AllowTenantLoadBalancerIP).To(HaveValue(BeTrue()))
+	})
+
+	It("Should decode and validate the externalTrafficPolicy override", func() {
+		defaults, err := NewCloudConfigFromBytes([]byte("{}"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(defaults.LoadBalancer.ExternalTrafficPolicy).To(BeEmpty())
+		config, err := NewCloudConfigFromBytes([]byte("loadBalancer:\n  externalTrafficPolicy: Cluster\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(config.LoadBalancer.ExternalTrafficPolicy).To(Equal(corev1.ServiceExternalTrafficPolicyTypeCluster))
+		_, err = NewCloudConfigFromBytes([]byte("loadBalancer:\n  externalTrafficPolicy: cluster\n"))
+		Expect(err).To(HaveOccurred())
 	})
 
 	DescribeTable("Get CloudConfig from bytes", func(configBytes string, expectedCloudConfig CloudConfig, expectedError error) {
