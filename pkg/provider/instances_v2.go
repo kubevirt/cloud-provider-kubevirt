@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
@@ -136,14 +137,16 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 	var addrs []corev1.NodeAddress
 
 	foundInternalIP := false
-	// Find the default interface and add all its IP addresses (supports dual-stack)
+	// Find the default interface and add all its routable IP addresses (supports dual-stack)
 	for _, iface := range ifs {
 		if iface.Name != "default" {
 			continue
 		}
 
 		for _, ip := range iface.IPs {
-			if ip != "" {
+			// Link-local addresses (169.254.0.0/16, fe80::/10) are only valid on
+			// one link, so nothing outside the guest can use them to reach the node.
+			if ip != "" && !isLinkLocalUnicast(ip) {
 				v1helper.AddToNodeAddresses(&addrs, corev1.NodeAddress{
 					Type:    corev1.NodeInternalIP,
 					Address: ip,
@@ -168,6 +171,12 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 	}
 
 	return addrs
+}
+
+// isLinkLocalUnicast reports whether ip is an IPv4 or IPv6 link-local unicast address.
+func isLinkLocalUnicast(ip string) bool {
+	parsed := net.ParseIP(ip)
+	return parsed != nil && parsed.IsLinkLocalUnicast()
 }
 
 func (i *instancesV2) getRegionAndZone(ctx context.Context, nodeName string) (string, string, error) {
