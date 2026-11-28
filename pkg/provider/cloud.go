@@ -85,6 +85,15 @@ type LoadBalancerConfig struct {
 	// the infra cluster's shared pool. When false and a tenant requests an IP,
 	// the request is ignored and a Warning event is emitted on the tenant Service.
 	AllowTenantLoadBalancerIP *bool `yaml:"allowTenantLoadBalancerIP,omitempty"`
+
+	// ExternalTrafficPolicy forces spec.externalTrafficPolicy of every infra
+	// Service to "Cluster" or "Local". When unset (default) the infra Service
+	// follows the tenant Service. The infra operator knows whether the infra
+	// load balancer implementation supports "Local", the tenant does not. When
+	// "Cluster" is forced and a tenant requests "Local", a Warning event is
+	// emitted on the tenant Service. The selector choice still follows the
+	// tenant Service's own policy.
+	ExternalTrafficPolicy corev1.ServiceExternalTrafficPolicy `yaml:"externalTrafficPolicy,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -115,6 +124,12 @@ func NewCloudConfigFromBytes(configBytes []byte) (CloudConfig, error) {
 	err := yaml.Unmarshal(configBytes, &config)
 	if err != nil {
 		return CloudConfig{}, err
+	}
+	switch config.LoadBalancer.ExternalTrafficPolicy {
+	case "", corev1.ServiceExternalTrafficPolicyTypeCluster, corev1.ServiceExternalTrafficPolicyTypeLocal:
+	default:
+		return CloudConfig{}, fmt.Errorf("invalid loadBalancer.externalTrafficPolicy %q: must be %q or %q",
+			config.LoadBalancer.ExternalTrafficPolicy, corev1.ServiceExternalTrafficPolicyTypeCluster, corev1.ServiceExternalTrafficPolicyTypeLocal)
 	}
 	return config, nil
 }

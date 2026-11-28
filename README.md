@@ -54,7 +54,11 @@ more privileged than the tenant cluster, the provider only propagates the tenant
 Service fields that are safe to expose across that trust boundary:
 
 - `spec.ports` are mapped to tenant NodePorts. Infra-allocated NodePorts are
-  retained during reconciliation. `spec.externalTrafficPolicy` is copied at creation.
+  retained during reconciliation.
+- `spec.externalTrafficPolicy` is copied at creation and reconciled afterwards,
+  unless the infra operator sets `loadBalancer.externalTrafficPolicy` (see
+  below). With the EPS controller enabled, the infra Service selector is
+  reconciled together with it: a tenant policy of `Local` makes it selectorless.
 - `spec.loadBalancerSourceRanges` is propagated (falling back to the legacy
   `service.beta.kubernetes.io/load-balancer-source-ranges` annotation) so that a
   tenant's source restriction is forwarded. Invalid ranges block creation. On an
@@ -74,7 +78,11 @@ The following tenant fields are **not** propagated by default:
   The provider's ownership annotation, `kubectl.kubernetes.io/last-applied-configuration`,
   and the legacy source-range annotation are never copied, even if allowlisted.
   Other keys, including provider-specific `service.beta.kubernetes.io/*` keys,
-  may be explicitly allowlisted.
+  may be explicitly allowlisted. The provider also writes the
+  `cloud-provider.kubevirt.io/tenant-annotation-keys` annotation and the
+  `cloud-provider.kubevirt.io/annotation-ownership` label on every infra
+  Service, so an admission policy that refuses annotations or labels on these
+  Services makes creates and updates fail.
 - `spec.externalIPs`: never copied (avoids CVE-2020-8554-style interception).
 - `spec.healthCheckNodePort`: never copied; the infra Service manages its own
   node ports.
@@ -84,6 +92,25 @@ The following tenant fields are **not** propagated by default:
 
 Ignored `externalIPs` and `loadBalancerIP` requests generate Warning events on
 the tenant Service on creation and reconciliation.
+
+#### Forcing the infra externalTrafficPolicy
+
+`Local` on the infra Service only works when the infra load balancer sends
+traffic to nodes that host one of the tenant's VMs (for example MetalLB). With
+an implementation that sends traffic to any node, a `Local` infra Service drops
+the flows entering at other nodes. The infra operator, who knows the
+implementation, can force the policy of every infra Service:
+
+```yaml
+loadBalancer:
+  # unset (default): follow the tenant Service
+  externalTrafficPolicy: Cluster
+```
+
+Valid values are `Cluster` and `Local`. When `Cluster` is forced and a tenant
+Service asks for `Local`, a Warning event is emitted on the tenant Service
+because its client source address is not preserved. The selector choice keeps
+following the tenant Service's own policy.
 
 #### Tenant event permissions
 
@@ -120,8 +147,8 @@ reconciliation can otherwise succeed.
 
 #### Reconciliation and migration
 
-Ports, source ranges, allowed annotations and the loadBalancerIP policy are
-reconciled on update; existing infra `externalIPs` are cleared. Infra-allocated
+Ports, source ranges, allowed annotations, the externalTrafficPolicy and the
+loadBalancerIP policy are reconciled on update; existing infra `externalIPs` are cleared. Infra-allocated
 health-check ports and any infra load-balancer class are preserved.
 
 The infra-only `cloud-provider.kubevirt.io/tenant-annotation-keys` annotation
