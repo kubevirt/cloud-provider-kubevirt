@@ -20,8 +20,9 @@ const (
 	instanceIDLabelKey = "node.kubernetes.io/instance-id"
 )
 
-// Must match providerIDs built by cloudprovider.GetInstanceProviderID
-var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_-]+)$`)
+// Must match providerIDs built by cloudprovider.GetInstanceProviderID. The
+// instance ID is a VMI name, which is a DNS subdomain and can contain dots.
+var providerIDRegexp = regexp.MustCompile(`^` + ProviderName + `://([0-9A-Za-z_.-]+)$`)
 
 type instancesV2 struct {
 	namespace string
