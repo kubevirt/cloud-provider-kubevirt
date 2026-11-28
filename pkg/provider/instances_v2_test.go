@@ -383,6 +383,35 @@ var _ = Describe("Instances V2", func() {
 				}))
 			})
 
+			It("Should not report link-local addresses of the default interface", func() {
+				i := instancesV2{}
+				ifs := []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+					{
+						Name: "default",
+						IPs:  []string{"10.129.0.209", "169.254.1.5", "fd02:0:0:2::13c2", "fe80::5054:ff:fe12:3456"},
+					},
+				}
+
+				addrs := i.getNodeAddresses(ifs, nil)
+				Expect(addrs).To(Equal([]corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: "10.129.0.209"},
+					{Type: corev1.NodeInternalIP, Address: "fd02:0:0:2::13c2"},
+				}))
+			})
+
+			It("Should fall back to the previous internal IPs when the default interface only has link-local addresses", func() {
+				i := instancesV2{}
+				ifs := []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+					{
+						Name: "default",
+						IPs:  []string{"fe80::5054:ff:fe12:3456"},
+					},
+				}
+				prev := []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.200.100.1"}}
+
+				Expect(i.getNodeAddresses(ifs, prev)).To(Equal(prev))
+			})
+
 			It("Should fetch a vmi by node name and return a complete metadata object - zone and region disabled", func() {
 				vmiName := "test-vm"
 				namespace := "cluster-qwedas"
